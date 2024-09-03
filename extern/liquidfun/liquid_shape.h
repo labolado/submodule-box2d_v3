@@ -22,7 +22,7 @@ public:
 		b2Circle circle;
 		b2Polygon polygon;
 		b2Segment segment;
-		b2SmoothSegment smoothSegment;
+		b2ChainSegment chainSegment;
 	};
 	b2ShapeType type;
 };

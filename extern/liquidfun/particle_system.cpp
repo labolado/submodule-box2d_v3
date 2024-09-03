@@ -119,7 +119,8 @@ namespace // anonymous namespace.
 				p1 = ap;
 			}
 			b2Vec2 p2 = ap + queryContext->step.dt * av;
-			b2CastOutput output = b2Shape_RayCast(shapeId, p1, p2 - p1);
+			b2RayCastInput input = {p1, p2 - p1, 1.0f};
+			b2CastOutput output = b2Shape_RayCast(shapeId, &input);
 			// if (fixture->RayCast(&output, input, childIndex))
 			if (output.hit)
 			{
@@ -167,7 +168,7 @@ namespace // anonymous namespace.
 				b2Vec2 bp = b2Body_GetWorldCenterOfMass(bodyId);
 				float32 bm = b2Body_GetMass(bodyId);
 				float32 bI =
-					b2Body_GetInertiaTensor(bodyId) - bm * b2LengthSquared(b2Body_GetLocalCenterOfMass(bodyId));
+					b2Body_GetRotationalInertia(bodyId) - bm * b2LengthSquared(b2Body_GetLocalCenterOfMass(bodyId));
 				float32 invBm = bm > 0 ? 1 / bm : 0;
 				float32 invBI = bI > 0 ? 1 / bI : 0;
 				float32 invAm =
@@ -3573,7 +3574,7 @@ void b2ParticleSystem::SolveRigidDamping()
 					&invMassB, &invInertiaB, &tangentDistanceB,
 					b2Body_GetMass(b),
 					// Calculate b->m_I from public functions of b2Body.
-					b2Body_GetInertiaTensor(b) -
+					b2Body_GetRotationalInertia(b) -
 							b2Body_GetMass(b) * b2LengthSquared(b2Body_GetLocalCenterOfMass(b)),
 					b2Body_GetWorldCenterOfMass(b),
 					p, n);

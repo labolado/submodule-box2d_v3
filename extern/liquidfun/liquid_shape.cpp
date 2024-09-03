@@ -6,7 +6,7 @@ void b2LiquidShape::SetAsBox( float32 hx, float32 hy ) {
 }
 
 void b2LiquidShape::SetAsBox( float32 hx, float32 hy, const b2Vec2 &center, float32 angle ) {
-	polygon = b2MakeOffsetBox( hx, hy, center, angle );
+	polygon = b2MakeOffsetBox( hx, hy, center, b2MakeRot( angle ) );
 	type = b2_polygonShape;
 }
 

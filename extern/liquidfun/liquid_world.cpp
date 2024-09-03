@@ -648,6 +648,7 @@ void b2LiquidWorld::Step(float timeStep, int subStepCount )
 	context.jointSoftness = b2MakeSoft( jointHertz, world->jointDampingRatio, context.h );
 
 	context.restitutionThreshold = world->restitutionThreshold;
+	context.maxLinearVelocity = world->maxLinearVelocity;
 	context.enableWarmStarting = world->enableWarmStarting;
 
 	// Update contacts
