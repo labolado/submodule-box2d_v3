@@ -15,7 +15,7 @@
 * misrepresented as being the original software.
 * 3. This notice may not be removed or altered from any source distribution.
 */
-#include "Rtt_Assert.h"
+// #include "Rtt_Assert.h"
 #include "particle_system.h"
 #include "particle_group.h"
 #include "voronoi_diagram.h"
