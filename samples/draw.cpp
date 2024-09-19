@@ -1317,9 +1317,9 @@ void DrawStringFcn( b2Vec2 p, const char* s, void* context )
 
 void GetBodyTransformFcn( b2Transform* transform, void* bodyUserData, void* context )
 {
-	B2_MAYBE_UNUSED( transform );
-	B2_MAYBE_UNUSED( bodyUserData );
-	B2_MAYBE_UNUSED( context );
+	(void)( transform );
+	(void)( bodyUserData );
+	(void)( context );
 }
 
 Draw::Draw()
