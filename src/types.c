@@ -146,6 +146,13 @@ static void b2EmptyDrawString( b2Vec2 p, const char* s, void* context )
 	B2_MAYBE_UNUSED( context );
 }
 
+static void b2EmptyGetBodyTransform( b2Transform* transform, void* bodyUserData, void* context )
+{
+	B2_MAYBE_UNUSED( transform );
+	B2_MAYBE_UNUSED( bodyUserData );
+	B2_MAYBE_UNUSED( context );
+}
+
 b2DebugDraw b2DefaultDebugDraw(void)
 {
 	b2DebugDraw draw = { 0 };
@@ -160,5 +167,6 @@ b2DebugDraw b2DefaultDebugDraw(void)
 	draw.DrawTransform = b2EmptyDrawTransform;
 	draw.DrawPoint = b2EmptyDrawPoint;
 	draw.DrawString = b2EmptyDrawString;
+	draw.GetBodyTransform = b2EmptyGetBodyTransform;
 	return draw;
 }

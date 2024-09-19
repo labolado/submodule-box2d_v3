@@ -104,4 +104,14 @@ private:
 	const char *m_liquidFunVersionString;
 };
 
+inline b2ParticleSystem* b2LiquidWorld::GetParticleSystemList()
+{
+	return m_particleSystemList;
+}
+
+inline const b2ParticleSystem* b2LiquidWorld::GetParticleSystemList() const
+{
+	return m_particleSystemList;
+}
+
 #endif

@@ -704,13 +704,3 @@ void b2LiquidWorld::Step(float timeStep, int subStepCount )
 
 	b2TracyCZoneEnd( world_step );
 }
-
-inline b2ParticleSystem* b2LiquidWorld::GetParticleSystemList()
-{
-	return m_particleSystemList;
-}
-
-inline const b2ParticleSystem* b2LiquidWorld::GetParticleSystemList() const
-{
-	return m_particleSystemList;
-}

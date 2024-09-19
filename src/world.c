@@ -1141,6 +1141,7 @@ void b2World_Draw( b2WorldId worldId, b2DebugDraw* draw )
 				B2_ASSERT( body->setIndex == setIndex );
 
 				b2Transform xf = bodySim->transform;
+				draw->GetBodyTransform( &xf, body->userData, draw->context );
 				int shapeId = body->headShapeId;
 				while ( shapeId != B2_NULL_INDEX )
 				{

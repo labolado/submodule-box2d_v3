@@ -1244,6 +1244,8 @@ void b2DrawJoint( b2DebugDraw* draw, b2World* world, b2Joint* joint )
 
 	b2Transform transformA = b2GetBodyTransformQuick( world, bodyA );
 	b2Transform transformB = b2GetBodyTransformQuick( world, bodyB );
+	draw->GetBodyTransform( &transformA, bodyA->userData, draw->context );
+	draw->GetBodyTransform( &transformB, bodyB->userData, draw->context );
 	b2Vec2 pA = b2TransformPoint( transformA, jointSim->localOriginAnchorA );
 	b2Vec2 pB = b2TransformPoint( transformB, jointSim->localOriginAnchorB );
 

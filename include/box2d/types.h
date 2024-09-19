@@ -1307,6 +1307,8 @@ typedef struct b2DebugDraw
 	/// Draw a string.
 	void ( *DrawString )( b2Vec2 p, const char* s, void* context );
 
+	void ( *GetBodyTransform )( b2Transform* transform, void* bodyUserData, void* context );
+
 	/// Bounds to use if restricting drawing to a rectangular region
 	b2AABB drawingBounds;
 

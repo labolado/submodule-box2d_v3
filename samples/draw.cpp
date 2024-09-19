@@ -1315,6 +1315,13 @@ void DrawStringFcn( b2Vec2 p, const char* s, void* context )
 	static_cast<Draw*>( context )->DrawString( p, s );
 }
 
+void GetBodyTransformFcn( b2Transform* transform, void* bodyUserData, void* context )
+{
+	B2_MAYBE_UNUSED( transform );
+	B2_MAYBE_UNUSED( bodyUserData );
+	B2_MAYBE_UNUSED( context );
+}
+
 Draw::Draw()
 {
 	m_showUI = true;
@@ -1369,6 +1376,7 @@ void Draw::Create()
 					DrawTransformFcn,
 					DrawPointFcn,
 					DrawStringFcn,
+					GetBodyTransformFcn,
 					bounds,
 					false, // drawUsingBounds
 					true,  // shapes
