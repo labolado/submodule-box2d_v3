@@ -1,5 +1,6 @@
 // #include "Rtt_Assert.h"
 #include "liquid_world.h"
+#include "liquid_callbacks.h"
 extern "C" {
 #include "src/world.h"
 
@@ -24,6 +25,8 @@ extern "C" {
 #include <stdio.h>
 #include <string.h>
 }
+
+static b2ContactFilter b2_liquid_defaultFilter;
 
 typedef struct WorldQueryContext
 {
@@ -483,6 +486,11 @@ b2LiquidWorld::b2LiquidWorld( b2WorldId worldId )
 {
 	m_worldId = worldId;
 	m_particleSystemList = NULL;
+
+	m_contactFilter = &b2_liquid_defaultFilter;
+
+	m_liquidFunVersion = &b2_liquidFunVersion;
+	m_liquidFunVersionString = b2_liquidFunVersionString;
 }
 
 b2LiquidWorld::~b2LiquidWorld()
@@ -497,6 +505,10 @@ b2LiquidWorld::~b2LiquidWorld()
 	// Even though the block allocator frees them for us, for safety,
 	// we should ensure that all buffers have been freed.
 	// b2Assert(m_blockAllocator.GetNumGiantAllocations() == 0);
+}
+
+void b2LiquidWorld::SetContactListener( b2ContactListener *listener ) {
+	m_contactListener = listener;
 }
 
 b2ParticleSystem* b2LiquidWorld::CreateParticleSystem(const b2ParticleSystemDef* def)

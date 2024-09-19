@@ -25,6 +25,7 @@
 #include "box2d/box2d.h"
 #include "box2d/math_functions.h"
 #include "liquid_shape.h"
+#include "liquid_callbacks.h"
 // #include <Box2D/Dynamics/b2Fixture.h>
 
 #if LIQUIDFUN_UNIT_TESTS
@@ -706,7 +707,7 @@ public:
 	/// @param callback a user implemented callback class.
 	/// @param point1 the ray starting point
 	/// @param point2 the ray ending point
-	void RayCast(b2RayCastCallback* callback, const b2Vec2& point1,
+	void RayCast(b2LiquidRayCastCallback* callback, const b2Vec2& point1,
 				 const b2Vec2& point2) const;
 
 	/// Compute the axis-aligned bounding box for all particles contained
@@ -1030,7 +1031,6 @@ private:
 public:
 	float32 GetParticleMass() const;
 	float32 GetParticleInvMass() const;
-private:
 
 	// Get the world's contact filter if any particles with the
 	// b2_contactFilterParticle flag are present in the system.
@@ -1048,6 +1048,7 @@ private:
 	// b2_particleContactListenerParticle flag are present in the system.
 	b2ContactListener* GetParticleContactListener() const;
 
+private:
 	template <typename T> void SetUserOverridableBuffer(
 		UserOverridableBuffer<T>* buffer, T* newBufferData, int32 newCapacity);
 

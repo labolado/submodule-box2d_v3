@@ -53,15 +53,15 @@ public:
 	/// Create a particle system given a definition. No reference to the
 	/// definition is retained.
 	/// @warning This function is locked during callbacks.
-	b2ParticleSystem* CreateParticleSystem(const b2ParticleSystemDef* def);
+	b2ParticleSystem* CreateParticleSystem( const b2ParticleSystemDef* def );
 
 	/// Destroy a particle system.
 	/// @warning This function is locked during callbacks.
-	void DestroyParticleSystem(b2ParticleSystem* p);
+	void DestroyParticleSystem( b2ParticleSystem* p );
 
 	void QueryAABB( b2AABB aabb, b2QueryFilter filter, b2OverlapResultFcn* fcn, void* context );
 
-	void Step(float timeStep, int subStepCount );
+	void Step( float timeStep, int subStepCount );
 
 	/// Is the world locked (in the middle of a time step).
 	bool IsLocked() const;
@@ -73,19 +73,17 @@ public:
 	b2ParticleSystem* GetParticleSystemList();
 	const b2ParticleSystem* GetParticleSystemList() const;
 
-	b2WorldId GetWorldId() {
-		return m_worldId;
-	}
+	b2WorldId GetWorldId() { return m_worldId; }
+
+	/// Register a contact event listener. The listener is owned by you and must
+	/// remain in scope.
+	void SetContactListener( b2ContactListener* listener );
 
 	/// Get API version.
-	const b2Version* GetVersion() const {
-		return m_liquidFunVersion;
-	}
+	const b2Version* GetVersion() const { return m_liquidFunVersion; }
 
 	/// Get API version string.
-	const char* GetVersionString() const {
-		return m_liquidFunVersionString;
-	}
+	const char* GetVersionString() const { return m_liquidFunVersionString; }
 
 private:
 
@@ -98,6 +96,8 @@ private:
 	b2BlockAllocator m_blockAllocator;
 	b2LiquidStackAllocator m_stackAllocator;
 
+	b2ContactListener* m_contactListener;
+	b2ContactFilter* m_contactFilter;
 	/// Used to reference b2_LiquidFunVersion so that it's not stripped from
 	/// the static library.
 	const b2Version *m_liquidFunVersion;

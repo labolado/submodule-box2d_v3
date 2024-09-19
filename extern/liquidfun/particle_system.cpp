@@ -68,6 +68,22 @@ namespace // anonymous namespace.
 		b2TimeStep step;
 	};
 
+	bool liquid_should_collide(b2ParticleSystem* system, b2ShapeId fixture, int32 particleIndex)
+	{
+		b2ContactFilter* contactFilter = system->GetFixtureContactFilter();
+
+		if (contactFilter)
+		{
+			const uint32* const flags = system->GetFlagsBuffer();
+			if (flags[particleIndex] & b2_fixtureContactFilterParticle)
+			{
+				return contactFilter->ShouldCollide(fixture, system,
+													  particleIndex);
+			}
+		}
+		return true;
+	}
+
 	bool liquid_query_callback(b2ShapeId shapeId, void* context)
 	{
 		LiquidQueryContext* queryContext = static_cast<LiquidQueryContext*>(context);
@@ -83,57 +99,55 @@ namespace // anonymous namespace.
 		int32 index = -7;
 		while ((index = enumerator.GetNext()) >= 0)
 		{
-			// ReportFixtureAndParticle(fixture, childIndex, index);
-			// b2Body* body = fixture->GetBody();
-			// b2Shape_RayCast(b2ShapeId shapeId, b2Vec2 origin, b2Vec2 translation)
-			b2Vec2 ap = system->m_positionBuffer.data[index];
-			b2Vec2 av = system->m_velocityBuffer.data[index];
-			// b2RayCastOutput output;
-			// b2RayCastInput input;
-			b2Vec2 p1;
-			if (system->m_iterationIndex == 0)
+			if (liquid_should_collide(system, shapeId, index))
 			{
-				b2Transform transform = b2Body_GetTransform(bodyId);
-				b2Transform transform0 = b2Body_GetPreviousTransform(bodyId);
-				// Put 'ap' in the local space of the previous frame
-				p1 = b2InvTransformPoint(transform0, ap);
-				// if (fixture->GetShape()->GetType() == b2Shape::e_circle)
-				if (b2Shape_GetType(shapeId) == b2_circleShape)
+				b2Vec2 ap = system->m_positionBuffer.data[index];
+				b2Vec2 av = system->m_velocityBuffer.data[index];
+				b2Vec2 p1;
+				if (system->m_iterationIndex == 0)
 				{
-					b2Vec2 bodyLocalCenter = b2Body_GetWorldCenterOfMass(bodyId);
-					// Make relative to the center of the circle
-					p1 -= bodyLocalCenter;
-					// Re-apply rotation about the center of the
-					// circle
-					p1 = b2RotateVector(transform0.q, p1);
-					// Subtract rotation of the current frame
-					p1 = b2InvRotateVector(transform.q, p1);
-					// Return to local space
-					p1 += bodyLocalCenter;
+					b2Transform transform = b2Body_GetTransform(bodyId);
+					b2Transform transform0 = b2Body_GetPreviousTransform(bodyId);
+					// Put 'ap' in the local space of the previous frame
+					p1 = b2InvTransformPoint(transform0, ap);
+					// if (fixture->GetShape()->GetType() == b2Shape::e_circle)
+					if (b2Shape_GetType(shapeId) == b2_circleShape)
+					{
+						b2Vec2 bodyLocalCenter = b2Body_GetWorldCenterOfMass(bodyId);
+						// Make relative to the center of the circle
+						p1 -= bodyLocalCenter;
+						// Re-apply rotation about the center of the
+						// circle
+						p1 = b2RotateVector(transform0.q, p1);
+						// Subtract rotation of the current frame
+						p1 = b2InvRotateVector(transform.q, p1);
+						// Return to local space
+						p1 += bodyLocalCenter;
+					}
+					// Return to global space and apply rotation of current frame
+					p1 = b2TransformPoint(transform, p1);
 				}
-				// Return to global space and apply rotation of current frame
-				p1 = b2TransformPoint(transform, p1);
-			}
-			else
-			{
-				p1 = ap;
-			}
-			b2Vec2 p2 = ap + queryContext->step.dt * av;
-			b2RayCastInput input = {p1, p2 - p1, 1.0f};
-			b2CastOutput output = b2Shape_RayCast(shapeId, &input);
-			// if (fixture->RayCast(&output, input, childIndex))
-			if (output.hit)
-			{
-				b2Vec2 n = output.normal;
-				b2Vec2 p =
-					(1 - output.fraction) * p1 +
-					output.fraction * p2 +
-					b2_linearSlop * n;
-				b2Vec2 v = queryContext->step.inv_dt * (p - ap);
-				system->m_velocityBuffer.data[index] = v;
-				b2Vec2 f = queryContext->step.inv_dt *
-					system->GetParticleMass() * (av - v);
-				system->ParticleApplyForce(index, f);
+				else
+				{
+					p1 = ap;
+				}
+				b2Vec2 p2 = ap + queryContext->step.dt * av;
+				b2RayCastInput input = {p1, p2 - p1, 1.0f};
+				b2CastOutput output = b2Shape_RayCast(shapeId, &input);
+				// if (fixture->RayCast(&output, input, childIndex))
+				if (output.hit)
+				{
+					b2Vec2 n = output.normal;
+					b2Vec2 p =
+						(1 - output.fraction) * p1 +
+						output.fraction * p2 +
+						b2_linearSlop * n;
+					b2Vec2 v = queryContext->step.inv_dt * (p - ap);
+					system->m_velocityBuffer.data[index] = v;
+					b2Vec2 f = queryContext->step.inv_dt *
+						system->GetParticleMass() * (av - v);
+					system->ParticleApplyForce(index, f);
+				}
 			}
 		}
 		// Rtt_Log("particle_system.cpp -> liquid_query_callback: index = %d", index);
@@ -162,7 +176,7 @@ namespace // anonymous namespace.
 			// fixture->ComputeDistance(ap, &d, &n, childIndex);
 			b2Shape_ComputeDistance(shapeId, ap, &d, &n);
 			// if (d < system->m_particleDiameter && ShouldCollide(fixture, a))
-			if (d < system->m_particleDiameter)
+			if (d < system->m_particleDiameter && liquid_should_collide(system, shapeId, a))
 			{
 				// b2Body* b = fixture->GetBody();
 				b2Vec2 bp = b2Body_GetWorldCenterOfMass(bodyId);
@@ -2160,18 +2174,16 @@ static inline bool b2ParticleContactIsZombie(const b2ParticleContact& contact)
 // b2_particleContactFilterParticle flag are present in the system.
 inline b2ContactFilter* b2ParticleSystem::GetParticleContactFilter() const
 {
-	// return (m_allParticleFlags & b2_particleContactFilterParticle) ?
-	// 	m_world->m_contactManager.m_contactFilter : NULL;
-	return NULL;
+	return (m_allParticleFlags & b2_particleContactFilterParticle) ?
+		m_world->m_contactFilter : NULL;
 }
 
 // Get the world's contact listener if any particles with the
 // b2_particleContactListenerParticle flag are present in the system.
 inline b2ContactListener* b2ParticleSystem::GetParticleContactListener() const
 {
-	// return (m_allParticleFlags & b2_particleContactListenerParticle) ?
-	// 	m_world->m_contactManager.m_contactListener : NULL;
-	return NULL;
+	return (m_allParticleFlags & b2_particleContactListenerParticle) ?
+		m_world->m_contactListener : NULL;
 }
 
 // Recalculate 'tag' in proxies using m_positionBuffer.
@@ -2323,10 +2335,9 @@ public:
 
 	bool operator()(const b2ParticleContact& contact)
 	{
-	    // return (contact.GetFlags() & b2_particleContactFilterParticle)
-	    //     && !m_contactFilter->ShouldCollide(m_system, contact.GetIndexA(),
-	    //     								   contact.GetIndexB());
-	    return false;
+		return (contact.GetFlags() & b2_particleContactFilterParticle)
+			&& !m_contactFilter->ShouldCollide(m_system, contact.GetIndexA(),
+											   contact.GetIndexB());
 	}
 
 private:
@@ -2387,7 +2398,7 @@ void b2ParticleSystem::NotifyContactListenerPostContact(
 		else
 		{
 			// Just started touching, inform the listener.
-			// contactListener->BeginContact(this, contact);
+			contactListener->BeginParticleSystemContact(this, contact);
 		}
 	}
 
@@ -2400,8 +2411,8 @@ void b2ParticleSystem::NotifyContactListenerPostContact(
 	{
 		if (valid[i])
 		{
-			// contactListener->EndContact(this, pairs[i].first,
-			// 							pairs[i].second);
+			contactListener->EndParticleSystemContact(this, pairs[i].first,
+										pairs[i].second);
 		}
 	}
 }
@@ -2468,18 +2479,16 @@ void b2ParticleSystem::DetectStuckParticle(int32 particle)
 // b2_fixtureContactListenerParticle flag are present in the system.
 inline b2ContactListener* b2ParticleSystem::GetFixtureContactListener() const
 {
-	// return (m_allParticleFlags & b2_fixtureContactListenerParticle) ?
-	// 	m_world->m_contactManager.m_contactListener : NULL;
-	return NULL;
+	return (m_allParticleFlags & b2_fixtureContactListenerParticle) ?
+		m_world->m_contactListener : NULL;
 }
 
 // Get the world's contact filter if any particles with the
 // b2_fixtureContactFilterParticle flag are present in the system.
 inline b2ContactFilter* b2ParticleSystem::GetFixtureContactFilter() const
 {
-	// return (m_allParticleFlags & b2_fixtureContactFilterParticle) ?
-	// 	m_world->m_contactManager.m_contactFilter : NULL;
-	return NULL;
+	return (m_allParticleFlags & b2_fixtureContactFilterParticle) ?
+		m_world->m_contactFilter : NULL;
 }
 
 /// Compute the axis-aligned bounding box for all particles contained
@@ -2738,7 +2747,7 @@ void b2ParticleSystem::NotifyBodyContactListenerPostContact(
 		else
 		{
 			// Just started touching, report it!
-			// contactListener->BeginContact(this, contact);
+			contactListener->BeginParticleContact(this, contact);
 		}
 	}
 
@@ -2753,8 +2762,8 @@ void b2ParticleSystem::NotifyBodyContactListenerPostContact(
 		{
 			const FixtureParticle* const fixtureParticle =
 				&fixtureParticles[i];
-			// contactListener->EndContact(fixtureParticle->first, this,
-			// 							fixtureParticle->second);
+			contactListener->EndParticleContact(fixtureParticle->first, this,
+										fixtureParticle->second);
 		}
 	}
 }
@@ -2852,7 +2861,8 @@ void b2ParticleSystem::UpdateBodyContacts()
 	b2AABB aabb;
 	ComputeAABB(&aabb);
 	// m_world->QueryAABB(&callback, aabb);
-	b2World_OverlapAABB(m_world->GetWorldId(), aabb, b2DefaultQueryFilter(), liquid_query_update_body_contacts_callback, this);
+	// b2World_OverlapAABB(m_world->GetWorldId(), aabb, b2DefaultQueryFilter(), liquid_query_update_body_contacts_callback, this);
+	m_world->QueryAABB(aabb, b2DefaultQueryFilter(), liquid_query_update_body_contacts_callback, this);
 
 	if (m_def.strictContactCheck)
 	{
@@ -4712,57 +4722,57 @@ void b2ParticleSystem::QueryShapeAABB(b2LiquidQueryCallback* callback,
 	QueryAABB(callback, aabb);
 }
 
-void b2ParticleSystem::RayCast(b2RayCastCallback* callback,
+void b2ParticleSystem::RayCast(b2LiquidRayCastCallback* callback,
 							   const b2Vec2& point1,
 							   const b2Vec2& point2) const
 {
-	// if (m_proxyBuffer.GetCount() == 0)
-	// {
-	// 	return;
-	// }
-	// b2AABB aabb;
-	// aabb.lowerBound = b2Min(point1, point2);
-	// aabb.upperBound = b2Max(point1, point2);
-	// float32 fraction = 1;
-	// // solving the following equation:
-	// // ((1-t)*point1+t*point2-position)^2=diameter^2
-	// // where t is a potential fraction
-	// b2Vec2 v = point2 - point1;
-	// float32 v2 = b2Dot(v, v);
-	// InsideBoundsEnumerator enumerator = GetInsideBoundsEnumerator(aabb);
-	// int32 i;
-	// while ((i = enumerator.GetNext()) >= 0)
-	// {
-	// 	b2Vec2 p = point1 - m_positionBuffer.data[i];
-	// 	float32 pv = b2Dot(p, v);
-	// 	float32 p2 = b2Dot(p, p);
-	// 	float32 determinant = pv * pv - v2 * (p2 - m_squaredDiameter);
-	// 	if (determinant >= 0)
-	// 	{
-	// 		float32 sqrtDeterminant = b2Sqrt(determinant);
-	// 		// find a solution between 0 and fraction
-	// 		float32 t = (-pv - sqrtDeterminant) / v2;
-	// 		if (t > fraction)
-	// 		{
-	// 			continue;
-	// 		}
-	// 		if (t < 0)
-	// 		{
-	// 			t = (-pv + sqrtDeterminant) / v2;
-	// 			if (t < 0 || t > fraction)
-	// 			{
-	// 				continue;
-	// 			}
-	// 		}
-	// 		b2Vec2 n = b2Normalize(p + t * v);
-	// 		float32 f = callback->ReportParticle(this, i, point1 + t * v, n, t);
-	// 		fraction = b2Min(fraction, f);
-	// 		if (fraction <= 0)
-	// 		{
-	// 			break;
-	// 		}
-	// 	}
-	// }
+	if (m_proxyBuffer.GetCount() == 0)
+	{
+		return;
+	}
+	b2AABB aabb;
+	aabb.lowerBound = b2Min(point1, point2);
+	aabb.upperBound = b2Max(point1, point2);
+	float32 fraction = 1;
+	// solving the following equation:
+	// ((1-t)*point1+t*point2-position)^2=diameter^2
+	// where t is a potential fraction
+	b2Vec2 v = point2 - point1;
+	float32 v2 = b2Dot(v, v);
+	InsideBoundsEnumerator enumerator = GetInsideBoundsEnumerator(aabb);
+	int32 i;
+	while ((i = enumerator.GetNext()) >= 0)
+	{
+		b2Vec2 p = point1 - m_positionBuffer.data[i];
+		float32 pv = b2Dot(p, v);
+		float32 p2 = b2Dot(p, p);
+		float32 determinant = pv * pv - v2 * (p2 - m_squaredDiameter);
+		if (determinant >= 0)
+		{
+			float32 sqrtDeterminant = b2Sqrt(determinant);
+			// find a solution between 0 and fraction
+			float32 t = (-pv - sqrtDeterminant) / v2;
+			if (t > fraction)
+			{
+				continue;
+			}
+			if (t < 0)
+			{
+				t = (-pv + sqrtDeterminant) / v2;
+				if (t < 0 || t > fraction)
+				{
+					continue;
+				}
+			}
+			b2Vec2 n = b2Normalize(p + t * v);
+			float32 f = callback->ReportParticle(this, i, point1 + t * v, n, t);
+			fraction = b2MinFloat(fraction, f);
+			if (fraction <= 0)
+			{
+				break;
+			}
+		}
+	}
 }
 
 float32 b2ParticleSystem::ComputeCollisionEnergy() const

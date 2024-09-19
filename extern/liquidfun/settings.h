@@ -196,9 +196,22 @@ typedef unsigned long long uint64;
 /// The time into the future that collisions against barrier particles will be detected.
 #define b2_barrierCollisionTime 2.5f
 
-// Sleep
+/// Global variable is used to identify the version of LiquidFun.
+extern const b2Version b2_liquidFunVersion;
+/// String which identifies the current version of LiquidFun.
+/// b2_liquidFunVersionString is used by Google developers to identify which
+/// applications uploaded to Google Play are using this library.  This allows
+/// the development team at Google to determine the popularity of the library.
+/// How it works: Applications that are uploaded to the Google Play Store are
+/// scanned for this version string.  We track which applications are using it
+/// to measure popularity.  You are free to remove it (of course) but we would
+/// appreciate if you left it in.
+extern const char *b2_liquidFunVersionString;
+
 
 /*
+// Sleep
+
 /// The time that a body must be still before it will go to sleep.
 #define b2_timeToSleep				0.5f
 
@@ -252,18 +265,6 @@ struct b2Version
 /// Current version.
 /// Version of Box2D, LiquidFun is based upon.
 extern b2Version b2_version;
-
-/// Global variable is used to identify the version of LiquidFun.
-extern const b2Version b2_liquidFunVersion;
-/// String which identifies the current version of LiquidFun.
-/// b2_liquidFunVersionString is used by Google developers to identify which
-/// applications uploaded to Google Play are using this library.  This allows
-/// the development team at Google to determine the popularity of the library.
-/// How it works: Applications that are uploaded to the Google Play Store are
-/// scanned for this version string.  We track which applications are using it
-/// to measure popularity.  You are free to remove it (of course) but we would
-/// appreciate if you left it in.
-extern const char *b2_liquidFunVersionString;
 
 class b2Settings
 {
