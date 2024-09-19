@@ -15,6 +15,13 @@ void b2LiquidShape::SetAsCircle( const b2Vec2 &center, float32 radius ) {
 	type = b2_circleShape;
 }
 
+void b2LiquidShape::SetAsSegments( const b2Vec2 *points, int32 count ) {
+	for ( int i = 0; i < count; ++i ) {
+		segments.push_back( { points[i], points[i + 1] } );
+	}
+	type = b2_chainSegmentShape;
+}
+
 bool b2LiquidShape::Set( const b2Vec2 *points, int32 count ) {
 	b2Hull hull = b2ComputeHull( points, count );
 	bool result = b2ValidateHull( &hull );

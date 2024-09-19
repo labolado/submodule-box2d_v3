@@ -3,6 +3,7 @@
 
 #include "box2d/box2d.h"
 #include "settings.h"
+#include <vector>
 
 class b2LiquidShape {
 public:
@@ -12,6 +13,7 @@ public:
 	void SetAsBox(float32 hx, float32 hy);
 	void SetAsBox(float32 hx, float32 hy, const b2Vec2& center, float32 angle);
 	void SetAsCircle(const b2Vec2 &center, float32 radius);
+	void SetAsSegments(const b2Vec2* points, int32 count);
 	bool Set(const b2Vec2* points, int32 count);
 	b2AABB ComputeAABB(b2Transform transform) const;
 	bool TestPoint(b2Transform transform, b2Vec2 point) const;
@@ -21,9 +23,10 @@ public:
 		b2Capsule capsule;
 		b2Circle circle;
 		b2Polygon polygon;
-		b2Segment segment;
-		b2ChainSegment chainSegment;
+		// b2Segment segment;
+		// b2ChainSegment chainSegment;
 	};
+	std::vector<b2Segment> segments;
 	b2ShapeType type;
 };
 
