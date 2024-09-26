@@ -1114,6 +1114,10 @@ typedef bool b2OverlapResultFcn( b2ShapeId shapeId, void* context );
 ///	@ingroup world
 typedef float b2CastResultFcn( b2ShapeId shapeId, b2Vec2 point, b2Vec2 normal, float fraction, void* context );
 
+/// Prototype for LiquidFun step.
+/// This is called before b2Solve in world step.
+typedef void b2LiquidFunStepFcn( float dt, float invDT, void* context );
+
 /// These colors are used for debug draw.
 ///	See https://www.rapidtables.com/web/color/index.html
 typedef enum b2HexColor

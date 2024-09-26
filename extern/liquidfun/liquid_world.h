@@ -4,8 +4,6 @@
 #ifndef B2_LIQUID_WORLD_H
 #define B2_LIQUID_WORLD_H
 
-// B2_API void b2LiquidWorld_Step( b2WorldId worldId, float timeStep, int subStepCount );
-void b2Shape_ComputeDistance( b2ShapeId shapeId, b2Vec2 target, float32* distance, b2Vec2* normal );
 bool operator<( b2ShapeId a, b2ShapeId b );
 
 /// Callback class for AABB queries.
@@ -78,6 +76,8 @@ public:
 	/// Register a contact event listener. The listener is owned by you and must
 	/// remain in scope.
 	void SetContactListener( b2ContactListener* listener );
+
+	void OnStep( float dt, float invDT );
 
 	/// Get API version.
 	const b2Version* GetVersion() const { return m_liquidFunVersion; }

@@ -1358,3 +1358,28 @@ b2Vec2 b2Shape_GetClosestPoint( b2ShapeId shapeId, b2Vec2 target )
 
 	return output.pointA;
 }
+
+void b2Shape_ComputeDistance( b2ShapeId shapeId, b2Vec2 target, float* distance, b2Vec2* normal ) {
+	b2World* world = b2GetWorld( shapeId.world0 );
+	if ( world == NULL )
+	{
+		return;
+	}
+
+	b2Shape* shape = b2GetShape( world, shapeId );
+	b2Body* body = b2GetBody( world, shape->bodyId );
+	b2Transform transform = b2GetBodyTransformQuick( world, body );
+
+	b2DistanceInput input;
+	input.proxyA = b2MakeShapeDistanceProxy( shape );
+	input.proxyB = b2MakeProxy( &target, 1, 0.0f );
+	input.transformA = transform;
+	input.transformB = b2Transform_identity;
+	input.useRadii = true;
+
+	b2DistanceCache cache = { 0 };
+	b2DistanceOutput output = b2ShapeDistance( &cache, &input, NULL, 0 );
+
+	*distance = output.distance;
+	*normal = b2Normalize( b2Sub( output.pointB, output.pointA ) );
+}
