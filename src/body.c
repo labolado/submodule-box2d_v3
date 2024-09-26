@@ -43,10 +43,8 @@ b2Transform b2GetBodyTransformQuick( b2World* world, b2Body* body )
 
 b2Transform b2GetBodyPreviousTransformQuick( b2World* world, b2Body* body )
 {
-	b2CheckIndex( world->solverSetArray, body->setIndex );
-	b2SolverSet* set = world->solverSetArray + body->setIndex;
-	B2_ASSERT( 0 <= body->localIndex && body->localIndex <= set->sims.count );
-	b2BodySim* bodySim = set->sims.data + body->localIndex;
+	b2SolverSet* set = b2SolverSetArray_Get( &world->solverSets, body->setIndex );
+	b2BodySim* bodySim = b2BodySimArray_Get( &set->bodySims, body->localIndex );
 	return bodySim->transform0;
 }
 

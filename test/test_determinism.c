@@ -151,7 +151,7 @@ static void TiltedStacks( int testIndex, int workerCount )
 
 	for ( int i = 0; i < 100; ++i )
 	{
-		b2World_Step( worldId, timeStep, subStepCount );
+		b2World_Step( worldId, timeStep, subStepCount, NULL, NULL );
 		taskCount = 0;
 		TracyCFrameMark;
 	}
@@ -295,7 +295,7 @@ static int CrossPlatformTest(void)
 	int maxSteps = 500;
 	while ( stepCount < maxSteps )
 	{
-		b2World_Step( worldId, timeStep, subStepCount );
+		b2World_Step( worldId, timeStep, subStepCount, NULL, NULL );
 		TracyCFrameMark;
 
 		if ( hash == 0 )

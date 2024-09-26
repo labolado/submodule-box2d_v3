@@ -672,7 +672,7 @@ static void b2Collide( b2StepContext* context )
 	b2TracyCZoneEnd( collide );
 }
 
-void b2World_Step( b2WorldId worldId, float timeStep, int subStepCount )
+void b2World_Step( b2WorldId worldId, float timeStep, int subStepCount, b2LiquidFunStepFcn* fcn, void* liquidFunContext )
 {
 	b2World* world = b2GetWorldFromId( worldId );
 	B2_ASSERT( world->locked == false );
@@ -756,6 +756,9 @@ void b2World_Step( b2WorldId worldId, float timeStep, int subStepCount )
 	if ( context.dt > 0.0f )
 	{
 		b2Timer timer = b2CreateTimer();
+		if (fcn) {
+			fcn( context.dt, context.inv_dt, liquidFunContext );
+		}
 		b2Solve( world, &context );
 		world->profile.solve = b2GetMilliseconds( &timer );
 	}
@@ -1426,6 +1429,12 @@ bool b2World_IsValid( b2WorldId id )
 	return id.revision == world->revision;
 }
 
+bool b2World_IsLocked( b2WorldId id )
+{
+	b2World* world = b2GetWorldFromId( id );
+	return world->locked;
+}
+
 bool b2Body_IsValid( b2BodyId id )
 {
 	if ( id.world0 < 0 || b2_maxWorlds <= id.world0 )
@@ -1856,6 +1865,20 @@ void b2World_OverlapAABB( b2WorldId worldId, b2AABB aabb, b2QueryFilter filter, 
 	{
 		return;
 	}
+
+	B2_ASSERT( b2AABB_IsValid( aabb ) );
+
+	WorldQueryContext worldContext = { world, fcn, filter, context };
+
+	for ( int i = 0; i < b2_bodyTypeCount; ++i )
+	{
+		b2DynamicTree_Query( world->broadPhase.trees + i, aabb, filter.maskBits, TreeQueryCallback, &worldContext );
+	}
+}
+
+void b2World_OverlapAABBForLiquidFun( b2WorldId worldId, b2AABB aabb, b2QueryFilter filter, b2OverlapResultFcn* fcn, void* context )
+{
+	b2World* world = b2GetWorldFromId( worldId );
 
 	B2_ASSERT( b2AABB_IsValid( aabb ) );
 

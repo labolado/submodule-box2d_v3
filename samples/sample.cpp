@@ -271,7 +271,7 @@ void Sample::Step( Settings& settings )
 
 	for ( int i = 0; i < 1; ++i )
 	{
-		b2World_Step( m_worldId, timeStep, settings.subStepCount );
+		b2World_Step( m_worldId, timeStep, settings.subStepCount, nullptr, nullptr );
 		m_taskCount = 0;
 	}
 

@@ -229,14 +229,14 @@ int main( int argc, char** argv )
 				int subStepCount = 4;
 
 				// Initial step can be expensive and skew benchmark
-				b2World_Step( worldId, timeStep, subStepCount );
+				b2World_Step( worldId, timeStep, subStepCount, NULL, NULL );
 				taskCount = 0;
 
 				b2Timer timer = b2CreateTimer();
 
 				for ( int step = 0; step < stepCount; ++step )
 				{
-					b2World_Step( worldId, timeStep, subStepCount );
+					b2World_Step( worldId, timeStep, subStepCount, NULL, NULL );
 					taskCount = 0;
 				}
 

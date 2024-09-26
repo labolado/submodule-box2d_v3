@@ -36,7 +36,7 @@ B2_API bool b2World_IsValid( b2WorldId id );
 /// @param worldId The world to simulate
 /// @param timeStep The amount of time to simulate, this should be a fixed number. Typically 1/60.
 /// @param subStepCount The number of sub-steps, increasing the sub-step count can increase accuracy. Typically 4.
-B2_API void b2World_Step( b2WorldId worldId, float timeStep, int subStepCount );
+B2_API void b2World_Step( b2WorldId worldId, float timeStep, int subStepCount, b2LiquidFunStepFcn* fcn, void* liquidFunContext );
 
 /// Call this to draw shapes and other debug draw data
 B2_API void b2World_Draw( b2WorldId worldId, b2DebugDraw* draw );
@@ -52,6 +52,9 @@ B2_API b2ContactEvents b2World_GetContactEvents( b2WorldId worldId );
 
 /// Overlap test for all shapes that *potentially* overlap the provided AABB
 B2_API void b2World_OverlapAABB( b2WorldId worldId, b2AABB aabb, b2QueryFilter filter, b2OverlapResultFcn* fcn, void* context );
+
+/// Overlap test for all shapes that *potentially* overlap the provided AABB
+B2_API void b2World_OverlapAABBForLiquidFun( b2WorldId worldId, b2AABB aabb, b2QueryFilter filter, b2OverlapResultFcn* fcn, void* context );
 
 /// Overlap test for for all shapes that overlap the provided circle
 B2_API void b2World_OverlapCircle( b2WorldId worldId, const b2Circle* circle, b2Transform transform, b2QueryFilter filter,
@@ -171,6 +174,9 @@ B2_API b2Counters b2World_GetCounters( b2WorldId worldId );
 
 /// Dump memory stats to box2d_memory.txt
 B2_API void b2World_DumpMemoryStats( b2WorldId worldId );
+
+/// Is locked?
+B2_API bool b2World_IsLocked( b2WorldId worldId );
 
 /** @} */
 
@@ -596,6 +602,10 @@ B2_API b2AABB b2Shape_GetAABB( b2ShapeId shapeId );
 
 /// Get the closest point on a shape to a target point. Target and result are in world space.
 B2_API b2Vec2 b2Shape_GetClosestPoint( b2ShapeId shapeId, b2Vec2 target );
+
+/// Compute the closest point on a shape to a target point. Target and result are in world space.
+/// Get the distance and normal between point and target.
+B2_API void b2Shape_ComputeDistance( b2ShapeId shapeId, b2Vec2 target, float* distance, b2Vec2* normal );
 
 /// Chain Shape
 

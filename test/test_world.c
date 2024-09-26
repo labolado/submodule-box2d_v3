@@ -76,7 +76,7 @@ int HelloWorld( void )
 	{
 		// Instruct the world to perform a single step of simulation.
 		// It is generally best to keep the time step and iterations fixed.
-		b2World_Step( worldId, timeStep, subStepCount );
+		b2World_Step( worldId, timeStep, subStepCount, NULL, NULL );
 
 		// Now print the position and angle of the body.
 		position = b2Body_GetPosition( bodyId );
@@ -107,7 +107,7 @@ int EmptyWorld( void )
 
 	for ( int32_t i = 0; i < 60; ++i )
 	{
-		b2World_Step( worldId, timeStep, subStepCount );
+		b2World_Step( worldId, timeStep, subStepCount, NULL, NULL );
 	}
 
 	b2DestroyWorld( worldId );
@@ -156,7 +156,7 @@ int DestroyAllBodiesWorld( void )
 			count -= 1;
 		}
 
-		b2World_Step( worldId, 1.0f / 60.0f, 3 );
+		b2World_Step( worldId, 1.0f / 60.0f, 3, NULL, NULL );
 	}
 
 	b2Counters counters = b2World_GetCounters( worldId );
@@ -248,7 +248,7 @@ int TestForAmy( void )
 
 		b2DestroyBody( simulon_body_id );
 
-		b2World_Step( world_id, 1. / 60., 4 );
+		b2World_Step( world_id, 1. / 60., 4, NULL, NULL );
 
 		b2DestroyWorld( world_id );
 	}
@@ -285,7 +285,7 @@ int TestForAmy( void )
 		b2JointId distance_joint_id = b2CreateDistanceJoint( world_id, &distance_joint_def );
 
 		b2Body_SetType( box_body_id, b2_staticBody );
-		b2World_Step( world_id, 1. / 60., 4 );
+		b2World_Step( world_id, 1. / 60., 4, NULL, NULL );
 
 		b2DestroyJoint( distance_joint_id );
 
