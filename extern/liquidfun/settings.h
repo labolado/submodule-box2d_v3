@@ -22,7 +22,7 @@
 
 #include "box2d/box2d.h"
 extern "C" {
-#include "src/allocate.h"
+#include "src/core.h"
 }
 #include <stddef.h>
 #include <assert.h>
