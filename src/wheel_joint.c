@@ -144,11 +144,11 @@ float b2WheelJoint_GetMaxMotorTorque( b2JointId jointId )
 
 float b2WheelJoint_GetJointTranslation( b2JointId jointId )
 {
-	b2JointSim* joint = b2GetJointSimCheckType( jointId, b2_prismaticJoint );
+	b2JointSim* joint = b2GetJointSimCheckType( jointId, b2_wheelJoint );
 
 	b2BodyId bodyIdA = b2Joint_GetBodyA( jointId );
 	b2Vec2 pA = b2Body_GetWorldPoint( bodyIdA, joint->localOriginAnchorA );
-	b2Vec2 pB = b2Body_GetWorldPoint( b2Joint_GetBodyB( jointId ), joint->localOriginAnchorA );
+	b2Vec2 pB = b2Body_GetWorldPoint( b2Joint_GetBodyB( jointId ), joint->localOriginAnchorB );
 	b2Vec2 d = b2Sub( pB, pA );
 	b2Vec2 axis = b2Body_GetWorldVector( bodyIdA, joint->wheelJoint.localAxisA );
 

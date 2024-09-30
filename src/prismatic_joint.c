@@ -147,7 +147,7 @@ float b2PrismaticJoint_GetJointTranslation( b2JointId jointId )
 
 	b2BodyId bodyIdA = b2Joint_GetBodyA( jointId );
 	b2Vec2 pA = b2Body_GetWorldPoint( bodyIdA, joint->localOriginAnchorA );
-	b2Vec2 pB = b2Body_GetWorldPoint( b2Joint_GetBodyB( jointId ), joint->localOriginAnchorA );
+	b2Vec2 pB = b2Body_GetWorldPoint( b2Joint_GetBodyB( jointId ), joint->localOriginAnchorB );
 	b2Vec2 d = b2Sub( pB, pA );
 	b2Vec2 axis = b2Body_GetWorldVector( bodyIdA, joint->prismaticJoint.localAxisA );
 
