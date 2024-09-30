@@ -87,6 +87,7 @@ b2FakeJointDef b2DefaultFakeJointDef( void )
 {
 	b2FakeJointDef def = { 0 };
 	def.internalValue = B2_SECRET_COOKIE;
+	return def;
 }
 
 b2ExplosionDef b2DefaultExplosionDef( void )
