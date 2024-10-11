@@ -1922,8 +1922,10 @@ b2TreeStats b2World_OverlapAABB( b2WorldId worldId, b2AABB aabb, b2QueryFilter f
 	return treeStats;
 }
 
-void b2World_OverlapAABBForLiquidFun( b2WorldId worldId, b2AABB aabb, b2QueryFilter filter, b2OverlapResultFcn* fcn, void* context )
+b2TreeStats b2World_OverlapAABBForLiquidFun( b2WorldId worldId, b2AABB aabb, b2QueryFilter filter, b2OverlapResultFcn* fcn, void* context )
 {
+	b2TreeStats treeStats = { 0 };
+
 	b2World* world = b2GetWorldFromId( worldId );
 
 	B2_ASSERT( b2AABB_IsValid( aabb ) );
@@ -1932,8 +1934,14 @@ void b2World_OverlapAABBForLiquidFun( b2WorldId worldId, b2AABB aabb, b2QueryFil
 
 	for ( int i = 0; i < b2_bodyTypeCount; ++i )
 	{
-		b2DynamicTree_Query( world->broadPhase.trees + i, aabb, filter.maskBits, TreeQueryCallback, &worldContext );
+		b2TreeStats treeResult =
+			b2DynamicTree_Query( world->broadPhase.trees + i, aabb, filter.maskBits, TreeQueryCallback, &worldContext );
+
+		treeStats.nodeVisits += treeResult.nodeVisits;
+		treeStats.leafVisits += treeResult.leafVisits;
 	}
+
+	return treeStats;
 }
 
 typedef struct WorldOverlapContext
