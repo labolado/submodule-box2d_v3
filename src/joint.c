@@ -91,13 +91,6 @@ b2WheelJointDef b2DefaultWheelJointDef( void )
 	return def;
 }
 
-b2FakeJointDef b2DefaultFakeJointDef( void )
-{
-	b2FakeJointDef def = { 0 };
-	def.internalValue = B2_SECRET_COOKIE;
-	return def;
-}
-
 b2ExplosionDef b2DefaultExplosionDef( void )
 {
 	b2ExplosionDef def = { 0 };
@@ -702,42 +695,6 @@ b2JointId b2CreateWheelJoint( b2WorldId worldId, const b2WheelJointDef* def )
 	return jointId;
 }
 
-b2JointId b2CreateFakeJoint(b2WorldId worldId, const b2FakeJointDef* def)
-{
-	b2CheckDef( def );
-	b2World* world = b2GetWorldFromId( worldId );
-
-	B2_ASSERT( world->locked == false );
-
-	if ( world->locked )
-	{
-		return ( b2JointId ){ 0 };
-	}
-
-	b2Body* bodyA = b2GetBodyFullId( world, def->bodyIdA );
-	b2Body* bodyB = b2GetBodyFullId( world, def->bodyIdB );
-
-	b2JointPair pair = b2CreateJoint( world, bodyA, bodyB, def->userData, 1.0f, b2_fakeJoint, def->collideConnected );
-
-	b2JointSim* joint = pair.jointSim;
-	joint->type = b2_fakeJoint;
-	joint->localOriginAnchorA = def->localAnchorA;
-	joint->localOriginAnchorB = def->localAnchorB;
-
-	b2FakeJoint empty = { 0 };
-	joint->fakeJoint = empty;
-	joint->fakeJoint.referenceAngle = def->referenceAngle;
-
-	// If the joint prevents collisions, then destroy all contacts between attached bodies
-	if ( def->collideConnected == false )
-	{
-		b2DestroyContactsBetweenBodies( world, bodyA, bodyB );
-	}
-
-	b2JointId jointId = { joint->jointId + 1, world->worldId, pair.joint->revision };
-	return jointId;
-}
-
 void b2DestroyJointInternal( b2World* world, b2Joint* joint, bool wakeBodies )
 {
 	int jointId = joint->jointId;
@@ -1119,10 +1076,6 @@ void b2PrepareJoint( b2JointSim* joint, b2StepContext* context )
 			b2PrepareWheelJoint( joint, context );
 			break;
 
-		case b2_fakeJoint:
-			// do nothing
-			break;
-
 		default:
 			B2_ASSERT( false );
 	}
@@ -1171,10 +1124,6 @@ void b2WarmStartJoint( b2JointSim* joint, b2StepContext* context )
 			b2WarmStartWheelJoint( joint, context );
 			break;
 
-		case b2_fakeJoint:
-			// do nothing
-			break;
-
 		default:
 			B2_ASSERT( false );
 	}
@@ -1221,10 +1170,6 @@ void b2SolveJoint( b2JointSim* joint, b2StepContext* context, bool useBias )
 
 		case b2_wheelJoint:
 			b2SolveWheelJoint( joint, context, useBias );
-			break;
-
-		case b2_fakeJoint:
-			// do nothing
 			break;
 
 		default:
@@ -1344,10 +1289,6 @@ void b2DrawJoint( b2DebugDraw* draw, b2World* world, b2Joint* joint )
 
 		case b2_wheelJoint:
 			b2DrawWheelJoint( draw, jointSim, transformA, transformB );
-			break;
-
-		case b2_fakeJoint:
-			// do nothing
 			break;
 
 		default:

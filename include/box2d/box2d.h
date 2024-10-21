@@ -1169,17 +1169,4 @@ B2_API float b2WheelJoint_GetJointTranslation( b2JointId jointId );
 
 /**@}*/
 
-/**
- * @defgroup fake_joint fake Joint
- * The fake joint can be used to simulate two connnected but not collided bodys.
- *
- * @{
- */
-
-/// Create a fake joint
-/// @see b2FakeJointDef for details
-B2_API b2JointId b2CreateFakeJoint( b2WorldId worldId, const b2FakeJointDef* def );
-
-/**@}*/
-
 /**@}*/

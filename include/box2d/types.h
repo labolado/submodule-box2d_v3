@@ -488,7 +488,6 @@ typedef enum b2JointType
 	b2_revoluteJoint,
 	b2_weldJoint,
 	b2_wheelJoint,
-	b2_fakeJoint,
 } b2JointType;
 
 /// Distance joint definition
