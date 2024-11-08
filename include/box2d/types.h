@@ -1005,6 +1005,9 @@ typedef struct b2SensorBeginTouchEvent
 } b2SensorBeginTouchEvent;
 
 /// An end touch event is generated when a shape stops overlapping a sensor shape.
+///	You will not get an end event if you do anything that destroys contacts outside
+///	of the world step. These include things like setting the transform, destroying a body
+///	or shape, or changing a filter or body type.
 typedef struct b2SensorEndTouchEvent
 {
 	/// The id of the sensor shape
@@ -1046,6 +1049,9 @@ typedef struct b2ContactBeginTouchEvent
 } b2ContactBeginTouchEvent;
 
 /// An end touch event is generated when two shapes stop touching.
+///	You will not get an end event if you do anything that destroys contacts outside
+///	of the world step. These include things like setting the transform, destroying a body
+///	or shape, or changing a filter or body type.
 typedef struct b2ContactEndTouchEvent
 {
 	/// Id of the first shape
