@@ -326,7 +326,7 @@ int TestWorldRecycle( void )
 
 			for ( int k = 0; k < 10; ++k )
 			{
-				b2World_Step( worldIds[j], timeStep, subStepCount );
+				b2World_Step( worldIds[j], timeStep, subStepCount, NULL, NULL );
 			}
 		}
 
