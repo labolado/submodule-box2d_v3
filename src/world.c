@@ -1278,8 +1278,11 @@ void b2World_Draw( b2WorldId worldId, b2DebugDraw* draw )
 			for ( int bodyIndex = 0; bodyIndex < bodyCount; ++bodyIndex )
 			{
 				b2BodySim* bodySim = set->bodySims.data + bodyIndex;
+				b2Body* body = b2BodyArray_Get( &world->bodies, bodySim->bodyId );
+				B2_ASSERT( body->setIndex == setIndex );
 
 				b2Transform transform = { bodySim->center, bodySim->transform.q };
+				draw->GetBodyTransform( &transform, body->userData, draw->context );
 				draw->DrawTransform( transform, draw->context );
 
 				b2Vec2 p = b2TransformPoint( transform, offset );
