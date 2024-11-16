@@ -227,7 +227,7 @@ static void b2FinalizeBodiesTask( int startIndex, int endIndex, uint32_t threadI
 		float w = state->angularVelocity;
 
 		B2_ASSERT( b2Vec2_IsValid( v ) );
-		B2_ASSERT( b2IsValid( w ) );
+		B2_ASSERT( b2Float_IsValid( w ) );
 
 		sim->transform0.p = sim->transform.p;
 		sim->transform0.q = sim->transform.q;
