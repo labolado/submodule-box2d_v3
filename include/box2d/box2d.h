@@ -204,8 +204,11 @@ B2_API void b2World_DumpMemoryStats( b2WorldId worldId );
 /// Is locked?
 B2_API bool b2World_IsLocked( b2WorldId worldId );
 
-/// todo testing
+/// This is for internal testing
 B2_API void b2World_RebuildStaticTree( b2WorldId worldId );
+
+/// This is for internal testing
+B2_API void b2World_EnableSpeculative( b2WorldId worldId, bool flag );
 
 /** @} */
 
