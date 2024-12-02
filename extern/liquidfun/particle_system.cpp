@@ -23,6 +23,7 @@
 #include "block_allocator.h"
 extern "C" {
 #include "src/core.h"
+#include "src/constants.h"
 }
 #include "liquid_world.h"
 // #include <Box2D/Dynamics/b2World.h>
