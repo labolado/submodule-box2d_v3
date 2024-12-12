@@ -247,7 +247,7 @@ b2BodyId b2CreateBody( b2WorldId worldId, const b2BodyDef* def )
 	bodySim->invMass = 0.0f;
 	bodySim->inertia = 0.0f;
 	bodySim->invInertia = 0.0f;
-	bodySim->minExtent = b2_huge;
+	bodySim->minExtent = B2_HUGE;
 	bodySim->maxExtent = 0.0f;
 	bodySim->linearDamping = def->linearDamping;
 	bodySim->angularDamping = def->angularDamping;
@@ -526,7 +526,7 @@ void b2UpdateBodyMassData( b2World* world, b2Body* body )
 	bodySim->inertia = 0.0f;
 	bodySim->invInertia = 0.0f;
 	bodySim->localCenter = b2Vec2_zero;
-	bodySim->minExtent = b2_huge;
+	bodySim->minExtent = B2_HUGE;
 	bodySim->maxExtent = 0.0f;
 
 	// Static and kinematic sims have zero mass.
