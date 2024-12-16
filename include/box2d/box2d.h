@@ -432,6 +432,13 @@ B2_API void b2Body_SetBullet( b2BodyId bodyId, bool flag );
 /// Is this body a bullet?
 B2_API bool b2Body_IsBullet( b2BodyId bodyId );
 
+/// This allows this body to bypass rotational speed limits. Should only be used
+/// for circular objects, like wheels.
+B2_API void b2Body_SetAllowFastRotation( b2BodyId bodyId, bool flag );
+
+/// Is this body allowing fast rotation?
+B2_API bool b2Body_AllowFastRotation( b2BodyId bodyId );
+
 /// Enable/disable hit events on all shapes
 /// @see b2ShapeDef::enableHitEvents
 B2_API void b2Body_EnableHitEvents( b2BodyId bodyId, bool enableHitEvents );
