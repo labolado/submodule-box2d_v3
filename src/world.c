@@ -75,29 +75,25 @@ b2World* b2GetWorldLocked( int index )
 
 static void* b2DefaultAddTaskFcn( b2TaskCallback* task, int count, int minRange, void* taskContext, void* userContext )
 {
-	B2_MAYBE_UNUSED( minRange );
-	B2_MAYBE_UNUSED( userContext );
+	B2_UNUSED( minRange, userContext );
 	task( 0, count, 0, taskContext );
 	return NULL;
 }
 
 static void b2DefaultFinishTaskFcn( void* userTask, void* userContext )
 {
-	B2_MAYBE_UNUSED( userTask );
-	B2_MAYBE_UNUSED( userContext );
+	B2_UNUSED( userTask, userContext );
 }
 
 static float b2DefaultFrictionCallback( float frictionA, int materialA, float frictionB, int materialB )
 {
-	B2_MAYBE_UNUSED( materialA );
-	B2_MAYBE_UNUSED( materialB );
+	B2_UNUSED( materialA, materialB );
 	return sqrtf( frictionA * frictionB );
 }
 
 static float b2DefaultRestitutionCallback( float restitutionA, int materialA, float restitutionB, int materialB )
 {
-	B2_MAYBE_UNUSED( materialA );
-	B2_MAYBE_UNUSED( materialB );
+	B2_UNUSED( materialA, materialB );
 	return b2MaxFloat( restitutionA, restitutionB );
 }
 
@@ -201,7 +197,7 @@ b2WorldId b2CreateWorld( const b2WorldDef* def )
 	world->jointHertz = def->jointHertz;
 	world->jointDampingRatio = def->jointDampingRatio;
 
-	if (def->frictionCallback == NULL)
+	if ( def->frictionCallback == NULL )
 	{
 		world->frictionCallback = b2DefaultFrictionCallback;
 	}
@@ -300,11 +296,12 @@ void b2DestroyWorld( b2WorldId worldId )
 		b2ChainShape* chain = world->chainShapes.data + i;
 		if ( chain->id != B2_NULL_INDEX )
 		{
-			b2Free( chain->shapeIndices, chain->count * sizeof( int ) );
+			b2FreeChainData( chain );
 		}
 		else
 		{
 			B2_ASSERT( chain->shapeIndices == NULL );
+			B2_ASSERT( chain->materials == NULL );
 		}
 	}
 
@@ -436,9 +433,9 @@ static void b2CollideTask( int startIndex, int endIndex, uint32_t threadIndex, v
 
 static void b2UpdateTreesTask( int startIndex, int endIndex, uint32_t threadIndex, void* context )
 {
-	B2_MAYBE_UNUSED( startIndex );
-	B2_MAYBE_UNUSED( endIndex );
-	B2_MAYBE_UNUSED( threadIndex );
+	B2_UNUSED( startIndex );
+	B2_UNUSED( endIndex );
+	B2_UNUSED( threadIndex );
 
 	b2TracyCZoneNC( tree_task, "Rebuild BVH", b2_colorFireBrick, true );
 
@@ -866,7 +863,7 @@ struct DrawContext
 
 static bool DrawQueryCallback( int proxyId, int shapeId, void* context )
 {
-	B2_MAYBE_UNUSED( proxyId );
+	B2_UNUSED( proxyId );
 
 	struct DrawContext* drawContext = context;
 	b2World* world = drawContext->world;
@@ -996,7 +993,7 @@ static void b2DrawWithBounds( b2World* world, b2DebugDraw* draw )
 
 			b2Body* body = b2BodyArray_Get( &world->bodies, bodyId );
 
-			if (draw->drawBodyNames && body->name[0] != 0)
+			if ( draw->drawBodyNames && body->name[0] != 0 )
 			{
 				b2Vec2 offset = { 0.1f, 0.1f };
 				b2BodySim* bodySim = b2GetBodySim( world, body );
@@ -1303,7 +1300,7 @@ void b2World_Draw( b2WorldId worldId, b2DebugDraw* draw )
 				continue;
 			}
 
-			if ( body->name[0] == 0)
+			if ( body->name[0] == 0 )
 			{
 				continue;
 			}
@@ -1862,15 +1859,15 @@ void* b2World_GetUserData( b2WorldId worldId )
 	return world->userData;
 }
 
-void b2World_SetFrictionCallback(b2WorldId worldId, b2FrictionCallback* callback)
+void b2World_SetFrictionCallback( b2WorldId worldId, b2FrictionCallback* callback )
 {
 	b2World* world = b2GetWorldFromId( worldId );
-	if (world->locked)
+	if ( world->locked )
 	{
 		return;
 	}
 
-	if (callback != NULL)
+	if ( callback != NULL )
 	{
 		world->frictionCallback = callback;
 	}
@@ -1883,12 +1880,12 @@ void b2World_SetFrictionCallback(b2WorldId worldId, b2FrictionCallback* callback
 void b2World_SetRestitutionCallback( b2WorldId worldId, b2RestitutionCallback* callback )
 {
 	b2World* world = b2GetWorldFromId( worldId );
-	if (world->locked)
+	if ( world->locked )
 	{
 		return;
 	}
 
-	if (callback != NULL)
+	if ( callback != NULL )
 	{
 		world->restitutionCallback = callback;
 	}
@@ -2009,7 +2006,7 @@ typedef struct WorldQueryContext
 
 static bool TreeQueryCallback( int proxyId, int shapeId, void* context )
 {
-	B2_MAYBE_UNUSED( proxyId );
+	B2_UNUSED( proxyId );
 
 	WorldQueryContext* worldContext = context;
 	b2World* world = worldContext->world;
@@ -2090,7 +2087,7 @@ typedef struct WorldOverlapContext
 
 static bool TreeOverlapCallback( int proxyId, int shapeId, void* context )
 {
-	B2_MAYBE_UNUSED( proxyId );
+	B2_UNUSED( proxyId );
 
 	WorldOverlapContext* worldContext = context;
 	b2World* world = worldContext->world;
@@ -2242,7 +2239,7 @@ typedef struct WorldRayCastContext
 
 static float RayCastCallback( const b2RayCastInput* input, int proxyId, int shapeId, void* context )
 {
-	B2_MAYBE_UNUSED( proxyId );
+	B2_UNUSED( proxyId );
 
 	WorldRayCastContext* worldContext = context;
 	b2World* world = worldContext->world;
@@ -2363,7 +2360,7 @@ b2RayResult b2World_CastRayClosest( b2WorldId worldId, b2Vec2 origin, b2Vec2 tra
 
 static float ShapeCastCallback( const b2ShapeCastInput* input, int proxyId, int shapeId, void* context )
 {
-	B2_MAYBE_UNUSED( proxyId );
+	B2_UNUSED( proxyId );
 
 	WorldRayCastContext* worldContext = context;
 	b2World* world = worldContext->world;
@@ -2653,7 +2650,7 @@ struct ExplosionContext
 
 static bool ExplosionCallback( int proxyId, int shapeId, void* context )
 {
-	B2_MAYBE_UNUSED( proxyId );
+	B2_UNUSED( proxyId );
 
 	struct ExplosionContext* explosionContext = context;
 	b2World* world = explosionContext->world;
@@ -3268,17 +3265,17 @@ void b2ValidateContacts( b2World* world )
 
 void b2ValidateConnectivity( b2World* world )
 {
-	B2_MAYBE_UNUSED( world );
+	B2_UNUSED( world );
 }
 
 void b2ValidateSolverSets( b2World* world )
 {
-	B2_MAYBE_UNUSED( world );
+	B2_UNUSED( world );
 }
 
 void b2ValidateContacts( b2World* world )
 {
-	B2_MAYBE_UNUSED( world );
+	B2_UNUSED( world );
 }
 
 #endif
