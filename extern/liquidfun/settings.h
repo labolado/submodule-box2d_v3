@@ -83,17 +83,17 @@ typedef unsigned long long uint64;
 /// Global tuning constants based on meters-kilograms-seconds (MKS) units.
 ///
 
-/*
 // Collision
 
 /// The maximum number of contact points between two convex shapes. Do
 /// not change this value.
-#define b2_maxManifoldPoints	2
+// #define b2_maxManifoldPoints	2
 
 /// The maximum number of vertices on a convex polygon. You cannot increase
 /// this too much because b2BlockAllocator has a maximum object size.
-#define b2_maxPolygonVertices	8
+#define b2_maxPolygonVertices B2_MAX_POLYGON_VERTICES
 
+/*
 /// This is used to fatten AABBs in the dynamic tree. This allows proxies
 /// to move by a small amount without triggering a tree adjustment.
 /// This is in meters.
@@ -103,12 +103,13 @@ typedef unsigned long long uint64;
 /// the future position based on the current displacement.
 /// This is a dimensionless multiplier.
 #define b2_aabbMultiplier		2.0f
+*/
 
 /// A small length used as a collision and constraint tolerance. Usually it is
 /// chosen to be numerically significant, but visually insignificant.
-// #define b2_linearSlop			0.005f
-#define b2_linearSlop			b2Settings::linearSlop
+#define b2_linearSlop B2_LINEAR_SLOP
 
+/*
 /// A small angle used as a collision and constraint tolerance. Usually it is
 /// chosen to be numerically significant, but visually insignificant.
 #define b2_angularSlop			(2.0f / 180.0f * b2_pi)
