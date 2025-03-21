@@ -688,7 +688,7 @@ public:
 
 		m_bodyCount = index;
 
-		b2World_Step( m_worldId, 1.0f / 60.0f, 4 );
+		b2World_Step( m_worldId, 1.0f / 60.0f, 4, NULL, NULL );
 	}
 
 	void Step( Settings& settings ) override

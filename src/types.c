@@ -128,9 +128,7 @@ static void b2EmptyDrawString( b2Vec2 p, const char* s, b2HexColor color, void* 
 
 static void b2EmptyGetBodyTransform( b2Transform* transform, void* bodyUserData, void* context )
 {
-	B2_MAYBE_UNUSED( transform );
-	B2_MAYBE_UNUSED( bodyUserData );
-	B2_MAYBE_UNUSED( context );
+	B2_UNUSED( transform, bodyUserData, context );
 }
 
 b2DebugDraw b2DefaultDebugDraw( void )
