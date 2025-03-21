@@ -420,6 +420,9 @@ typedef struct b2ChainDef
 	/// Indicates a closed chain formed by connecting the first and last points
 	bool isLoop;
 
+	/// For 'SetSensor' like box2d v2, not official.
+	bool isSensor;
+
 	/// Used internally to detect a valid definition. DO NOT SET.
 	int32_t internalValue;
 } b2ChainDef;

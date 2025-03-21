@@ -323,6 +323,7 @@ b2ChainId b2CreateChain( b2BodyId bodyId, const b2ChainDef* def )
 	shapeDef.friction = def->friction;
 	shapeDef.filter = def->filter;
 	shapeDef.customColor = def->customColor;
+	shapeDef.isSensor = def->isSensor;
 	shapeDef.enableContactEvents = false;
 	shapeDef.enableHitEvents = false;
 	shapeDef.enableSensorEvents = false;
@@ -835,17 +836,6 @@ bool b2Shape_IsSensor( b2ShapeId shapeId )
 	b2World* world = b2GetWorld( shapeId.world0 );
 	b2Shape* shape = b2GetShape( world, shapeId );
 	return shape->isSensor;
-}
-
-void b2Shape_SetSensor( b2ShapeId shapeId, bool flag )
-{
-	b2World* world = b2GetWorld( shapeId.world0 );
-	if ( world == NULL )
-	{
-		return;
-	}
-	b2Shape* shape = b2GetShape( world, shapeId );
-	shape->isSensor = flag;
 }
 
 bool b2Shape_TestPoint( b2ShapeId shapeId, b2Vec2 point )

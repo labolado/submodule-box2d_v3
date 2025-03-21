@@ -522,9 +522,6 @@ B2_API b2WorldId b2Shape_GetWorld( b2ShapeId shapeId );
 /// Returns true If the shape is a sensor
 B2_API bool b2Shape_IsSensor( b2ShapeId shapeId );
 
-/// Set this body to be a sensor.
-B2_API void b2Shape_SetSensor( b2ShapeId shapeId, bool flag );
-
 /// Set the user data for a shape
 B2_API void b2Shape_SetUserData( b2ShapeId shapeId, void* userData );
 
