@@ -578,7 +578,7 @@ B2_API float b2Shape_GetRestitution( b2ShapeId shapeId );
 /// @see b2ShapeDef::material
 B2_API void b2Shape_SetMaterial( b2ShapeId shapeId, int material );
 
-/// Get the shape material identifier 
+/// Get the shape material identifier
 B2_API int b2Shape_GetMaterial( b2ShapeId shapeId );
 
 /// Get the shape filter
