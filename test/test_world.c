@@ -361,7 +361,7 @@ static int TestSensor( void )
 	{
 		float timeStep = 1.0f / 60.0f;
 		int subStepCount = 4;
-		b2World_Step( worldId, timeStep, subStepCount );
+		b2World_Step( worldId, timeStep, subStepCount, NULL, NULL );
 
 		b2Vec2 bulletPos = b2Body_GetPosition( bulletId );
 		//printf( "Bullet pos: %g %g\n", bulletPos.x, bulletPos.y );
