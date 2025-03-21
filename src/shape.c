@@ -1535,7 +1535,7 @@ void b2Shape_ComputeDistance( b2ShapeId shapeId, b2Vec2 target, float* distance,
 	input.transformB = b2Transform_identity;
 	input.useRadii = true;
 
-	b2DistanceCache cache = { 0 };
+	b2SimplexCache cache = { 0 };
 	b2DistanceOutput output = b2ShapeDistance( &cache, &input, NULL, 0 );
 
 	*distance = output.distance;
