@@ -416,7 +416,7 @@ int TestWorldCoverage( void )
 	void* userData = b2World_GetUserData( worldId );
 	ENSURE( userData == &value );
 
-	b2World_Step( worldId, 1.0f, 1 );
+	b2World_Step( worldId, 1.0f, 1, NULL, NULL);
 
 	b2DestroyWorld( worldId );
 
