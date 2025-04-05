@@ -1202,8 +1202,8 @@ void b2DrawJoint( b2DebugDraw* draw, b2World* world, b2Joint* joint )
 
 	b2Transform transformA = b2GetBodyTransformQuick( world, bodyA );
 	b2Transform transformB = b2GetBodyTransformQuick( world, bodyB );
-	draw->GetBodyTransform( &transformA, bodyA->userData, draw->context );
-	draw->GetBodyTransform( &transformB, bodyB->userData, draw->context );
+	draw->GetBodyTransformFcn( &transformA, bodyA->userData, draw->context );
+	draw->GetBodyTransformFcn( &transformB, bodyB->userData, draw->context );
 	b2Vec2 pA = b2TransformPoint( transformA, jointSim->localOriginAnchorA );
 	b2Vec2 pB = b2TransformPoint( transformB, jointSim->localOriginAnchorB );
 
@@ -1220,17 +1220,17 @@ void b2DrawJoint( b2DebugDraw* draw, b2World* world, b2Joint* joint )
 			b2Vec2 target = jointSim->mouseJoint.targetA;
 
 			b2HexColor c1 = b2_colorGreen;
-			draw->DrawPoint( target, 4.0f, c1, draw->context );
-			draw->DrawPoint( pB, 4.0f, c1, draw->context );
+			draw->DrawPointFcn( target, 4.0f, c1, draw->context );
+			draw->DrawPointFcn( pB, 4.0f, c1, draw->context );
 
 			b2HexColor c2 = b2_colorLightGray;
-			draw->DrawSegment( target, pB, c2, draw->context );
+			draw->DrawSegmentFcn( target, pB, c2, draw->context );
 		}
 		break;
 
 		case b2_nullJoint:
 		{
-			draw->DrawSegment( pA, pB, b2_colorGold, draw->context );
+			draw->DrawSegmentFcn( pA, pB, b2_colorGold, draw->context );
 		}
 		break;
 
@@ -1247,9 +1247,9 @@ void b2DrawJoint( b2DebugDraw* draw, b2World* world, b2Joint* joint )
 			break;
 
 		default:
-			draw->DrawSegment( transformA.p, pA, color, draw->context );
-			draw->DrawSegment( pA, pB, color, draw->context );
-			draw->DrawSegment( transformB.p, pB, color, draw->context );
+			draw->DrawSegmentFcn( transformA.p, pA, color, draw->context );
+			draw->DrawSegmentFcn( pA, pB, color, draw->context );
+			draw->DrawSegmentFcn( transformB.p, pB, color, draw->context );
 	}
 
 	if ( draw->drawGraphColors )
@@ -1262,7 +1262,7 @@ void b2DrawJoint( b2DebugDraw* draw, b2World* world, b2Joint* joint )
 		if ( colorIndex != B2_NULL_INDEX )
 		{
 			b2Vec2 p = b2Lerp( pA, pB, 0.5f );
-			draw->DrawPoint( p, 5.0f, colors[colorIndex], draw->context );
+			draw->DrawPointFcn( p, 5.0f, colors[colorIndex], draw->context );
 		}
 	}
 }
