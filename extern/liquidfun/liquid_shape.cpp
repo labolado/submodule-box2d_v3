@@ -54,13 +54,13 @@ bool b2LiquidShape::TestPoint( b2Transform transform, b2Vec2 point ) const {
 	switch ( type )
 	{
 		case b2_capsuleShape:
-			return b2PointInCapsule( localPoint, &capsule );
+			return b2PointInCapsule( &capsule, localPoint );
 
 		case b2_circleShape:
-			return b2PointInCircle( localPoint, &circle );
+			return b2PointInCircle( &circle, localPoint );
 
 		case b2_polygonShape:
-			return b2PointInPolygon( localPoint, &polygon );
+			return b2PointInPolygon( &polygon, localPoint );
 
 		default:
 			return false;
