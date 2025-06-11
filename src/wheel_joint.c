@@ -405,9 +405,9 @@ void b2SolveWheelJoint( b2JointSim* base, b2StepContext* context, bool useBias )
 			}
 			else if ( useBias )
 			{
-				bias = context->jointSoftness.biasRate * C;
-				massScale = context->jointSoftness.massScale;
-				impulseScale = context->jointSoftness.impulseScale;
+				bias = base->constraintSoftness.biasRate * C;
+				massScale = base->constraintSoftness.massScale;
+				impulseScale = base->constraintSoftness.impulseScale;
 			}
 
 			float Cdot = b2Dot( axisA, b2Sub( vB, vA ) ) + a2 * wB - a1 * wA;
@@ -443,9 +443,9 @@ void b2SolveWheelJoint( b2JointSim* base, b2StepContext* context, bool useBias )
 			}
 			else if ( useBias )
 			{
-				bias = context->jointSoftness.biasRate * C;
-				massScale = context->jointSoftness.massScale;
-				impulseScale = context->jointSoftness.impulseScale;
+				bias = base->constraintSoftness.biasRate * C;
+				massScale = base->constraintSoftness.massScale;
+				impulseScale = base->constraintSoftness.impulseScale;
 			}
 
 			// sign flipped on Cdot
@@ -477,9 +477,9 @@ void b2SolveWheelJoint( b2JointSim* base, b2StepContext* context, bool useBias )
 		if ( useBias )
 		{
 			float C = b2Dot( perpA, d );
-			bias = context->jointSoftness.biasRate * C;
-			massScale = context->jointSoftness.massScale;
-			impulseScale = context->jointSoftness.impulseScale;
+			bias = base->constraintSoftness.biasRate * C;
+			massScale = base->constraintSoftness.massScale;
+			impulseScale = base->constraintSoftness.impulseScale;
 		}
 
 		float s1 = b2Cross( b2Add( d, rA ), perpA );
