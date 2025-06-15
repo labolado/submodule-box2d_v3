@@ -10,10 +10,10 @@
 #include "id_pool.h"
 #include "island.h"
 #include "joint.h"
+#include "physics_world.h"
 #include "sensor.h"
 #include "shape.h"
 #include "solver_set.h"
-#include "physics_world.h"
 
 #include "box2d/box2d.h"
 #include "box2d/id.h"
@@ -239,6 +239,11 @@ b2BodyId b2CreateBody( b2WorldId worldId, const b2BodyDef* def )
 
 	int bodyId = b2AllocId( &world->bodyIdPool );
 
+	uint32_t lockFlags = 0;
+	lockFlags |= def->motionLocks.linearX ? b2_lockLinearX : 0;
+	lockFlags |= def->motionLocks.linearY ? b2_lockLinearY : 0;
+	lockFlags |= def->motionLocks.angularZ ? b2_lockAngularZ : 0;
+
 	b2SolverSet* set = b2SolverSetArray_Get( &world->solverSets, setId );
 	b2BodySim* bodySim = b2BodySimArray_Add( &set->bodySims );
 	*bodySim = (b2BodySim){ 0 };
@@ -255,9 +260,10 @@ b2BodyId b2CreateBody( b2WorldId worldId, const b2BodyDef* def )
 	bodySim->angularDamping = def->angularDamping;
 	bodySim->gravityScale = def->gravityScale;
 	bodySim->bodyId = bodyId;
-	bodySim->isBullet = def->isBullet;
-	bodySim->enableSensorHits = def->enableSensorHits;
-	bodySim->allowFastRotation = def->allowFastRotation;
+	bodySim->flags = lockFlags;
+	bodySim->flags |= def->isBullet ? b2_isBullet : 0;
+	bodySim->flags |= def->enableSensorHits ? b2_enableSensorHits : 0;
+	bodySim->flags |= def->allowFastRotation ? b2_allowFastRotation : 0;
 
 	if ( setId == b2_awakeSet )
 	{
@@ -268,6 +274,7 @@ b2BodyId b2CreateBody( b2WorldId worldId, const b2BodyDef* def )
 		bodyState->linearVelocity = def->linearVelocity;
 		bodyState->angularVelocity = def->angularVelocity;
 		bodyState->deltaRotation = b2Rot_identity;
+		bodyState->flags = lockFlags;
 	}
 
 	if ( bodyId == world->bodies.count )
@@ -322,8 +329,8 @@ b2BodyId b2CreateBody( b2WorldId worldId, const b2BodyDef* def )
 	body->sleepThreshold = def->sleepThreshold;
 	body->sleepTime = 0.0f;
 	body->type = def->type;
+	body->flags = lockFlags;
 	body->enableSleep = def->enableSleep;
-	body->fixedRotation = def->fixedRotation;
 	body->isSpeedCapped = false;
 	body->isMarked = false;
 
@@ -544,6 +551,10 @@ void b2UpdateBodyMassData( b2World* world, b2Body* body )
 	body->mass = 0.0f;
 	body->inertia = 0.0f;
 
+	// Copy lock flags from body to sim body
+	bodySim->flags &= ~b2_allLocks;
+	bodySim->flags |= ( body->flags & b2_allLocks );
+
 	bodySim->invMass = 0.0f;
 	bodySim->invInertia = 0.0f;
 	bodySim->localCenter = b2Vec2_zero;
@@ -600,7 +611,7 @@ void b2UpdateBodyMassData( b2World* world, b2Body* body )
 		localCenter = b2MulSV( bodySim->invMass, localCenter );
 	}
 
-	if ( body->inertia > 0.0f && body->fixedRotation == false )
+	if ( body->inertia > 0.0f )
 	{
 		// Center the inertia about the center of mass.
 		body->inertia -= body->mass * b2Dot( localCenter, localCenter );
@@ -813,7 +824,7 @@ void b2Body_SetAngularVelocity( b2BodyId bodyId, float angularVelocity )
 	b2World* world = b2GetWorld( bodyId.world0 );
 	b2Body* body = b2GetBodyFullId( world, bodyId );
 
-	if ( body->type == b2_staticBody || body->fixedRotation )
+	if ( body->type == b2_staticBody || ( body->flags & b2_lockAngularZ ) )
 	{
 		return;
 	}
@@ -837,6 +848,11 @@ void b2Body_SetTargetTransform( b2BodyId bodyId, b2Transform target, float timeS
 	b2World* world = b2GetWorld( bodyId.world0 );
 	b2Body* body = b2GetBodyFullId( world, bodyId );
 
+	if ( body->setIndex == b2_disabledSet )
+	{
+		return;
+	}
+
 	if ( body->type == b2_staticBody || timeStep <= 0.0f )
 	{
 		return;
@@ -849,34 +865,34 @@ void b2Body_SetTargetTransform( b2BodyId bodyId, b2Transform target, float timeS
 	b2Vec2 center2 = b2TransformPoint( target, sim->localCenter );
 	float invTimeStep = 1.0f / timeStep;
 	b2Vec2 linearVelocity = b2MulSV( invTimeStep, b2Sub( center2, center1 ) );
+	linearVelocity.x = ( body->flags & b2_lockLinearX ) ? 0.0f : linearVelocity.x;
+	linearVelocity.y = ( body->flags & b2_lockLinearY ) ? 0.0f : linearVelocity.y;
 
 	// Compute angular velocity
-	float angularVelocity = 0.0f;
-	if ( body->fixedRotation == false )
+	b2Rot q1 = sim->transform.q;
+	b2Rot q2 = target.q;
+	float deltaAngle = b2RelativeAngle( q1, q2 );
+	float angularVelocity = invTimeStep * deltaAngle;
+	angularVelocity = ( body->flags & b2_lockAngularZ ) ? 0.0f : angularVelocity;
+
+	// Early out if the body is asleep already and the desired movement is small
+	if ( body->setIndex != b2_awakeSet )
 	{
-		b2Rot q1 = sim->transform.q;
-		b2Rot q2 = target.q;
-		float deltaAngle = b2RelativeAngle( q1, q2 );
-		angularVelocity = invTimeStep * deltaAngle;
+		float maxVelocity = b2Length( linearVelocity ) + b2AbsFloat( angularVelocity ) * sim->maxExtent;
+
+		// Return if velocity would be sleepy
+		if ( maxVelocity < body->sleepThreshold )
+		{
+			return;
+		}
+
+		// Must wake for state to exist
+		b2WakeBody( world, body );
 	}
 
-	float maxVelocity = b2Length( linearVelocity ) + b2AbsFloat( angularVelocity ) * sim->maxExtent;
-
-	// Return if velocity would be sleepy
-	if ( maxVelocity < body->sleepThreshold )
-	{
-		return;
-	}
-
-	// Must wake for state to exist
-	b2WakeBody( world, body );
+	B2_ASSERT( body->setIndex == b2_awakeSet );
 
 	b2BodyState* state = b2GetBodyState( world, body );
-	if ( state == NULL )
-	{
-		return;
-	}
-
 	state->linearVelocity = linearVelocity;
 	state->angularVelocity = angularVelocity;
 }
@@ -922,6 +938,11 @@ void b2Body_ApplyForce( b2BodyId bodyId, b2Vec2 force, b2Vec2 point, bool wake )
 	b2World* world = b2GetWorld( bodyId.world0 );
 	b2Body* body = b2GetBodyFullId( world, bodyId );
 
+	if ( body->type != b2_dynamicBody || body->setIndex == b2_disabledSet )
+	{
+		return;
+	}
+
 	if ( wake && body->setIndex >= b2_firstSleepingSet )
 	{
 		b2WakeBody( world, body );
@@ -940,6 +961,11 @@ void b2Body_ApplyForceToCenter( b2BodyId bodyId, b2Vec2 force, bool wake )
 	b2World* world = b2GetWorld( bodyId.world0 );
 	b2Body* body = b2GetBodyFullId( world, bodyId );
 
+	if ( body->type != b2_dynamicBody || body->setIndex == b2_disabledSet )
+	{
+		return;
+	}
+
 	if ( wake && body->setIndex >= b2_firstSleepingSet )
 	{
 		b2WakeBody( world, body );
@@ -956,6 +982,11 @@ void b2Body_ApplyTorque( b2BodyId bodyId, float torque, bool wake )
 {
 	b2World* world = b2GetWorld( bodyId.world0 );
 	b2Body* body = b2GetBodyFullId( world, bodyId );
+
+	if ( body->type != b2_dynamicBody || body->setIndex == b2_disabledSet )
+	{
+		return;
+	}
 
 	if ( wake && body->setIndex >= b2_firstSleepingSet )
 	{
@@ -974,6 +1005,11 @@ void b2Body_ApplyLinearImpulse( b2BodyId bodyId, b2Vec2 impulse, b2Vec2 point, b
 	b2World* world = b2GetWorld( bodyId.world0 );
 	b2Body* body = b2GetBodyFullId( world, bodyId );
 
+	if ( body->type != b2_dynamicBody || body->setIndex == b2_disabledSet )
+	{
+		return;
+	}
+
 	if ( wake && body->setIndex >= b2_firstSleepingSet )
 	{
 		b2WakeBody( world, body );
@@ -988,7 +1024,7 @@ void b2Body_ApplyLinearImpulse( b2BodyId bodyId, b2Vec2 impulse, b2Vec2 point, b
 		state->linearVelocity = b2MulAdd( state->linearVelocity, bodySim->invMass, impulse );
 		state->angularVelocity += bodySim->invInertia * b2Cross( b2Sub( point, bodySim->center ), impulse );
 
-		b2LimitVelocity(state, world->maxLinearSpeed );
+		b2LimitVelocity( state, world->maxLinearSpeed );
 	}
 }
 
@@ -996,6 +1032,11 @@ void b2Body_ApplyLinearImpulseToCenter( b2BodyId bodyId, b2Vec2 impulse, bool wa
 {
 	b2World* world = b2GetWorld( bodyId.world0 );
 	b2Body* body = b2GetBodyFullId( world, bodyId );
+
+	if ( body->type != b2_dynamicBody || body->setIndex == b2_disabledSet )
+	{
+		return;
+	}
 
 	if ( wake && body->setIndex >= b2_firstSleepingSet )
 	{
@@ -1018,10 +1059,12 @@ void b2Body_ApplyAngularImpulse( b2BodyId bodyId, float impulse, bool wake )
 {
 	B2_ASSERT( b2Body_IsValid( bodyId ) );
 	b2World* world = b2GetWorld( bodyId.world0 );
+	b2Body* body = b2GetBodyFullId( world, bodyId );
 
-	int id = bodyId.index1 - 1;
-	b2Body* body = b2BodyArray_Get( &world->bodies, id );
-	B2_ASSERT( body->generation == bodyId.generation );
+	if ( body->type != b2_dynamicBody || body->setIndex == b2_disabledSet )
+	{
+		return;
+	}
 
 	if ( wake && body->setIndex >= b2_firstSleepingSet )
 	{
@@ -1185,7 +1228,7 @@ void b2Body_SetType( b2BodyId bodyId, b2BodyType type )
 		b2RemoveBodyFromIsland( world, body );
 
 		b2BodySim* bodySim = b2BodySimArray_Get( &staticSet->bodySims, body->localIndex );
-		bodySim->isFast = false;
+		bodySim->flags &= ~b2_isFast;
 
 		// Maybe transfer joints to static set.
 		int jointKey = body->headJointKey;
@@ -1739,7 +1782,7 @@ void b2Body_Enable( b2BodyId bodyId )
 	b2ValidateSolverSets( world );
 }
 
-void b2Body_SetFixedRotation( b2BodyId bodyId, bool flag )
+void b2Body_SetMotionLocks( b2BodyId bodyId, b2MotionLocks locks )
 {
 	b2World* world = b2GetWorldLocked( bodyId.world0 );
 	if ( world == NULL )
@@ -1747,25 +1790,53 @@ void b2Body_SetFixedRotation( b2BodyId bodyId, bool flag )
 		return;
 	}
 
+	uint32_t newFlags = 0;
+	newFlags |= locks.linearX ? b2_lockLinearX : 0;
+	newFlags |= locks.linearY ? b2_lockLinearY : 0;
+	newFlags |= locks.angularZ ? b2_lockAngularZ : 0;
+
 	b2Body* body = b2GetBodyFullId( world, bodyId );
-	if ( body->fixedRotation != flag )
+	if ( ( body->flags & b2_allLocks ) != newFlags )
 	{
-		body->fixedRotation = flag;
+		body->flags &= ~b2_allLocks;
+		body->flags |= newFlags;
 
 		b2BodyState* state = b2GetBodyState( world, body );
+
 		if ( state != NULL )
 		{
-			state->angularVelocity = 0.0f;
+			state->flags = body->flags;
+
+			if (locks.linearX)
+			{
+				state->linearVelocity.x = 0.0f;
+			}
+
+			if (locks.linearY)
+			{
+				state->linearVelocity.y = 0.0f;
+			}
+
+			if (locks.angularZ)
+			{
+				state->angularVelocity = 0.0f;
+			}
 		}
+
 		b2UpdateBodyMassData( world, body );
 	}
 }
 
-bool b2Body_IsFixedRotation( b2BodyId bodyId )
+b2MotionLocks b2Body_GetMotionLocks( b2BodyId bodyId )
 {
 	b2World* world = b2GetWorld( bodyId.world0 );
 	b2Body* body = b2GetBodyFullId( world, bodyId );
-	return body->fixedRotation;
+
+	b2MotionLocks locks;
+	locks.linearX = ( body->flags & b2_lockLinearX );
+	locks.linearY = ( body->flags & b2_lockLinearY );
+	locks.angularZ = ( body->flags & b2_lockAngularZ );
+	return locks;
 }
 
 void b2Body_SetBullet( b2BodyId bodyId, bool flag )
@@ -1778,7 +1849,15 @@ void b2Body_SetBullet( b2BodyId bodyId, bool flag )
 
 	b2Body* body = b2GetBodyFullId( world, bodyId );
 	b2BodySim* bodySim = b2GetBodySim( world, body );
-	bodySim->isBullet = flag;
+
+	if ( flag )
+	{
+		bodySim->flags |= b2_isBullet;
+	}
+	else
+	{
+		bodySim->flags &= ~b2_isBullet;
+	}
 }
 
 bool b2Body_IsBullet( b2BodyId bodyId )
@@ -1786,7 +1865,7 @@ bool b2Body_IsBullet( b2BodyId bodyId )
 	b2World* world = b2GetWorld( bodyId.world0 );
 	b2Body* body = b2GetBodyFullId( world, bodyId );
 	b2BodySim* bodySim = b2GetBodySim( world, body );
-	return bodySim->isBullet;
+	return ( bodySim->flags & b2_isBullet ) != 0;
 }
 
 void b2Body_SetAllowFastRotation( b2BodyId bodyId, bool flag )
@@ -1799,7 +1878,9 @@ void b2Body_SetAllowFastRotation( b2BodyId bodyId, bool flag )
 
 	b2Body* body = b2GetBodyFullId( world, bodyId );
 	b2BodySim* bodySim = b2GetBodySim( world, body );
-	bodySim->allowFastRotation = flag;
+	// bodySim->allowFastRotation = flag;
+	bodySim->flags |= flag ? b2_allowFastRotation : 0;
+
 }
 
 bool b2Body_AllowFastRotation( b2BodyId bodyId )
@@ -1807,7 +1888,7 @@ bool b2Body_AllowFastRotation( b2BodyId bodyId )
 	b2World* world = b2GetWorld( bodyId.world0 );
 	b2Body* body = b2GetBodyFullId( world, bodyId );
 	b2BodySim* bodySim = b2GetBodySim( world, body );
-	return bodySim->allowFastRotation;
+	return ( bodySim->flags & b2_allowFastRotation ) != 0;
 }
 
 void b2Body_EnableContactEvents( b2BodyId bodyId, bool flag )

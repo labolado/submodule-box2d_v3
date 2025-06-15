@@ -153,5 +153,9 @@ b2DebugDraw b2DefaultDebugDraw( void )
 	draw.DrawPointFcn = b2EmptyDrawPoint;
 	draw.DrawStringFcn = b2EmptyDrawString;
 	draw.GetBodyTransformFcn = b2EmptyGetBodyTransform;
+	draw.drawingBounds.lowerBound = (b2Vec2){ -FLT_MAX, -FLT_MAX };
+	draw.drawingBounds.upperBound = (b2Vec2){ FLT_MAX, FLT_MAX };
+	draw.useDrawingBounds = true;
+
 	return draw;
 }

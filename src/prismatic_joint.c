@@ -4,9 +4,9 @@
 #include "body.h"
 #include "core.h"
 #include "joint.h"
+#include "physics_world.h"
 #include "solver.h"
 #include "solver_set.h"
-#include "physics_world.h"
 
 // needed for dll export
 #include "box2d/box2d.h"
@@ -196,7 +196,7 @@ float b2PrismaticJoint_GetSpeed( b2JointId jointId )
 	b2Vec2 rA = b2RotateVector( transformA.q, b2Sub( base->localFrameA.p, bodySimA->localCenter ) );
 	b2Vec2 rB = b2RotateVector( transformB.q, b2Sub( base->localFrameB.p, bodySimB->localCenter ) );
 
-	b2Vec2 d = b2Add(b2Sub(cB, cA), b2Sub( rB, rA ));
+	b2Vec2 d = b2Add( b2Sub( cB, cA ), b2Sub( rB, rA ) );
 
 	b2Vec2 vA = bodyStateA ? bodyStateA->linearVelocity : b2Vec2_zero;
 	b2Vec2 vB = bodyStateB ? bodyStateB->linearVelocity : b2Vec2_zero;
