@@ -1253,7 +1253,6 @@ void Draw::Create( Camera* camera )
 	m_debugDraw.GetBodyTransformFcn = GetBodyTransformFcn;
 	m_debugDraw.drawingBounds = bounds;
 
-	m_debugDraw.useDrawingBounds = false;
 	m_debugDraw.drawShapes = true;
 	m_debugDraw.drawJoints = true;
 	m_debugDraw.drawJointExtras = false;
