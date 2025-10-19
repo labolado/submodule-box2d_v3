@@ -148,7 +148,7 @@ b2DebugDraw b2DefaultDebugDraw( void )
 	draw.DrawCircleFcn = b2EmptyDrawCircle;
 	draw.DrawSolidCircleFcn = b2EmptyDrawSolidCircle;
 	draw.DrawSolidCapsuleFcn = b2EmptyDrawSolidCapsule;
-	draw.DrawSegmentFcn = b2EmptyDrawSegment;
+	draw.DrawLineFcn = b2EmptyDrawSegment;
 	draw.DrawTransformFcn = b2EmptyDrawTransform;
 	draw.DrawPointFcn = b2EmptyDrawPoint;
 	draw.DrawStringFcn = b2EmptyDrawString;
@@ -156,6 +156,7 @@ b2DebugDraw b2DefaultDebugDraw( void )
 	draw.drawingBounds.lowerBound = (b2Vec2){ -FLT_MAX, -FLT_MAX };
 	draw.drawingBounds.upperBound = (b2Vec2){ FLT_MAX, FLT_MAX };
 	draw.forceScale = 1.0f;
+	draw.jointScale = 1.0f;
 	draw.drawShapes = true;
 	
 	return draw;
