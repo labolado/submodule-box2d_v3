@@ -546,6 +546,9 @@ void b2UpdateBodyMassData( b2World* world, b2Body* body )
 {
 	b2BodySim* bodySim = b2GetBodySim( world, body );
 
+	// Mass is no longer dirty
+	body->flags &= ~b2_dirtyMass;
+
 	// Compute mass data from shapes. Each shape has its own density.
 	body->mass = 0.0f;
 	body->inertia = 0.0f;
@@ -596,6 +599,7 @@ void b2UpdateBodyMassData( b2World* world, b2Body* body )
 		if ( s->density == 0.0f )
 		{
 			masses[shapeIndex] = (b2MassData){ 0 };
+			shapeIndex += 1;
 			continue;
 		}
 
@@ -863,7 +867,7 @@ void b2Body_SetAngularVelocity( b2BodyId bodyId, float angularVelocity )
 	state->angularVelocity = angularVelocity;
 }
 
-void b2Body_SetTargetTransform( b2BodyId bodyId, b2Transform target, float timeStep )
+void b2Body_SetTargetTransform( b2BodyId bodyId, b2Transform target, float timeStep, bool wake )
 {
 	b2World* world = b2GetWorld( bodyId.world0 );
 	b2Body* body = b2GetBodyFullId( world, bodyId );
@@ -874,6 +878,11 @@ void b2Body_SetTargetTransform( b2BodyId bodyId, b2Transform target, float timeS
 	}
 
 	if ( body->type == b2_staticBody || timeStep <= 0.0f )
+	{
+		return;
+	}
+
+	if ( body->setIndex != b2_awakeSet && wake == false )
 	{
 		return;
 	}
