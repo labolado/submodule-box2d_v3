@@ -158,6 +158,6 @@ b2DebugDraw b2DefaultDebugDraw( void )
 	draw.forceScale = 1.0f;
 	draw.jointScale = 1.0f;
 	draw.drawShapes = true;
-	
+
 	return draw;
 }
