@@ -397,10 +397,7 @@ B2_INLINE bool b2IsNormalizedRot( b2Rot q )
 /// Get the inverse of a rotation
 B2_INLINE b2Rot b2InvertRot( b2Rot a )
 {
-	return B2_LITERAL( b2Rot ){
-		.c = a.c,
-		.s = -a.s,
-	};
+	return B2_LITERAL( b2Rot ){ a.c, -a.s };
 }
 
 /// Normalized linear interpolation
