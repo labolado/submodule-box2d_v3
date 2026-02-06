@@ -70,7 +70,11 @@ static inline uint32_t b2CTZ64( uint64_t block )
 
 static inline int b2PopCount64( uint64_t block )
 {
+	#ifdef _WIN64
 	return (int)__popcnt64( block );
+	#else
+	return (int)__popcnt( block );
+	#endif
 }
 #else
 
