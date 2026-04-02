@@ -434,6 +434,13 @@ typedef struct b2ShapeDef
 	/// Warning: if this is true, you MUST call b2Body_ApplyMassFromShapes before simulating the world.
 	bool updateBodyMass;
 
+	/// Setting this to FLT_MAX makes the plane as rigid as possible. Lower values can
+	/// make the plane collision soft. Usually in meters.
+	float pushLimit;
+
+	/// Indicates if b2ClipVector should clip against this plane. Should be false for soft collision.
+	bool clipVelocity;
+
 	/// Used internally to detect a valid definition. DO NOT SET.
 	int internalValue;
 } b2ShapeDef;

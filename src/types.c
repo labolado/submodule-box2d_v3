@@ -60,6 +60,8 @@ b2ShapeDef b2DefaultShapeDef( void )
 	def.filter = b2DefaultFilter();
 	def.updateBodyMass = true;
 	def.invokeContactCreation = true;
+	def.pushLimit = FLT_MAX;
+	def.clipVelocity = true;
 	def.internalValue = B2_SECRET_COOKIE;
 	return def;
 }

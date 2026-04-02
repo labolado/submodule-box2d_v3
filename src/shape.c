@@ -118,6 +118,8 @@ static b2Shape* b2CreateShapeInternal( b2World* world, b2Body* body, b2Transform
 	shape->aabb = (b2AABB){ b2Vec2_zero, b2Vec2_zero };
 	shape->fatAABB = (b2AABB){ b2Vec2_zero, b2Vec2_zero };
 	shape->generation += 1;
+	shape->pushLimit = def->pushLimit;
+	shape->clipVelocity = def->clipVelocity;
 
 	if ( body->setIndex != b2_disabledSet )
 	{
@@ -1275,6 +1277,47 @@ void b2Shape_SetFilter( b2ShapeId shapeId, b2Filter filter )
 
 	// note: this does not immediately update sensor overlaps. Instead sensor
 	// overlaps are updated the next time step
+}
+
+float b2Shape_GetPushLimit( b2ShapeId shapeId )
+{
+	b2World* world = b2GetWorld( shapeId.world0 );
+	b2Shape* shape = b2GetShape( world, shapeId );
+	return shape->pushLimit;
+}
+
+void b2Shape_SetPushLimit( b2ShapeId shapeId, float pushLimit )
+{
+	B2_ASSERT( b2IsValidFloat( pushLimit ) && pushLimit >= 0.0f );
+
+	b2World* world = b2GetWorld( shapeId.world0 );
+	B2_ASSERT( world->locked == false );
+	if ( world->locked )
+	{
+		return;
+	}
+
+	b2Shape* shape = b2GetShape( world, shapeId );
+	shape->pushLimit = pushLimit;
+}
+
+void b2Shape_SetClipVelocity( b2ShapeId shapeId, bool flag )
+{
+	b2World* world = b2GetWorldLocked( shapeId.world0 );
+	if ( world == NULL )
+	{
+		return;
+	}
+
+	b2Shape* shape = b2GetShape( world, shapeId );
+	shape->clipVelocity = flag;
+}
+
+bool b2Shape_GetClipVelocity( b2ShapeId shapeId )
+{
+	b2World* world = b2GetWorld( shapeId.world0 );
+	b2Shape* shape = b2GetShape( world, shapeId );
+	return shape->clipVelocity;
 }
 
 void b2Shape_EnableSensorEvents( b2ShapeId shapeId, bool flag )

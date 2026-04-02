@@ -598,6 +598,18 @@ B2_API b2Filter b2Shape_GetFilter( b2ShapeId shapeId );
 /// @see b2ShapeDef::filter
 B2_API void b2Shape_SetFilter( b2ShapeId shapeId, b2Filter filter );
 
+/// Get the pushLimit on a shape
+B2_API float b2Shape_GetPushLimit( b2ShapeId shapeId );
+
+/// Set the pushLimit on a shape
+B2_API void b2Shape_SetPushLimit( b2ShapeId shapeId, float pushLimit );
+
+/// Returns true if b2ClipVector should clip against this plane.
+B2_API bool b2Shape_GetClipVelocity( b2ShapeId shapeId );
+
+/// Set if b2ClipVector should clip against this plane.
+B2_API void b2Shape_SetClipVelocity( b2ShapeId shapeId, bool flag );
+
 /// Enable sensor events for this shape.
 /// @see b2ShapeDef::enableSensorEvents
 B2_API void b2Shape_EnableSensorEvents( b2ShapeId shapeId, bool flag );
