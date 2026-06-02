@@ -96,7 +96,7 @@ static int BuiltInSchedulerTest( void )
 		for ( int i = 0; i < stepLimit; ++i )
 		{
 			int subStepCount = 4;
-			b2World_Step( worldId, timeStep, subStepCount );
+			b2World_Step( worldId, timeStep, subStepCount, NULL, NULL );
 
 			bool done = UpdateFallingHinges( worldId, &data );
 			if ( done )
