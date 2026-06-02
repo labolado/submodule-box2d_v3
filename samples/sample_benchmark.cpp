@@ -301,16 +301,8 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		Sample::UpdateGui();
-
-		float fontSize = ImGui::GetFontSize();
-		float height = 6.0f * fontSize;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 15.0f * fontSize, height ) );
-		ImGui::Begin( "Benchmark: Barrel", nullptr, ImGuiWindowFlags_NoResize );
-
 		bool changed = false;
 		const char* shapeTypes[] = { "Circle", "Capsule", "Mix", "Compound", "Human" };
 
@@ -325,7 +317,7 @@ public:
 			CreateScene();
 		}
 
-		ImGui::End();
+		return true;
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -494,7 +486,7 @@ public:
 		Sample::Step();
 
 		b2ContactEvents events = b2World_GetContactEvents( m_worldId );
-		DrawTextLine( "hits = %d", events.hitCount );
+		DrawScreenTextLine( "hits = %d", events.hitCount );
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -617,16 +609,9 @@ public:
 		m_bodyIndex = 0;
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		Sample::UpdateGui();
-
-		float fontSize = ImGui::GetFontSize();
-		float height = 8.5f * fontSize;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 15.5f * fontSize, height ) );
-		ImGui::Begin( "Benchmark: Many Tumblers", nullptr, ImGuiWindowFlags_NoResize );
-		ImGui::PushItemWidth( 8.0f * fontSize );
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
 		bool changed = false;
 		changed = changed || ImGui::SliderInt( "Row Count", &m_rowCount, 1, 32 );
@@ -647,7 +632,8 @@ public:
 		}
 
 		ImGui::PopItemWidth();
-		ImGui::End();
+
+		return true;
 	}
 
 	void Step() override
@@ -859,11 +845,11 @@ public:
 			CreateScene();
 		}
 
-		DrawTextLine( "total: create = %g ms, destroy = %g ms", m_createTime, m_destroyTime );
+		DrawScreenTextLine( "total: create = %g ms, destroy = %g ms", m_createTime, m_destroyTime );
 
 		float createPerBody = 1000.0f * m_createTime / m_iterations / m_bodyCount;
 		float destroyPerBody = 1000.0f * m_destroyTime / m_iterations / m_bodyCount;
-		DrawTextLine( "body: create = %g us, destroy = %g us", createPerBody, destroyPerBody );
+		DrawScreenTextLine( "body: create = %g us, destroy = %g us", createPerBody, destroyPerBody );
 
 		Sample::Step();
 	}
@@ -978,8 +964,8 @@ public:
 			m_sleepTotal += b2GetMillisecondsAndReset( &ticks );
 
 			int count = m_stepCount - 20;
-			DrawTextLine( "wake ave = %g ms", m_wakeTotal / count );
-			DrawTextLine( "sleep ave = %g ms", m_sleepTotal / count );
+			DrawScreenTextLine( "wake ave = %g ms", m_wakeTotal / count );
+			DrawScreenTextLine( "sleep ave = %g ms", m_sleepTotal / count );
 		}
 
 		Sample::Step();
@@ -1326,16 +1312,9 @@ public:
 		m_minTime = 1e6f;
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 17.0f * fontSize;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 13.0f * fontSize, height ) );
-
-		ImGui::Begin( "Cast", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize );
-
-		ImGui::PushItemWidth( 7.5f * fontSize );
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
 		bool changed = false;
 
@@ -1381,6 +1360,8 @@ public:
 			changed = true;
 		}
 
+		ImGui::PopItemWidth();
+
 		if ( ImGui::Checkbox( "top down", &m_topDown ) )
 		{
 			changed = true;
@@ -1391,13 +1372,12 @@ public:
 			m_drawIndex = ( m_drawIndex + 1 ) % m_origins.size();
 		}
 
-		ImGui::PopItemWidth();
-		ImGui::End();
-
 		if ( changed )
 		{
 			BuildScene();
 		}
+
+		return true;
 	}
 
 	struct CastResult
@@ -1565,13 +1545,13 @@ public:
 			}
 		}
 
-		DrawTextLine( "build time ms = %g", m_buildTime );
-		DrawTextLine( "hit count = %d, node visits = %d, leaf visits = %d", hitCount, nodeVisits, leafVisits );
-		DrawTextLine( "total ms = %.3f", ms );
-		DrawTextLine( "min total ms = %.3f", m_minTime );
+		DrawScreenTextLine( "build time ms = %g", m_buildTime );
+		DrawScreenTextLine( "hit count = %d, node visits = %d, leaf visits = %d", hitCount, nodeVisits, leafVisits );
+		DrawScreenTextLine( "total ms = %.3f", ms );
+		DrawScreenTextLine( "min total ms = %.3f", m_minTime );
 
 		float aveRayCost = 1000.0f * m_minTime / float( sampleCount );
-		DrawTextLine( "average us = %.2f", aveRayCost );
+		DrawScreenTextLine( "average us = %.2f", aveRayCost );
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -1628,7 +1608,7 @@ public:
 			m_context->pause = true;
 		}
 
-		// DrawTextLine( "toi calls, hits = %d, %d", b2_toiCalls, b2_toiHitCount );
+		// DrawScreenTextLine( "toi calls, hits = %d, %d", b2_toiCalls, b2_toiHitCount );
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -1743,17 +1723,13 @@ public:
 		free( m_outputs );
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 5.0f * fontSize;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 17.0f * fontSize, height ) );
-		ImGui::Begin( "Benchmark: Shape Distance", nullptr, ImGuiWindowFlags_NoResize );
-
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 		ImGui::SliderInt( "draw index", &m_drawIndex, 0, m_count - 1 );
+		ImGui::PopItemWidth();
 
-		ImGui::End();
+		return true;
 	}
 
 	void Step() override
@@ -1779,9 +1755,9 @@ public:
 			float ms = b2GetMilliseconds( start );
 			m_minMilliseconds = b2MinFloat( m_minMilliseconds, ms );
 
-			DrawTextLine( "count = %d", m_count );
-			DrawTextLine( "min ms = %g, ave us = %g", m_minMilliseconds, 1000.0f * m_minMilliseconds / float( m_count ) );
-			DrawTextLine( "average iterations = %g", totalIterations / float( m_count ) );
+			DrawScreenTextLine( "count = %d", m_count );
+			DrawScreenTextLine( "min ms = %g, ave us = %g", m_minMilliseconds, 1000.0f * m_minMilliseconds / float( m_count ) );
+			DrawScreenTextLine( "average iterations = %g", totalIterations / float( m_count ) );
 		}
 
 		b2Transform xfA = m_transformAs[m_drawIndex];
@@ -1793,7 +1769,7 @@ public:
 		DrawPoint( m_context->draw, output.pointA, 10.0f, b2_colorWhite );
 		DrawPoint( m_context->draw, output.pointB, 10.0f, b2_colorWhite );
 		DrawLine( m_context->draw, output.pointA, output.pointA + 0.5f * output.normal, b2_colorYellow );
-		DrawTextLine( "distance = %g", output.distance );
+		DrawScreenTextLine( "distance = %g", output.distance );
 
 		Sample::Step();
 	}
@@ -1993,8 +1969,8 @@ public:
 
 		m_maxBeginCount = b2MaxInt( events.beginCount, m_maxBeginCount );
 		m_maxEndCount = b2MaxInt( events.endCount, m_maxEndCount );
-		DrawTextLine( "max begin touch events = %d", m_maxBeginCount );
-		DrawTextLine( "max end touch events = %d", m_maxEndCount );
+		DrawScreenTextLine( "max begin touch events = %d", m_maxBeginCount );
+		DrawScreenTextLine( "max end touch events = %d", m_maxEndCount );
 	}
 
 	bool Filter( b2ShapeId idA, b2ShapeId idB )

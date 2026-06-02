@@ -122,6 +122,92 @@ static void SortSamples()
 	qsort( g_sampleEntries, g_sampleCount, sizeof( SampleEntry ), CompareSamples );
 }
 
+static void ApplyUIStyle( void )
+{
+	ImGuiStyle& style = ImGui::GetStyle();
+
+	// Metrics: containers round at 4px, controls at 3px - one deliberate
+	// system instead of the stock mix. Padding gives rows room to breathe.
+	style.WindowPadding = ImVec2( 10.0f, 10.0f );
+	style.FramePadding = ImVec2( 8.0f, 4.0f );
+	style.CellPadding = ImVec2( 6.0f, 4.0f );
+	style.ItemSpacing = ImVec2( 8.0f, 7.0f );
+	style.ItemInnerSpacing = ImVec2( 7.0f, 4.0f );
+	style.IndentSpacing = 18.0f;
+	style.ScrollbarSize = 12.0f;
+	style.GrabMinSize = 10.0f;
+
+	style.WindowBorderSize = 1.0f;
+	style.FrameBorderSize = 0.0f;
+	style.PopupBorderSize = 1.0f;
+	style.TabBorderSize = 0.0f;
+	style.SeparatorTextBorderSize = 1.0f;
+
+	style.WindowRounding = 4.0f;
+	style.ChildRounding = 4.0f;
+	style.PopupRounding = 4.0f;
+	style.FrameRounding = 3.0f;
+	style.GrabRounding = 3.0f;
+	style.ScrollbarRounding = 3.0f;
+	style.TabRounding = 3.0f;
+
+	style.WindowTitleAlign = ImVec2( 0.0f, 0.5f );
+
+	// Palette: neutral charcoal surfaces, one steel-blue accent at three
+	// brightnesses. Replaces stock ImGui's saturated cornflower blue.
+	const ImVec4 accent = ImVec4( 0.28f, 0.48f, 0.66f, 1.00f );
+	const ImVec4 accentHi = ImVec4( 0.38f, 0.60f, 0.80f, 1.00f );
+	const ImVec4 accentLo = ImVec4( 0.22f, 0.36f, 0.50f, 1.00f );
+
+	ImVec4* c = style.Colors;
+	c[ImGuiCol_Text] = ImVec4( 0.90f, 0.91f, 0.93f, 1.00f );
+	c[ImGuiCol_TextDisabled] = ImVec4( 0.49f, 0.51f, 0.55f, 1.00f );
+	c[ImGuiCol_WindowBg] = ImVec4( 0.110f, 0.115f, 0.125f, 0.97f );
+	c[ImGuiCol_ChildBg] = ImVec4( 0.00f, 0.00f, 0.00f, 0.00f );
+	c[ImGuiCol_PopupBg] = ImVec4( 0.100f, 0.105f, 0.115f, 0.98f );
+	c[ImGuiCol_Border] = ImVec4( 0.00f, 0.00f, 0.00f, 0.45f );
+	c[ImGuiCol_BorderShadow] = ImVec4( 0.00f, 0.00f, 0.00f, 0.00f );
+	c[ImGuiCol_FrameBg] = ImVec4( 0.18f, 0.19f, 0.21f, 1.00f );
+	c[ImGuiCol_FrameBgHovered] = ImVec4( 0.24f, 0.26f, 0.29f, 1.00f );
+	c[ImGuiCol_FrameBgActive] = ImVec4( 0.29f, 0.32f, 0.36f, 1.00f );
+	c[ImGuiCol_TitleBg] = ImVec4( 0.090f, 0.095f, 0.105f, 1.00f );
+	c[ImGuiCol_TitleBgActive] = ImVec4( 0.14f, 0.16f, 0.19f, 1.00f );
+	c[ImGuiCol_TitleBgCollapsed] = ImVec4( 0.090f, 0.095f, 0.105f, 0.75f );
+	c[ImGuiCol_MenuBarBg] = ImVec4( 0.13f, 0.14f, 0.16f, 1.00f );
+	c[ImGuiCol_ScrollbarBg] = ImVec4( 0.06f, 0.06f, 0.07f, 0.55f );
+	c[ImGuiCol_ScrollbarGrab] = ImVec4( 0.28f, 0.30f, 0.33f, 1.00f );
+	c[ImGuiCol_ScrollbarGrabHovered] = ImVec4( 0.36f, 0.39f, 0.43f, 1.00f );
+	c[ImGuiCol_ScrollbarGrabActive] = accent;
+	c[ImGuiCol_CheckMark] = accentHi;
+	c[ImGuiCol_SliderGrab] = accent;
+	c[ImGuiCol_SliderGrabActive] = accentHi;
+	c[ImGuiCol_Button] = ImVec4( 0.22f, 0.24f, 0.27f, 1.00f );
+	c[ImGuiCol_ButtonHovered] = accentLo;
+	c[ImGuiCol_ButtonActive] = accent;
+	c[ImGuiCol_Header] = ImVec4( 0.19f, 0.21f, 0.24f, 1.00f );
+	c[ImGuiCol_HeaderHovered] = accentLo;
+	c[ImGuiCol_HeaderActive] = accent;
+	c[ImGuiCol_Separator] = ImVec4( 1.00f, 1.00f, 1.00f, 0.09f );
+	c[ImGuiCol_SeparatorHovered] = accentLo;
+	c[ImGuiCol_SeparatorActive] = accent;
+	c[ImGuiCol_ResizeGrip] = ImVec4( 1.00f, 1.00f, 1.00f, 0.06f );
+	c[ImGuiCol_ResizeGripHovered] = accentLo;
+	c[ImGuiCol_ResizeGripActive] = accent;
+	c[ImGuiCol_Tab] = ImVec4( 0.15f, 0.16f, 0.18f, 1.00f );
+	c[ImGuiCol_TabHovered] = accentLo;
+	c[ImGuiCol_TabSelected] = accent;
+	c[ImGuiCol_TabSelectedOverline] = accentHi;
+	c[ImGuiCol_TabDimmed] = ImVec4( 0.12f, 0.13f, 0.14f, 1.00f );
+	c[ImGuiCol_TabDimmedSelected] = accentLo;
+	c[ImGuiCol_TextSelectedBg] = ImVec4( accent.x, accent.y, accent.z, 0.40f );
+	c[ImGuiCol_DragDropTarget] = accentHi;
+	c[ImGuiCol_NavCursor] = accentHi;
+	c[ImGuiCol_PlotLines] = ImVec4( 0.70f, 0.72f, 0.75f, 1.00f );
+	c[ImGuiCol_PlotLinesHovered] = accentHi;
+	c[ImGuiCol_PlotHistogram] = accent;
+	c[ImGuiCol_PlotHistogramHovered] = accentHi;
+}
+
 static void CreateUI( GLFWwindow* window, const char* glslVersion )
 {
 	IMGUI_CHECKVERSION();
@@ -142,33 +228,20 @@ static void CreateUI( GLFWwindow* window, const char* glslVersion )
 		assert( false );
 	}
 
-	ImGui::GetStyle().ScaleAllSizes( s_context.uiScale );
+	ImGuiIO& io = ImGui::GetIO();
+	ApplyUIStyle();
 
-	const char* fontPath = "samples/data/droid_sans.ttf";
-	FILE* file = fopen( fontPath, "rb" );
+	ImGuiStyle& style = ImGui::GetStyle();
+	style.ScaleAllSizes( s_context.uiScale );
+	style.FontSizeBase = floorf( 13.0f * s_context.uiScale );
 
-	if ( file != nullptr )
+	if ( s_context.uiScale == 1.0f && s_framebufferScale == 1.0f )
 	{
-		ImFontConfig fontConfig;
-		// This brightens the font, improving readability when it is small.
-		fontConfig.RasterizerMultiply = s_context.uiScale * s_framebufferScale;
-
-		float regularSize = floorf( 13.0f * s_context.uiScale );
-		float mediumSize = floorf( 40.0f * s_context.uiScale );
-		float largeSize = floorf( 64.0f * s_context.uiScale );
-
-		ImGuiIO& io = ImGui::GetIO();
-		//s_context.regularFont = io.Fonts->AddFontFromFileTTF( fontPath, regularSize );
-		s_context.regularFont = io.Fonts->AddFontFromFileTTF( fontPath, regularSize, &fontConfig );
-		s_context.mediumFont = io.Fonts->AddFontFromFileTTF( fontPath, mediumSize, &fontConfig );
-		s_context.largeFont = io.Fonts->AddFontFromFileTTF( fontPath, largeSize, &fontConfig );
-
-		ImGui::GetIO().FontDefault = s_context.regularFont;
+		io.Fonts->AddFontDefaultBitmap();
 	}
 	else
 	{
-		printf( "\n\nERROR: the Box2D samples working directory must be the top level Box2D directory (same as README.md)\n\n" );
-		exit( EXIT_FAILURE );
+		io.Fonts->AddFontDefaultVector();
 	}
 }
 
@@ -205,54 +278,20 @@ static void KeyCallback( GLFWwindow* window, int key, int scancode, int action, 
 
 			case GLFW_KEY_LEFT:
 				// Pan left
-				if ( mods == GLFW_MOD_CONTROL )
-				{
-					b2Vec2 newOrigin = { 2.0f, 0.0f };
-					s_context.sample->ShiftOrigin( newOrigin );
-				}
-				else
-				{
-					s_context.camera.center.x -= 0.5f;
-				}
+				s_context.camera.center.x -= 0.5f;
 				break;
 
 			case GLFW_KEY_RIGHT:
 				// Pan right
-				if ( mods == GLFW_MOD_CONTROL )
-				{
-					b2Vec2 newOrigin = { -2.0f, 0.0f };
-					s_context.sample->ShiftOrigin( newOrigin );
-				}
-				else
-				{
-					s_context.camera.center.x += 0.5f;
-				}
+				s_context.camera.center.x += 0.5f;
 				break;
 
 			case GLFW_KEY_DOWN:
-				// Pan down
-				if ( mods == GLFW_MOD_CONTROL )
-				{
-					b2Vec2 newOrigin = { 0.0f, 2.0f };
-					s_context.sample->ShiftOrigin( newOrigin );
-				}
-				else
-				{
-					s_context.camera.center.y -= 0.5f;
-				}
+				s_context.camera.center.y -= 0.5f;
 				break;
 
 			case GLFW_KEY_UP:
-				// Pan up
-				if ( mods == GLFW_MOD_CONTROL )
-				{
-					b2Vec2 newOrigin = { 0.0f, -2.0f };
-					s_context.sample->ShiftOrigin( newOrigin );
-				}
-				else
-				{
-					s_context.camera.center.y += 0.5f;
-				}
+				s_context.camera.center.y += 0.5f;
 				break;
 
 			case GLFW_KEY_HOME:
@@ -264,7 +303,15 @@ static void KeyCallback( GLFWwindow* window, int key, int scancode, int action, 
 				break;
 
 			case GLFW_KEY_O:
-				s_context.singleStep = true;
+				if ( mods == GLFW_MOD_CONTROL )
+				{
+					s_context.showUI = true;
+					s_context.openSamplePicker = true;
+				}
+				else
+				{
+					s_context.singleStep = true;
+				}
 				break;
 
 			case GLFW_KEY_P:
@@ -297,6 +344,10 @@ static void KeyCallback( GLFWwindow* window, int key, int scancode, int action, 
 
 			case GLFW_KEY_TAB:
 				s_context.showUI = !s_context.showUI;
+				break;
+
+			case GLFW_KEY_M:
+				s_context.showMetrics = !s_context.showMetrics;
 				break;
 
 			default:
@@ -451,12 +502,15 @@ int main( int, char** )
 
 	if ( GLFWmonitor* primaryMonitor = glfwGetPrimaryMonitor() )
 	{
+		float contentScale = 1.0f;
+		glfwGetMonitorContentScale( primaryMonitor, &contentScale, &contentScale );
+
 #ifdef __APPLE__
-		glfwGetMonitorContentScale( primaryMonitor, &s_framebufferScale, &s_framebufferScale );
+		s_context.uiScale = 1.0f;
+		s_framebufferScale = contentScale;
 #else
-		float uiScale = 1.0f;
-		glfwGetMonitorContentScale( primaryMonitor, &uiScale, &uiScale );
-		s_context.uiScale = uiScale;
+		s_context.uiScale = contentScale;
+		s_framebufferScale = 1.0f;
 #endif
 	}
 
@@ -538,18 +592,21 @@ int main( int, char** )
 
 		// s_context.draw.DrawBackground();
 
-		// double cursorPosX = 0, cursorPosY = 0;
-		// glfwGetCursorPos( s_context.window, &cursorPosX, &cursorPosY );
-		// ImGui_ImplGlfw_CursorPosCallback( s_context.window, cursorPosX / s_windowScale, cursorPosY / s_windowScale );
 		ImGui_ImplOpenGL3_NewFrame();
 		ImGui_ImplGlfw_NewFrame();
-		// ImGui_ImplGlfw_CursorPosCallback( s_context.window, cursorPosX / s_windowScale, cursorPosY / s_windowScale );
 
 		ImGuiIO& io = ImGui::GetIO();
 		io.DisplaySize.x = s_context.camera.width;
 		io.DisplaySize.y = s_context.camera.height;
-		io.DisplayFramebufferScale.x = bufferWidth / s_context.camera.width;
-		io.DisplayFramebufferScale.y = bufferHeight / s_context.camera.height;
+
+		// These can be zero if the window is minimized
+		if ( s_context.camera.width > 0.0f && s_context.camera.height > 0.0f )
+		{
+			// Framebuffer/window ratio: 1 on Windows/Linux, 2 on a Retina display. Drives
+			// both UI magnification and font rasterizer density.
+			io.DisplayFramebufferScale.x = bufferWidth / s_context.camera.width;
+			io.DisplayFramebufferScale.y = bufferHeight / s_context.camera.height;
+		}
 
 		ImGui::NewFrame();
 
@@ -568,21 +625,13 @@ int main( int, char** )
 		}
 
 		s_context.sample->ResetText();
-
-		const SampleEntry& entry = g_sampleEntries[s_context.sampleIndex];
-		s_context.sample->DrawColoredTextLine( b2_colorYellow, "%s : %s", entry.category, entry.name );
-
 		s_context.sample->Step();
-
-		DrawScreenString( s_context.draw, 5.0f, s_context.camera.height - 10.0f, b2_colorSeaGreen,
-						  "%.1f ms - step %d - camera (%g, %g, %g)", 1000.0f * frameTime, s_context.sample->m_stepCount,
-						  s_context.camera.center.x, s_context.camera.center.y, s_context.camera.zoom );
 
 		FlushDraw( s_context.draw, &s_context.camera );
 
-		UpdateSampleUI( &s_context );
+		DrawUI( &s_context, frameTime );
 
-		// ImGui::ShowDemoWindow();
+		//ImGui::ShowDemoWindow();
 
 		ImGui::Render();
 		ImGui_ImplOpenGL3_RenderDrawData( ImGui::GetDrawData() );

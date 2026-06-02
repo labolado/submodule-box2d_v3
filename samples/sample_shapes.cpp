@@ -164,14 +164,9 @@ public:
 		m_stepCount = 0;
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 155.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 240.0f, height ) );
-
-		ImGui::Begin( "Chain Shape", nullptr, ImGuiWindowFlags_NoResize );
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
 		const char* shapeTypes[] = { "Circle", "Capsule", "Box" };
 		int shapeType = int( m_shapeType );
@@ -192,12 +187,14 @@ public:
 			b2Shape_SetSurfaceMaterial( m_shapeId, &m_material );
 		}
 
+		ImGui::PopItemWidth();
+
 		if ( ImGui::Button( "Launch" ) )
 		{
 			Launch();
 		}
 
-		ImGui::End();
+		return true;
 	}
 
 	void Step() override
@@ -358,14 +355,9 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 130.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 240.0f, height ) );
-
-		ImGui::Begin( "Chain Segment Shape", nullptr, ImGuiWindowFlags_NoResize );
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
 		const char* shapeTypes[] = { "Circle", "Capsule", "Box" };
 		int shapeType = int( m_shapeType );
@@ -374,6 +366,8 @@ public:
 			m_shapeType = ShapeType( shapeType );
 			Launch();
 		}
+
+		ImGui::PopItemWidth();
 
 		if ( ImGui::Button( "Launch" ) )
 		{
@@ -385,7 +379,7 @@ public:
 			Mutate();
 		}
 
-		ImGui::End();
+		return true;
 	}
 
 	void Step() override
@@ -578,15 +572,8 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 100.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 180.0f, height ) );
-
-		ImGui::Begin( "Compound Shapes", nullptr, ImGuiWindowFlags_NoResize );
-
 		if ( ImGui::Button( "Intrude" ) )
 		{
 			Spawn();
@@ -594,7 +581,7 @@ public:
 
 		ImGui::Checkbox( "Body AABBs", &m_drawBodyAABBs );
 
-		ImGui::End();
+		return true;
 	}
 
 	void Step() override
@@ -696,15 +683,8 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 240.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 240.0f, height ) );
-
-		ImGui::Begin( "Shape Filter", nullptr, ImGuiWindowFlags_NoResize );
-
 		ImGui::Text( "Player 1 Collides With" );
 		{
 			b2Filter filter1 = b2Shape_GetFilter( m_shape1Id );
@@ -737,6 +717,8 @@ public:
 
 				b2Shape_SetFilter( m_shape1Id, filter1 );
 			}
+
+			return true;
 		}
 
 		ImGui::Separator();
@@ -810,8 +792,6 @@ public:
 				b2Shape_SetFilter( m_shape3Id, filter3 );
 			}
 		}
-
-		ImGui::End();
 	}
 
 	void Step() override
@@ -895,7 +875,7 @@ public:
 
 	void Step() override
 	{
-		DrawTextLine( "Custom filter disables collision between odd and even shapes" );
+		DrawScreenTextLine( "Custom filter disables collision between odd and even shapes" );
 
 		Sample::Step();
 
@@ -1021,14 +1001,9 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 100.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 240.0f, height ) );
-
-		ImGui::Begin( "Restitution", nullptr, ImGuiWindowFlags_NoResize );
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
 		bool changed = false;
 		const char* shapeTypes[] = { "Circle", "Box" };
@@ -1037,6 +1012,8 @@ public:
 		changed = changed || ImGui::Combo( "Shape", &shapeType, shapeTypes, IM_ARRAYSIZE( shapeTypes ) );
 		m_shapeType = ShapeType( shapeType );
 
+		ImGui::PopItemWidth();
+
 		changed = changed || ImGui::Button( "Reset" );
 
 		if ( changed )
@@ -1044,7 +1021,7 @@ public:
 			CreateBodies();
 		}
 
-		ImGui::End();
+		return true;
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -1369,15 +1346,9 @@ public:
 		m_bodyIds.clear();
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 80.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 260.0f, height ) );
-
-		ImGui::Begin( "Ball Parameters", nullptr, ImGuiWindowFlags_NoResize );
-		ImGui::PushItemWidth( 140.0f );
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
 		if ( ImGui::SliderFloat( "Friction", &m_friction, 0.0f, 2.0f, "%.2f" ) )
 		{
@@ -1389,7 +1360,9 @@ public:
 			Reset();
 		}
 
-		ImGui::End();
+		ImGui::PopItemWidth();
+
+		return true;
 	}
 
 	void Step() override
@@ -1494,15 +1467,8 @@ public:
 		b2Body_ApplyMassFromShapes( bodyId );
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 230.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 200.0f, height ) );
-
-		ImGui::Begin( "Modify Geometry", nullptr, ImGuiWindowFlags_NoResize );
-
 		if ( ImGui::RadioButton( "Circle", m_shapeType == b2_circleShape ) )
 		{
 			m_shapeType = b2_circleShape;
@@ -1527,10 +1493,12 @@ public:
 			UpdateShape();
 		}
 
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 		if ( ImGui::SliderFloat( "Scale", &m_scale, 0.1f, 10.0f, "%.2f" ) )
 		{
 			UpdateShape();
 		}
+		ImGui::PopItemWidth();
 
 		b2BodyId bodyId = b2Shape_GetBody( m_shapeId );
 		b2BodyType bodyType = b2Body_GetType( bodyId );
@@ -1550,7 +1518,7 @@ public:
 			b2Body_SetType( bodyId, b2_dynamicBody );
 		}
 
-		ImGui::End();
+		return true;
 	}
 
 	void Step() override
@@ -1648,7 +1616,7 @@ public:
 	{
 		Sample::Step();
 
-		DrawTextLine( "This shows how to link together two chain shapes" );
+		DrawScreenTextLine( "This shows how to link together two chain shapes" );
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -1905,15 +1873,8 @@ public:
 		m_impulse = 10.0f;
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 160.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 240.0f, height ) );
-
-		ImGui::Begin( "Explosion", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize );
-
 		if ( ImGui::Button( "Explode" ) )
 		{
 			b2ExplosionDef def = b2DefaultExplosionDef();
@@ -1924,11 +1885,13 @@ public:
 			b2World_Explode( m_worldId, &def );
 		}
 
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 		ImGui::SliderFloat( "radius", &m_radius, 0.0f, 20.0f, "%.1f" );
 		ImGui::SliderFloat( "falloff", &m_falloff, 0.0f, 20.0f, "%.1f" );
 		ImGui::SliderFloat( "impulse", &m_impulse, -20.0f, 20.0f, "%.1f" );
+		ImGui::PopItemWidth();
 
-		ImGui::End();
+		return true;
 	}
 
 	void Step() override
@@ -1949,7 +1912,7 @@ public:
 
 		Sample::Step();
 
-		DrawTextLine( "reference angle = %g", m_referenceAngle );
+		DrawScreenTextLine( "reference angle = %g", m_referenceAngle );
 
 		DrawCircle( m_draw, b2Vec2_zero, m_radius + m_falloff, b2_colorBox2DBlue );
 		DrawCircle( m_draw, b2Vec2_zero, m_radius, b2_colorBox2DYellow );
@@ -2187,15 +2150,9 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 15.0f * fontSize;
-		ImGui::SetNextWindowPos( { 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize }, ImGuiCond_Once );
-		ImGui::SetNextWindowSize( { 24.0f * fontSize, height } );
-
-		ImGui::Begin( "Wind", nullptr, ImGuiWindowFlags_NoResize );
-		ImGui::PushItemWidth( 18.0f * fontSize );
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
 		const char* shapeTypes[] = { "Circle", "Capsule", "Box" };
 		int shapeType = int( m_shapeType );
@@ -2214,7 +2171,8 @@ public:
 		}
 
 		ImGui::PopItemWidth();
-		ImGui::End();
+
+		return true;
 	}
 
 	void Step() override

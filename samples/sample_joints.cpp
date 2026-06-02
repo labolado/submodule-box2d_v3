@@ -115,15 +115,9 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 20.0f * fontSize;
-		ImGui::SetNextWindowPos( { 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize }, ImGuiCond_Once );
-		ImGui::SetNextWindowSize( { 18.0f * fontSize, height } );
-
-		ImGui::Begin( "Distance Joint", nullptr, ImGuiWindowFlags_NoResize );
-		ImGui::PushItemWidth( 10.0f * fontSize );
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
 		if ( ImGui::SliderFloat( "Length", &m_length, 0.1f, 4.0f, "%3.1f" ) )
 		{
@@ -219,7 +213,8 @@ public:
 		}
 
 		ImGui::PopItemWidth();
-		ImGui::End();
+
+		return true;
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -335,14 +330,9 @@ public:
 		m_time = 0.0f;
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 180.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 240.0f, height ) );
-
-		ImGui::Begin( "Motor Joint", nullptr, ImGuiWindowFlags_NoResize );
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
 		if ( ImGui::SliderFloat( "Speed", &m_speed, -5.0f, 5.0f, "%.0f" ) )
 		{
@@ -358,12 +348,14 @@ public:
 			b2MotorJoint_SetMaxSpringTorque( m_jointId, m_maxTorque );
 		}
 
+		ImGui::PopItemWidth();
+
 		if ( ImGui::Button( "Apply Impulse" ) )
 		{
 			b2Body_ApplyLinearImpulseToCenter( m_bodyId, { 100.0f, 0.0f }, true );
 		}
 
-		ImGui::End();
+		return true;
 	}
 
 	void Step() override
@@ -400,7 +392,7 @@ public:
 		b2Vec2 force = b2Joint_GetConstraintForce( m_jointId );
 		float torque = b2Joint_GetConstraintTorque( m_jointId );
 
-		DrawTextLine( "force = {%3.f, %3.f}, torque = %3.f", force.x, force.y, torque );
+		DrawScreenTextLine( "force = {%3.f, %3.f}, torque = %3.f", force.x, force.y, torque );
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -506,15 +498,8 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 180.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 240.0f, height ) );
-
-		ImGui::Begin( "Top Down Friction", nullptr, ImGuiWindowFlags_NoResize );
-
 		if ( ImGui::Button( "Explode" ) )
 		{
 			b2ExplosionDef def = b2DefaultExplosionDef();
@@ -527,7 +512,7 @@ public:
 			DrawCircle( m_draw, def.position, 10.0f, b2_colorWhite );
 		}
 
-		ImGui::End();
+		return true;
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -702,15 +687,8 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 8.0f * fontSize;
-		ImGui::SetNextWindowPos( { 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize }, ImGuiCond_Once );
-		ImGui::SetNextWindowSize( { 8.0f * fontSize, height } );
-
-		ImGui::Begin( "Revolute Joint", nullptr, ImGuiWindowFlags_NoResize );
-
 		if ( ImGui::Checkbox( "Limit", &m_enableLimit ) )
 		{
 			b2RevoluteJoint_EnableLimit( m_jointId1, m_enableLimit );
@@ -725,6 +703,7 @@ public:
 
 		if ( m_enableMotor )
 		{
+			ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 			if ( ImGui::SliderFloat( "Max Torque", &m_motorTorque, 0.0f, 5000.0f, "%.0f" ) )
 			{
 				b2RevoluteJoint_SetMaxMotorTorque( m_jointId1, m_motorTorque );
@@ -736,6 +715,7 @@ public:
 				b2RevoluteJoint_SetMotorSpeed( m_jointId1, m_motorSpeed );
 				b2Joint_WakeBodies( m_jointId1 );
 			}
+			ImGui::PopItemWidth();
 		}
 
 		if ( ImGui::Checkbox( "Spring", &m_enableSpring ) )
@@ -746,6 +726,7 @@ public:
 
 		if ( m_enableSpring )
 		{
+			ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 			if ( ImGui::SliderFloat( "Hertz", &m_hertz, 0.0f, 30.0f, "%.1f" ) )
 			{
 				b2RevoluteJoint_SetSpringHertz( m_jointId1, m_hertz );
@@ -763,9 +744,10 @@ public:
 				b2RevoluteJoint_SetTargetAngle( m_jointId1, B2_PI * m_targetDegrees / 180.0f );
 				b2Joint_WakeBodies( m_jointId1 );
 			}
+			ImGui::PopItemWidth();
 		}
 
-		ImGui::End();
+		return true;
 	}
 
 	void Step() override
@@ -773,13 +755,13 @@ public:
 		Sample::Step();
 
 		float angle1 = b2RevoluteJoint_GetAngle( m_jointId1 );
-		DrawTextLine( "Angle (Deg) 1 = %2.1f", angle1 );
+		DrawScreenTextLine( "Angle (Deg) 1 = %2.1f", angle1 );
 
 		float torque1 = b2RevoluteJoint_GetMotorTorque( m_jointId1 );
-		DrawTextLine( "Motor Torque 1 = %4.1f", torque1 );
+		DrawScreenTextLine( "Motor Torque 1 = %4.1f", torque1 );
 
 		float torque2 = b2RevoluteJoint_GetMotorTorque( m_jointId2 );
-		DrawTextLine( "Motor Torque 2 = %4.1f", torque2 );
+		DrawScreenTextLine( "Motor Torque 2 = %4.1f", torque2 );
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -864,15 +846,8 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 240.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 240.0f, height ) );
-
-		ImGui::Begin( "Prismatic Joint", nullptr, ImGuiWindowFlags_NoResize );
-
 		if ( ImGui::Checkbox( "Limit", &m_enableLimit ) )
 		{
 			b2PrismaticJoint_EnableLimit( m_jointId, m_enableLimit );
@@ -887,6 +862,7 @@ public:
 
 		if ( m_enableMotor )
 		{
+			ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 			if ( ImGui::SliderFloat( "Max Force", &m_motorForce, 0.0f, 200.0f, "%.0f" ) )
 			{
 				b2PrismaticJoint_SetMaxMotorForce( m_jointId, m_motorForce );
@@ -898,6 +874,7 @@ public:
 				b2PrismaticJoint_SetMotorSpeed( m_jointId, m_motorSpeed );
 				b2Joint_WakeBodies( m_jointId );
 			}
+			ImGui::PopItemWidth();
 		}
 
 		if ( ImGui::Checkbox( "Spring", &m_enableSpring ) )
@@ -908,6 +885,7 @@ public:
 
 		if ( m_enableSpring )
 		{
+			ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 			if ( ImGui::SliderFloat( "Hertz", &m_hertz, 0.0f, 10.0f, "%.1f" ) )
 			{
 				b2PrismaticJoint_SetSpringHertz( m_jointId, m_hertz );
@@ -925,9 +903,10 @@ public:
 				b2PrismaticJoint_SetTargetTranslation( m_jointId, m_translation );
 				b2Joint_WakeBodies( m_jointId );
 			}
+			ImGui::PopItemWidth();
 		}
 
-		ImGui::End();
+		return true;
 	}
 
 	void Step() override
@@ -935,13 +914,13 @@ public:
 		Sample::Step();
 
 		float force = b2PrismaticJoint_GetMotorForce( m_jointId );
-		DrawTextLine( "Motor Force = %4.1f", force );
+		DrawScreenTextLine( "Motor Force = %4.1f", force );
 
 		float translation = b2PrismaticJoint_GetTranslation( m_jointId );
-		DrawTextLine( "Translation = %4.1f", translation );
+		DrawScreenTextLine( "Translation = %4.1f", translation );
 
 		float speed = b2PrismaticJoint_GetSpeed( m_jointId );
-		DrawTextLine( "Speed = %4.8f", speed );
+		DrawScreenTextLine( "Speed = %4.8f", speed );
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -1018,15 +997,8 @@ public:
 		m_jointId = b2CreateWheelJoint( m_worldId, &jointDef );
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 15.0f * fontSize;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 18.0f * fontSize, height ) );
-
-		ImGui::Begin( "Wheel Joint", nullptr, ImGuiWindowFlags_NoResize );
-
 		if ( ImGui::Checkbox( "Limit", &m_enableLimit ) )
 		{
 			b2WheelJoint_EnableLimit( m_jointId, m_enableLimit );
@@ -1039,6 +1011,7 @@ public:
 
 		if ( m_enableMotor )
 		{
+			ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 			if ( ImGui::SliderFloat( "Torque", &m_motorTorque, 0.0f, 20.0f, "%.0f" ) )
 			{
 				b2WheelJoint_SetMaxMotorTorque( m_jointId, m_motorTorque );
@@ -1048,6 +1021,7 @@ public:
 			{
 				b2WheelJoint_SetMotorSpeed( m_jointId, m_motorSpeed );
 			}
+			ImGui::PopItemWidth();
 		}
 
 		if ( ImGui::Checkbox( "Spring", &m_enableSpring ) )
@@ -1057,6 +1031,7 @@ public:
 
 		if ( m_enableSpring )
 		{
+			ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 			if ( ImGui::SliderFloat( "Hertz", &m_hertz, 0.0f, 10.0f, "%.1f" ) )
 			{
 				b2WheelJoint_SetSpringHertz( m_jointId, m_hertz );
@@ -1066,9 +1041,10 @@ public:
 			{
 				b2WheelJoint_SetSpringDampingRatio( m_jointId, m_dampingRatio );
 			}
+			ImGui::PopItemWidth();
 		}
 
-		ImGui::End();
+		return true;
 	}
 
 	void Step() override
@@ -1076,7 +1052,7 @@ public:
 		Sample::Step();
 
 		float torque = b2WheelJoint_GetMotorTorque( m_jointId );
-		DrawTextLine( "Motor Torque = %4.1f", torque );
+		DrawScreenTextLine( "Motor Torque = %4.1f", torque );
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -1202,16 +1178,9 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 180.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 320.0f, height ) );
-
-		ImGui::Begin( "Bridge", nullptr, ImGuiWindowFlags_NoResize );
-
-		ImGui::PushItemWidth( ImGui::GetWindowWidth() * 0.6f );
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
 		bool updateFriction = ImGui::SliderFloat( "Joint Friction", &m_frictionTorque, 0.0f, 10000.0f, "%2.f" );
 		if ( updateFriction )
@@ -1256,7 +1225,7 @@ public:
 
 		ImGui::PopItemWidth();
 
-		ImGui::End();
+		return true;
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -1356,16 +1325,11 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 60.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 240.0f, height ) );
-
-		ImGui::Begin( "Ball and Chain", nullptr, ImGuiWindowFlags_NoResize );
-
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 		bool updateFriction = ImGui::SliderFloat( "Joint Friction", &m_frictionTorque, 0.0f, 1000.0f, "%2.f" );
+		ImGui::PopItemWidth();
 		if ( updateFriction )
 		{
 			for ( int i = 0; i <= m_count; ++i )
@@ -1374,7 +1338,7 @@ public:
 			}
 		}
 
-		ImGui::End();
+		return true;
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -1462,15 +1426,9 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 14.0f * fontSize;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 19.0f * fontSize, height ) );
-
-		ImGui::Begin( "Cantilever", nullptr, ImGuiWindowFlags_NoResize );
-		ImGui::PushItemWidth( 8.0f * fontSize );
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
 		if ( ImGui::SliderFloat( "Linear Hertz", &m_linearHertz, 0.0f, 20.0f, "%.0f" ) )
 		{
@@ -1504,14 +1462,6 @@ public:
 			}
 		}
 
-		if ( ImGui::Checkbox( "Collide Connected", &m_collideConnected ) )
-		{
-			for ( int i = 0; i < e_count; ++i )
-			{
-				b2Joint_SetCollideConnected( m_jointIds[i], m_collideConnected );
-			}
-		}
-
 		if ( ImGui::SliderFloat( "Gravity Scale", &m_gravityScale, -1.0f, 1.0f, "%.1f" ) )
 		{
 			for ( int i = 0; i < e_count; ++i )
@@ -1521,7 +1471,16 @@ public:
 		}
 
 		ImGui::PopItemWidth();
-		ImGui::End();
+
+		if ( ImGui::Checkbox( "Collide Connected", &m_collideConnected ) )
+		{
+			for ( int i = 0; i < e_count; ++i )
+			{
+				b2Joint_SetCollideConnected( m_jointIds[i], m_collideConnected );
+			}
+		}
+
+		return true;
 	}
 
 	void Step() override
@@ -1529,7 +1488,7 @@ public:
 		Sample::Step();
 
 		b2Vec2 tipPosition = b2Body_GetPosition( m_tipId );
-		DrawTextLine( "tip-y = %.2f", tipPosition.y );
+		DrawScreenTextLine( "tip-y = %.2f", tipPosition.y );
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -1728,15 +1687,8 @@ public:
 		++index;
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 8.0f * fontSize;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 14.0f * fontSize, height ) );
-
-		ImGui::Begin( "Motion Locks", nullptr, ImGuiWindowFlags_NoResize );
-
 		if ( ImGui::Checkbox( "Lock Linear X", &m_motionLocks.linearX ) )
 		{
 			for ( int i = 0; i < e_count; ++i )
@@ -1764,12 +1716,12 @@ public:
 			}
 		}
 
-		ImGui::End();
-
 		if ( glfwGetKey( m_context->window, GLFW_KEY_L ) == GLFW_PRESS )
 		{
 			b2Body_ApplyLinearImpulseToCenter( m_bodyIds[0], { 100.0f, 0.0f }, true );
 		}
+
+		return true;
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -1961,14 +1913,9 @@ public:
 		m_breakForce = 1000.0f;
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 100.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 240.0f, height ) );
-
-		ImGui::Begin( "Breakable Joint", nullptr, ImGuiWindowFlags_NoResize );
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
 		ImGui::SliderFloat( "break force", &m_breakForce, 0.0f, 10000.0f, "%.1f" );
 
@@ -1978,7 +1925,9 @@ public:
 			b2World_SetGravity( m_worldId, gravity );
 		}
 
-		ImGui::End();
+		ImGui::PopItemWidth();
+
+		return true;
 	}
 
 	void Step() override
@@ -2168,28 +2117,14 @@ public:
 		m_jointDampingRatio = 2.0f;
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 14.0f * fontSize;
-		ImGui::SetNextWindowPos( { 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize }, ImGuiCond_Once );
-		ImGui::SetNextWindowSize( { 20.0f * fontSize, height } );
-
-		ImGui::Begin( "Joint Separation", nullptr, ImGuiWindowFlags_NoResize );
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
 		b2Vec2 gravity = b2World_GetGravity( m_worldId );
 		if ( ImGui::SliderFloat( "gravity", &gravity.y, -500.0f, 500.0f, "%.0f" ) )
 		{
 			b2World_SetGravity( m_worldId, gravity );
-		}
-
-		if ( ImGui::Button( "impulse" ) )
-		{
-			for ( int i = 0; i < e_count; ++i )
-			{
-				b2Vec2 p = b2Body_GetWorldPoint( m_bodyIds[i], { 1.0f, 1.0f } );
-				b2Body_ApplyLinearImpulse( m_bodyIds[i], { m_impulse, -m_impulse }, p, true );
-			}
 		}
 
 		ImGui::SliderFloat( "magnitude", &m_impulse, 0.0f, 1000.0f, "%.0f" );
@@ -2210,7 +2145,18 @@ public:
 			}
 		}
 
-		ImGui::End();
+		ImGui::PopItemWidth();
+
+		if ( ImGui::Button( "impulse" ) )
+		{
+			for ( int i = 0; i < e_count; ++i )
+			{
+				b2Vec2 p = b2Body_GetWorldPoint( m_bodyIds[i], { 1.0f, 1.0f } );
+				b2Body_ApplyLinearImpulse( m_bodyIds[i], { m_impulse, -m_impulse }, p, true );
+			}
+		}
+
+		return true;
 	}
 
 	void Step() override
@@ -2354,7 +2300,7 @@ public:
 		b2Body_SetLinearVelocity( m_bodyId, vB );
 		b2Body_SetAngularVelocity( m_bodyId, omegaB );
 
-		DrawTextLine( "forces = %g, %g", m_impulses[0] * invTimeStep, m_impulses[1] * invTimeStep );
+		DrawScreenTextLine( "forces = %g, %g", m_impulses[0] * invTimeStep, m_impulses[1] * invTimeStep );
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -2547,16 +2493,9 @@ public:
 		m_car.Spawn( m_worldId, { 0.0f, 0.0f }, 1.0f, m_hertz, m_dampingRatio, m_torque, nullptr );
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 10.0f * fontSize;
-		ImGui::SetNextWindowPos( { 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize }, ImGuiCond_Once );
-		ImGui::SetNextWindowSize( { 16.0f * fontSize, height } );
-
-		ImGui::Begin( "Driving", nullptr, ImGuiWindowFlags_NoResize );
-
-		ImGui::PushItemWidth( 8.0f * fontSize );
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 		if ( ImGui::SliderFloat( "Spring Hertz", &m_hertz, 0.0f, 20.0f, "%.0f" ) )
 		{
 			m_car.SetHertz( m_hertz );
@@ -2578,7 +2517,7 @@ public:
 		}
 		ImGui::PopItemWidth();
 
-		ImGui::End();
+		return true;
 	}
 
 	void Step() override
@@ -2601,11 +2540,11 @@ public:
 			m_car.SetSpeed( -m_speed );
 		}
 
-		DrawTextLine( "Keys: left = a, brake = s, right = d" );
+		DrawScreenTextLine( "Keys: left = a, brake = s, right = d" );
 
 		b2Vec2 linearVelocity = b2Body_GetLinearVelocity( m_car.m_chassisId );
 		float kph = linearVelocity.x * 3.6f;
-		DrawTextLine( "speed in kph: %.2g", kph );
+		DrawScreenTextLine( "speed in kph: %.2g", kph );
 
 		b2Vec2 carPosition = b2Body_GetPosition( m_car.m_chassisId );
 		m_context->camera.center.x = carPosition.x;
@@ -2670,15 +2609,9 @@ public:
 		// Human_ApplyRandomAngularImpulse( &m_human, 10.0f );
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 10.0f * fontSize;
-		ImGui::SetNextWindowPos( { 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize }, ImGuiCond_Once );
-		ImGui::SetNextWindowSize( { 14.0f * fontSize, height } );
-
-		ImGui::Begin( "Ragdoll", nullptr, ImGuiWindowFlags_NoResize );
-		ImGui::PushItemWidth( 8.0f * fontSize );
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
 		if ( ImGui::SliderFloat( "Friction", &m_jointFrictionTorque, 0.0f, 1.0f, "%3.2f" ) )
 		{
@@ -2695,13 +2628,15 @@ public:
 			Human_SetJointDampingRatio( &m_human, m_jointDampingRatio );
 		}
 
+		ImGui::PopItemWidth();
+
 		if ( ImGui::Button( "Respawn" ) )
 		{
 			DestroyHuman( &m_human );
 			Spawn();
 		}
-		ImGui::PopItemWidth();
-		ImGui::End();
+
+		return true;
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -2969,20 +2904,15 @@ public:
 		car.Spawn( m_worldId, { 0.0f, y + 2.0f }, 1.0f, 3.0f, 0.7f, 0.0f, nullptr );
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 140.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 240.0f, height ) );
-
-		ImGui::Begin( "Scissor Lift", nullptr, ImGuiWindowFlags_NoResize );
-
 		if ( ImGui::Checkbox( "Motor", &m_enableMotor ) )
 		{
 			b2DistanceJoint_EnableMotor( m_liftJointId, m_enableMotor );
 			b2Joint_WakeBodies( m_liftJointId );
 		}
+
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
 		if ( ImGui::SliderFloat( "Max Force", &m_motorForce, 0.0f, 3000.0f, "%.0f" ) )
 		{
@@ -2996,7 +2926,9 @@ public:
 			b2Joint_WakeBodies( m_liftJointId );
 		}
 
-		ImGui::End();
+		ImGui::PopItemWidth();
+
+		return true;
 	}
 
 	void Step() override
@@ -3282,20 +3214,15 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 120.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 25.0f ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 240.0f, height ) );
-
-		ImGui::Begin( "Gear Lift", nullptr, ImGuiWindowFlags_NoResize );
-
 		if ( ImGui::Checkbox( "Motor", &m_enableMotor ) )
 		{
 			b2RevoluteJoint_EnableMotor( m_driverId, m_enableMotor );
 			b2Joint_WakeBodies( m_driverId );
 		}
+
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
 		if ( ImGui::SliderFloat( "Max Torque", &m_motorTorque, 0.0f, 100.0f, "%.0f" ) )
 		{
@@ -3309,7 +3236,9 @@ public:
 			b2Joint_WakeBodies( m_driverId );
 		}
 
-		ImGui::End();
+		ImGui::PopItemWidth();
+
+		return true;
 	}
 
 	void Step() override
@@ -3406,15 +3335,8 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 220.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 240.0f, height ) );
-
-		ImGui::Begin( "Door", nullptr, ImGuiWindowFlags_NoResize );
-
 		if ( ImGui::Button( "impulse" ) )
 		{
 			b2Vec2 p = b2Body_GetWorldPoint( m_doorId, { 0.0f, 1.5f } );
@@ -3422,12 +3344,9 @@ public:
 			m_translationError = 0.0f;
 		}
 
-		ImGui::SliderFloat( "magnitude", &m_impulse, 1000.0f, 100000.0f, "%.0f" );
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
-		if ( ImGui::Checkbox( "limit", &m_enableLimit ) )
-		{
-			b2RevoluteJoint_EnableLimit( m_jointId, m_enableLimit );
-		}
+		ImGui::SliderFloat( "magnitude", &m_impulse, 1000.0f, 100000.0f, "%.0f" );
 
 		if ( ImGui::SliderFloat( "hertz", &m_jointHertz, 15.0f, 480.0f, "%.0f" ) )
 		{
@@ -3439,7 +3358,14 @@ public:
 			b2Joint_SetConstraintTuning( m_jointId, m_jointHertz, m_jointDampingRatio );
 		}
 
-		ImGui::End();
+		ImGui::PopItemWidth();
+
+		if ( ImGui::Checkbox( "limit", &m_enableLimit ) )
+		{
+			b2RevoluteJoint_EnableLimit( m_jointId, m_enableLimit );
+		}
+
+		return true;
 	}
 
 	void Step() override
@@ -3452,7 +3378,7 @@ public:
 		float translationError = b2Joint_GetLinearSeparation( m_jointId );
 		m_translationError = b2MaxFloat( m_translationError, translationError );
 
-		DrawTextLine( "translation error = %g", m_translationError );
+		DrawScreenTextLine( "translation error = %g", m_translationError );
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -3506,18 +3432,12 @@ public:
 		float jointDampingRatio = 0.5f;
 		CreateHuman( &m_human, m_worldId, { 0.0f, 5.0f }, m_scale, jointFrictionTorque, jointHertz, jointDampingRatio, 1, nullptr,
 					 false );
-		Human_ApplyRandomAngularImpulse( &m_human, 10.0f );
+		Human_ApplyRandomAngularImpulse( &m_human, 0.1f );
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 4.0f * fontSize;
-		ImGui::SetNextWindowPos( { 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize }, ImGuiCond_Once );
-		ImGui::SetNextWindowSize( { 20.0f * fontSize, height } );
-
-		ImGui::Begin( "Scale Ragdoll", nullptr, ImGuiWindowFlags_NoResize );
-		ImGui::PushItemWidth( 15.0f * fontSize );
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
 		if ( ImGui::SliderFloat( "Scale", &m_scale, 0.1f, 10.0f, "%3.2f", ImGuiSliderFlags_ClampOnInput ) )
 		{
@@ -3525,7 +3445,8 @@ public:
 		}
 
 		ImGui::PopItemWidth();
-		ImGui::End();
+
+		return true;
 	}
 
 	static Sample* Create( SampleContext* context )

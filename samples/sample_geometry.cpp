@@ -113,7 +113,7 @@ public:
 	{
 		Sample::Step();
 
-		DrawTextLine( "Options: generate(g), auto(a), bulk(b)" );
+		DrawScreenTextLine( "Options: generate(g), auto(a), bulk(b)" );
 
 		b2Hull hull;
 		bool valid = false;
@@ -173,16 +173,16 @@ public:
 
 		if ( valid == false )
 		{
-			DrawTextLine( "generation = %d, FAILED", m_generation );
+			DrawScreenTextLine( "generation = %d, FAILED", m_generation );
 		}
 		else
 		{
-			DrawTextLine( "generation = %d, count = %d", m_generation, hull.count );
+			DrawScreenTextLine( "generation = %d, count = %d", m_generation, hull.count );
 		}
 
 		if ( milliseconds > 0.0f )
 		{
-			DrawTextLine( "milliseconds = %g", milliseconds );
+			DrawScreenTextLine( "milliseconds = %g", milliseconds );
 		}
 
 		DrawPolygon( m_draw, hull.points, hull.count, b2_colorGray );

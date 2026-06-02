@@ -51,7 +51,7 @@ public:
 		// DrawCircle({0.0f, 2.0f}, 1.0f, b2_colorWhite);
 
 		b2Vec2 position = b2Body_GetPosition( m_bodyId );
-		DrawTextLine( "(x, y) = (%.2g, %.2g)", position.x, position.y );
+		DrawScreenTextLine( "(x, y) = (%.2g, %.2g)", position.x, position.y );
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -347,16 +347,9 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 16.0f * fontSize;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 20.0f * fontSize, height ) );
-
-		ImGui::Begin( "Vertical Stack", nullptr, ImGuiWindowFlags_NoResize );
-
-		ImGui::PushItemWidth( 13.0f * fontSize );
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
 		bool changed = false;
 		const char* shapeTypes[] = { "Circle", "Box" };
@@ -395,7 +388,7 @@ public:
 			CreateStacks();
 		}
 
-		ImGui::End();
+		return true;
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -500,7 +493,7 @@ public:
 		int eventCount = (int)m_events.size();
 		for ( int i = 0; i < eventCount; ++i )
 		{
-			DrawTextLine( "%d, %d", m_events[i].indexA, m_events[i].indexB );
+			DrawScreenTextLine( "%d, %d", m_events[i].indexA, m_events[i].indexB );
 		}
 	}
 
@@ -695,22 +688,15 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 60.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 160.0f, height ) );
-
-		ImGui::Begin( "Cliff", nullptr, ImGuiWindowFlags_NoResize );
-
 		if ( ImGui::Button( "Flip" ) )
 		{
 			m_flip = !m_flip;
 			CreateBodies();
 		}
 
-		ImGui::End();
+		return true;
 	}
 
 	static Sample* Create( SampleContext* context )

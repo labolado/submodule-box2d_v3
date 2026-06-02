@@ -161,14 +161,9 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 21.0f * fontSize;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 19.0f * fontSize, height ) );
-
-		ImGui::Begin( "Shape Distance", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize );
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
 		const char* shapeTypes[] = { "point", "segment", "triangle", "box" };
 		int shapeType = int( m_typeA );
@@ -205,6 +200,8 @@ public:
 			m_transform.q = b2MakeRot( m_angle );
 		}
 
+		ImGui::PopItemWidth();
+
 		ImGui::Separator();
 
 		ImGui::Checkbox( "show indices", &m_showIndices );
@@ -219,11 +216,13 @@ public:
 
 		if ( m_drawSimplex && m_simplexCount > 0 )
 		{
+			ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 			ImGui::SliderInt( "index", &m_simplexIndex, 0, m_simplexCount - 1 );
 			m_simplexIndex = b2ClampInt( m_simplexIndex, 0, m_simplexCount - 1 );
+			ImGui::PopItemWidth();
 		}
 
-		ImGui::End();
+		return true;
 	}
 
 	void MouseDown( b2Vec2 p, int button, int mods ) override
@@ -377,22 +376,22 @@ public:
 			}
 		}
 
-		DrawTextLine( "mouse button 1: drag" );
-		DrawTextLine( "mouse button 1 + shift: rotate" );
-		DrawTextLine( "distance = %.2f, iterations = %d", output.distance, output.iterations );
+		DrawScreenTextLine( "mouse button 1: drag" );
+		DrawScreenTextLine( "mouse button 1 + shift: rotate" );
+		DrawScreenTextLine( "distance = %.2f, iterations = %d", output.distance, output.iterations );
 
 		if ( m_cache.count == 1 )
 		{
-			DrawTextLine( "cache = {%d}, {%d}", m_cache.indexA[0], m_cache.indexB[0] );
+			DrawScreenTextLine( "cache = {%d}, {%d}", m_cache.indexA[0], m_cache.indexB[0] );
 		}
 		else if ( m_cache.count == 2 )
 		{
-			DrawTextLine( "cache = {%d, %d}, {%d, %d}", m_cache.indexA[0], m_cache.indexA[1], m_cache.indexB[0],
+			DrawScreenTextLine( "cache = {%d, %d}, {%d, %d}", m_cache.indexA[0], m_cache.indexA[1], m_cache.indexB[0],
 						  m_cache.indexB[1] );
 		}
 		else if ( m_cache.count == 3 )
 		{
-			DrawTextLine( "cache = {%d, %d, %d}, {%d, %d, %d}", m_cache.indexA[0], m_cache.indexA[1], m_cache.indexA[2],
+			DrawScreenTextLine( "cache = {%d, %d, %d}, {%d, %d, %d}", m_cache.indexA[0], m_cache.indexA[1], m_cache.indexA[2],
 						  m_cache.indexB[0], m_cache.indexB[1], m_cache.indexB[2] );
 		}
 	}
@@ -570,16 +569,9 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 320.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 200.0f, height ) );
-
-		ImGui::Begin( "Dynamic Tree", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize );
-
-		ImGui::PushItemWidth( 100.0f );
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
 		bool changed = false;
 		if ( ImGui::SliderInt( "rows", &m_rowCount, 0, 1000, "%d" ) )
@@ -615,6 +607,8 @@ public:
 		{
 		}
 
+		ImGui::PopItemWidth();
+
 		if ( ImGui::RadioButton( "Incremental", m_updateType == Update_Incremental ) )
 		{
 			m_updateType = Update_Incremental;
@@ -638,13 +632,12 @@ public:
 		ImGui::Text( "mouse button 1: ray cast" );
 		ImGui::Text( "mouse button 1 + shift: query" );
 
-		ImGui::PopItemWidth();
-		ImGui::End();
-
 		if ( changed )
 		{
 			BuildTree();
 		}
+
+		return true;
 	}
 
 	void MouseDown( b2Vec2 p, int button, int mods ) override
@@ -702,7 +695,7 @@ public:
 			DrawPoint( m_draw, m_startPoint, 5.0f, b2_colorGreen );
 			DrawPoint( m_draw, m_endPoint, 5.0f, b2_colorRed );
 
-			DrawTextLine( "node visits = %d, leaf visits = %d", result.nodeVisits, result.leafVisits );
+			DrawScreenTextLine( "node visits = %d, leaf visits = %d", result.nodeVisits, result.leafVisits );
 		}
 
 		b2HexColor c = b2_colorBlue;
@@ -768,7 +761,7 @@ public:
 					}
 				}
 				float ms = b2GetMilliseconds( ticks );
-				DrawTextLine( "incremental : %.3f ms", ms );
+				DrawScreenTextLine( "incremental : %.3f ms", ms );
 			}
 			break;
 
@@ -786,7 +779,7 @@ public:
 				uint64_t ticks = b2GetTicks();
 				int boxCount = b2DynamicTree_Rebuild( &m_tree, true );
 				float ms = b2GetMilliseconds( ticks );
-				DrawTextLine( "full build %d : %.3f ms", boxCount, ms );
+				DrawScreenTextLine( "full build %d : %.3f ms", boxCount, ms );
 			}
 			break;
 
@@ -804,7 +797,7 @@ public:
 				uint64_t ticks = b2GetTicks();
 				int boxCount = b2DynamicTree_Rebuild( &m_tree, false );
 				float ms = b2GetMilliseconds( ticks );
-				DrawTextLine( "partial rebuild %d : %.3f ms", boxCount, ms );
+				DrawScreenTextLine( "partial rebuild %d : %.3f ms", boxCount, ms );
 			}
 			break;
 
@@ -816,7 +809,7 @@ public:
 		float areaRatio = b2DynamicTree_GetAreaRatio( &m_tree );
 
 		int hmin = (int)( ceilf( logf( (float)m_proxyCount ) / logf( 2.0f ) - 1.0f ) );
-		DrawTextLine( "proxies = %d, height = %d, hmin = %d, area ratio = %.1f", m_proxyCount, height, hmin, areaRatio );
+		DrawScreenTextLine( "proxies = %d, height = %d, hmin = %d, area ratio = %.1f", m_proxyCount, height, hmin, areaRatio );
 
 		b2DynamicTree_Validate( &m_tree );
 
@@ -910,16 +903,9 @@ public:
 		m_showFraction = false;
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 230.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 200.0f, height ) );
-
-		ImGui::Begin( "Ray-cast", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize );
-
-		ImGui::PushItemWidth( 100.0f );
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
 		ImGui::SliderFloat( "x offset", &m_transform.p.x, -2.0f, 2.0f, "%.2f" );
 		ImGui::SliderFloat( "y offset", &m_transform.p.y, -2.0f, 2.0f, "%.2f" );
@@ -932,6 +918,8 @@ public:
 		// if (ImGui::SliderFloat("ray radius", &m_rayRadius, 0.0f, 1.0f, "%.1f"))
 		//{
 		// }
+
+		ImGui::PopItemWidth();
 
 		ImGui::Checkbox( "show fraction", &m_showFraction );
 
@@ -947,9 +935,7 @@ public:
 		ImGui::Text( "mouse btn 1 + shft: translate" );
 		ImGui::Text( "mouse btn 1 + ctrl: rotate" );
 
-		ImGui::PopItemWidth();
-
-		ImGui::End();
+		return true;
 	}
 
 	void MouseDown( b2Vec2 p, int button, int mods ) override
@@ -1597,19 +1583,13 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 320.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 200.0f, height ) );
-
-		ImGui::Begin( "Ray-cast World", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize );
-
 		ImGui::Checkbox( "Simple", &m_simple );
 
 		if ( m_simple == false )
 		{
+			ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 			const char* castTypes[] = { "Ray", "Circle", "Capsule", "Polygon" };
 			int castType = int( m_castType );
 			if ( ImGui::Combo( "Type", &castType, castTypes, IM_ARRAYSIZE( castTypes ) ) )
@@ -1628,6 +1608,7 @@ public:
 			{
 				m_mode = Mode( mode );
 			}
+			ImGui::PopItemWidth();
 		}
 
 		if ( ImGui::Button( "Polygon" ) )
@@ -1671,15 +1652,15 @@ public:
 			DestroyBody();
 		}
 
-		ImGui::End();
+		return true;
 	}
 
 	void Step() override
 	{
 		Sample::Step();
 
-		DrawTextLine( "Click left mouse button and drag to modify ray cast" );
-		DrawTextLine( "Shape 7 is intentionally ignored by the ray" );
+		DrawScreenTextLine( "Click left mouse button and drag to modify ray cast" );
+		DrawScreenTextLine( "Shape 7 is intentionally ignored by the ray" );
 
 		b2HexColor color1 = b2_colorGreen;
 		b2HexColor color2 = b2_colorLightGray;
@@ -1689,7 +1670,7 @@ public:
 
 		if ( m_simple )
 		{
-			DrawTextLine( "Simple closest point ray cast" );
+			DrawScreenTextLine( "Simple closest point ray cast" );
 
 			// This version doesn't have a callback, but it doesn't skip the ignored shape
 			b2RayResult result = b2World_CastRayClosest( m_worldId, m_rayStart, rayTranslation, b2DefaultQueryFilter() );
@@ -1712,19 +1693,19 @@ public:
 			switch ( m_mode )
 			{
 				case e_any:
-					DrawTextLine( "Cast mode: any - check for obstruction - unsorted" );
+					DrawScreenTextLine( "Cast mode: any - check for obstruction - unsorted" );
 					break;
 
 				case e_closest:
-					DrawTextLine( "Cast mode: closest - find closest shape along the cast" );
+					DrawScreenTextLine( "Cast mode: closest - find closest shape along the cast" );
 					break;
 
 				case e_multiple:
-					DrawTextLine( "Cast mode: multiple - gather up to 3 shapes - unsorted" );
+					DrawScreenTextLine( "Cast mode: multiple - gather up to 3 shapes - unsorted" );
 					break;
 
 				case e_sorted:
-					DrawTextLine( "Cast mode: sorted - gather up to 3 shapes sorted by closeness" );
+					DrawScreenTextLine( "Cast mode: sorted - gather up to 3 shapes sorted by closeness" );
 					break;
 
 				default:
@@ -2081,15 +2062,8 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 330.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 140.0f, height ) );
-
-		ImGui::Begin( "Overlap World", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize );
-
 		if ( ImGui::Button( "Polygon 1" ) )
 			Create( 0 );
 		ImGui::SameLine();
@@ -2143,15 +2117,15 @@ public:
 		ImGui::RadioButton( "Capsule##Overlap", &m_shapeType, e_capsuleShape );
 		ImGui::RadioButton( "Box##Overlap", &m_shapeType, e_boxShape );
 
-		ImGui::End();
+		return true;
 	}
 
 	void Step() override
 	{
 		Sample::Step();
 
-		DrawTextLine( "left mouse button: drag query shape" );
-		DrawTextLine( "left mouse button + shift: rotate query shape" );
+		DrawScreenTextLine( "left mouse button: drag query shape" );
+		DrawScreenTextLine( "left mouse button + shift: rotate query shape" );
 
 		m_doomCount = 0;
 
@@ -2286,16 +2260,9 @@ public:
 		m_wedge = b2ComputeHull( points, 3 );
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 24.0f * fontSize;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 20.0f * fontSize, height ) );
-
-		ImGui::Begin( "Manifold", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize );
-
-		ImGui::PushItemWidth( 14.0f * fontSize );
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
 		ImGui::SliderFloat( "x offset", &m_transform.p.x, -2.0f, 2.0f, "%.2f" );
 		ImGui::SliderFloat( "y offset", &m_transform.p.y, -2.0f, 2.0f, "%.2f" );
@@ -2328,7 +2295,7 @@ public:
 		ImGui::Text( "mouse button 1: drag" );
 		ImGui::Text( "mouse button 1 + shift: rotate" );
 
-		ImGui::End();
+		return true;
 	}
 
 	void MouseDown( b2Vec2 p, int button, int mods ) override
@@ -3002,20 +2969,14 @@ public:
 		}
 	}
 
-	virtual ~SmoothManifold() override
+	~SmoothManifold() override
 	{
 		free( m_segments );
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 290.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 180.0f, height ) );
-
-		ImGui::Begin( "Smooth Manifold", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize );
-		ImGui::PushItemWidth( 100.0f );
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
 		{
 			const char* shapeTypes[] = { "Circle", "Box" };
@@ -3033,6 +2994,9 @@ public:
 		}
 
 		ImGui::SliderFloat( "Round", &m_round, 0.0f, 0.4f, "%.1f" );
+
+		ImGui::PopItemWidth();
+
 		ImGui::Checkbox( "Show Ids", &m_showIds );
 		ImGui::Checkbox( "Show Separation", &m_showSeparation );
 		ImGui::Checkbox( "Show Anchors", &m_showAnchors );
@@ -3048,8 +3012,7 @@ public:
 		ImGui::Text( "mouse button 1: drag" );
 		ImGui::Text( "mouse button 1 + shift: rotate" );
 
-		ImGui::PopItemWidth();
-		ImGui::End();
+		return true;
 	}
 
 	void MouseDown( b2Vec2 p, int button, int mods ) override
@@ -3446,14 +3409,9 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 300.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 240.0f, height ) );
-
-		ImGui::Begin( "Shape Distance", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize );
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 
 		const char* shapeTypes[] = { "point", "segment", "triangle", "box" };
 		int shapeType = int( m_typeA );
@@ -3490,12 +3448,14 @@ public:
 			m_transform.q = b2MakeRot( m_angle );
 		}
 
+		ImGui::PopItemWidth();
+
 		ImGui::Separator();
 
 		ImGui::Checkbox( "show indices", &m_showIndices );
 		ImGui::Checkbox( "encroach", &m_encroach );
 
-		ImGui::End();
+		return true;
 	}
 
 	void Step() override
@@ -3527,7 +3487,7 @@ public:
 		distanceCache.count = 0;
 		b2DistanceOutput distanceOutput = b2ShapeDistance( &distanceInput, &distanceCache, nullptr, 0 );
 
-		DrawTextLine( "hit = %s, iterations = %d, fraction = %g, distance = %g", output.hit ? "true" : "false", output.iterations,
+		DrawScreenTextLine( "hit = %s, iterations = %d, fraction = %g, distance = %g", output.hit ? "true" : "false", output.iterations,
 					  output.fraction, distanceOutput.distance );
 
 		DrawShape( m_typeA, b2Transform_identity, m_radiusA, b2_colorCyan );
@@ -3565,10 +3525,10 @@ public:
 			}
 		}
 
-		DrawTextLine( "mouse button 1: drag" );
-		DrawTextLine( "mouse button 1 + shift: rotate" );
-		DrawTextLine( "mouse button 1 + control: sweep" );
-		DrawTextLine( "distance = %.2f, iterations = %d", distanceOutput.distance, output.iterations );
+		DrawScreenTextLine( "mouse button 1: drag" );
+		DrawScreenTextLine( "mouse button 1 + shift: rotate" );
+		DrawScreenTextLine( "mouse button 1 + control: sweep" );
+		DrawScreenTextLine( "distance = %.2f, iterations = %d", distanceOutput.distance, output.iterations );
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -3649,10 +3609,7 @@ public:
 
 		b2TOIOutput output = b2TimeOfImpact( &input );
 
-		DrawTextLine( "toi = %g", output.fraction );
-
-		// DrawString(5, m_textLine, "max toi iters = %d, max root iters = %d", b2_toiMaxIters,
-		//                        b2_toiMaxRootIters);
+		DrawScreenTextLine( "toi = %g", output.fraction );
 
 		b2Vec2 vertices[B2_MAX_POLYGON_VERTICES];
 
@@ -3700,7 +3657,7 @@ public:
 			distanceInput.useRadii = false;
 			b2SimplexCache cache = { 0 };
 			b2DistanceOutput distanceOutput = b2ShapeDistance( &distanceInput, &cache, nullptr, 0 );
-			DrawTextLine( "distance = %g", distanceOutput.distance );
+			DrawScreenTextLine( "distance = %g", distanceOutput.distance );
 		}
 
 #if 0

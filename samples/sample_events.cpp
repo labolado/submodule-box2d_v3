@@ -234,15 +234,8 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 90.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 140.0f, height ) );
-
-		ImGui::Begin( "Sensor Event", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize );
-
 		if ( ImGui::RadioButton( "donut", m_type == e_donut ) )
 		{
 			Clear();
@@ -255,7 +248,7 @@ public:
 			m_type = e_human;
 		}
 
-		ImGui::End();
+		return true;
 	}
 
 	void Step() override
@@ -426,15 +419,8 @@ public:
 		m_visitorShapeId = b2CreateCircleShape( m_visitorBodyId, &shapeDef, &circle );
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 19.0f * fontSize;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 12.0f * fontSize, height ) );
-
-		ImGui::Begin( "Sensor Bookend", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize );
-
 		if ( B2_IS_NULL( m_visitorBodyId ) )
 		{
 			if ( ImGui::Button( "create visitor" ) )
@@ -553,7 +539,7 @@ public:
 			}
 		}
 
-		ImGui::End();
+		return true;
 	}
 
 	void Step() override
@@ -649,9 +635,9 @@ public:
 			m_sensorShapeId2 = b2_nullShapeId;
 		}
 
-		DrawTextLine( "visiting 1 == %s", m_isVisiting1 ? "true" : "false" );
-		DrawTextLine( "visiting 2 == %s", m_isVisiting2 ? "true" : "false" );
-		DrawTextLine( "sensors overlap count == %d", m_sensorsOverlapCount );
+		DrawScreenTextLine( "visiting 1 == %s", m_isVisiting1 ? "true" : "false" );
+		DrawScreenTextLine( "visiting 2 == %s", m_isVisiting2 ? "true" : "false" );
+		DrawScreenTextLine( "sensors overlap count == %d", m_sensorsOverlapCount );
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -782,7 +768,7 @@ public:
 			}
 		}
 
-		DrawTextLine( "count == %d", m_overlapCount );
+		DrawScreenTextLine( "count == %d", m_overlapCount );
 
 		int capacity = b2Shape_GetSensorCapacity( m_sensorId );
 		m_visitorIds.clear();
@@ -926,23 +912,18 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 60.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 240.0f, height ) );
-
-		ImGui::Begin( "Contact Event", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize );
-
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 		ImGui::SliderFloat( "force", &m_force, 100.0f, 500.0f, "%.1f" );
+		ImGui::PopItemWidth();
 
-		ImGui::End();
+		return true;
 	}
 
 	void Step() override
 	{
-		DrawTextLine( "move using WASD" );
+		DrawScreenTextLine( "move using WASD" );
 
 		b2Vec2 position = b2Body_GetPosition( m_playerId );
 
@@ -1349,19 +1330,14 @@ public:
 		return false;
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 100.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 240.0f, height ) );
-
-		ImGui::Begin( "One-Sided Platform", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize );
-
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 		ImGui::SliderFloat( "force", &m_force, 0.0f, 50.0f, "%.1f" );
 		ImGui::SliderFloat( "impulse", &m_impulse, 0.0f, 50.0f, "%.1f" );
+		ImGui::PopItemWidth();
 
-		ImGui::End();
+		return true;
 	}
 
 	void Step() override
@@ -1437,9 +1413,9 @@ public:
 
 		b2ContactData contactData = {};
 		int contactCount = b2Body_GetContactData( m_movingPlatformId, &contactData, 1 );
-		DrawTextLine( "Platform contact count = %d, point count = %d", contactCount, contactData.manifold.pointCount );
-		DrawTextLine( "Movement: A/D/Space" );
-		DrawTextLine( "Can jump = %s", canJump ? "true" : "false" );
+		DrawScreenTextLine( "Platform contact count = %d, point count = %d", contactCount, contactData.manifold.pointCount );
+		DrawScreenTextLine( "Movement: A/D/Space" );
+		DrawScreenTextLine( "Can jump = %s", canJump ? "true" : "false" );
 
 		if ( m_context->hertz > 0.0f )
 		{
@@ -1559,15 +1535,8 @@ public:
 		}
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 100.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 240.0f, height ) );
-
-		ImGui::Begin( "Body Move", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize );
-
 		if ( ImGui::Button( "Explode" ) )
 		{
 			b2ExplosionDef def = b2DefaultExplosionDef();
@@ -1578,9 +1547,11 @@ public:
 			b2World_Explode( m_worldId, &def );
 		}
 
+		ImGui::PushItemWidth( 6.0f * ImGui::GetFontSize() );
 		ImGui::SliderFloat( "Magnitude", &m_explosionMagnitude, -20.0f, 20.0f, "%.1f" );
+		ImGui::PopItemWidth();
 
-		ImGui::End();
+		return true;
 	}
 
 	void Step() override
@@ -1635,7 +1606,7 @@ public:
 
 		DrawCircle( m_draw, m_explosionPosition, m_explosionRadius, b2_colorAzure );
 
-		DrawTextLine( "sleep count: %d", m_sleepCount );
+		DrawScreenTextLine( "sleep count: %d", m_sleepCount );
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -1800,7 +1771,7 @@ public:
 			start += snprintf( buffer + start, sizeof( buffer ) - start, "%s, ", name );
 		}
 
-		DrawTextLine( buffer );
+		DrawScreenTextLine( buffer );
 	}
 
 	void Step() override
@@ -2309,15 +2280,8 @@ public:
 		m_shapeId = b2CreateCircleShape( m_bodyId, &shapeDef, &circle );
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 120.0f;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 120.0f, height ) );
-
-		ImGui::Begin( "Sensor Hit", nullptr, ImGuiWindowFlags_NoResize );
-
 		ImGui::Checkbox( "Bullet", &m_isBullet );
 
 		if ( ImGui::Button( "Launch" ) || glfwGetKey( m_context->window, GLFW_KEY_B ) == GLFW_PRESS )
@@ -2325,7 +2289,7 @@ public:
 			Launch();
 		}
 
-		ImGui::End();
+		return true;
 	}
 
 	void CollectTransforms( b2ShapeId sensorShapeId )
@@ -2384,8 +2348,8 @@ public:
 			}
 		}
 
-		DrawTextLine( "begin touch count = %d", m_beginCount );
-		DrawTextLine( "end touch count = %d", m_endCount );
+		DrawScreenTextLine( "begin touch count = %d", m_beginCount );
+		DrawScreenTextLine( "end touch count = %d", m_endCount );
 	}
 
 	static Sample* Create( SampleContext* context )
@@ -2526,7 +2490,7 @@ public:
 
 	void Step() override
 	{
-		DrawTextLine( "Use Ctrl + Left Mouse to drag and shoot a projectile" );
+		DrawScreenTextLine( "Use Ctrl + Left Mouse to drag and shoot a projectile" );
 
 		Sample::Step();
 
@@ -2655,15 +2619,8 @@ public:
 		b2Body_SetMassData( m_bodyId, massData );
 	}
 
-	void UpdateGui() override
+	bool DrawControls() override
 	{
-		float fontSize = ImGui::GetFontSize();
-		float height = 6.0f * fontSize;
-		ImGui::SetNextWindowPos( ImVec2( 0.5f * fontSize, m_camera->height - height - 2.0f * fontSize ), ImGuiCond_Once );
-		ImGui::SetNextWindowSize( ImVec2( 10.0f * fontSize, height ) );
-
-		ImGui::Begin( "Circle Impulse", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize );
-
 		if ( ImGui::Checkbox( "gravity", &m_useGravity ) )
 		{
 			Spawn();
@@ -2674,7 +2631,7 @@ public:
 			Spawn();
 		}
 
-		ImGui::End();
+		return true;
 	}
 
 	void Step() override
@@ -2700,14 +2657,14 @@ public:
 			m_events.push_back( e );
 		}
 
-		DrawTextLine( "mass = %g, gravity = %g, restitution = %g", m_mass, m_useGravity ? 10.0f : 0.0f,
+		DrawScreenTextLine( "mass = %g, gravity = %g, restitution = %g", m_mass, m_useGravity ? 10.0f : 0.0f,
 					  m_useRestitution ? m_restitution : 0.0f );
 
 		int eventCount = (int)m_events.size();
 		for ( int i = 0; i < eventCount; ++i )
 		{
 			const Event& e = m_events[i];
-			DrawTextLine( "hit speed = %g, hit momentum = %g, final impulse = %g, total impulse = %g", e.speed, m_mass * e.speed,
+			DrawScreenTextLine( "hit speed = %g, hit momentum = %g, final impulse = %g, total impulse = %g", e.speed, m_mass * e.speed,
 						  e.impulse, e.totalImpulse );
 		}
 	}
