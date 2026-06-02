@@ -1815,7 +1815,7 @@ void b2Shape_ComputeDistance( b2ShapeId shapeId, b2Vec2 target, float* distance,
 	}
 
 	b2Shape* shape = b2GetShape( world, shapeId );
-	b2Body* body = b2BodyArray_Get( &world->bodies, shape->bodyId );
+	b2Body* body = b2Array_Get( world->bodies, shape->bodyId );
 	b2Transform transform = b2GetBodyTransformQuick( world, body );
 
 	b2DistanceInput input;
