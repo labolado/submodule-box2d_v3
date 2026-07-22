@@ -1292,15 +1292,16 @@ public:
 		m_jumping = false;
 	}
 
-	static bool PreSolveStatic( b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Vec2 point, b2Vec2 normal, void* context )
+	static bool PreSolveStatic( b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Vec2 point, b2Vec2 normal, float separation,
+								void* context )
 	{
+		(void)separation;
 		Platform* self = static_cast<Platform*>( context );
 		return self->PreSolve( shapeIdA, shapeIdB, point, normal );
 	}
 
-	// This callback must be thread-safe. It may be called multiple times simultaneously.
-	// Notice how this method is constant and doesn't change any data. It also
-	// does not try to access any values in the world that may be changing, such as contact data.
+	// The callback runs on the b2World_Step calling thread while the world is locked.
+	// This method is constant and does not try to modify the world.
 	bool PreSolve( b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Vec2 point, b2Vec2 normal ) const
 	{
 		assert( b2Shape_IsValid( shapeIdA ) );

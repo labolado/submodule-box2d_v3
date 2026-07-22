@@ -123,6 +123,7 @@ static void b2CreateWorkerContexts( b2World* world )
 		world->taskContexts.data[i].jointStateBitSet = b2CreateBitSet( 1024 );
 		world->taskContexts.data[i].enlargedSimBitSet = b2CreateBitSet( 256 );
 		world->taskContexts.data[i].awakeIslandBitSet = b2CreateBitSet( 256 );
+		world->taskContexts.data[i].deferredContinuousBitSet = b2CreateBitSet( 256 );
 		world->taskContexts.data[i].splitIslandId = B2_NULL_INDEX;
 
 		world->sensorTaskContexts.data[i].eventBits = b2CreateBitSet( 128 );
@@ -139,6 +140,7 @@ static void b2DestroyWorkerContexts( b2World* world )
 		b2DestroyBitSet( &world->taskContexts.data[i].jointStateBitSet );
 		b2DestroyBitSet( &world->taskContexts.data[i].enlargedSimBitSet );
 		b2DestroyBitSet( &world->taskContexts.data[i].awakeIslandBitSet );
+		b2DestroyBitSet( &world->taskContexts.data[i].deferredContinuousBitSet );
 
 		b2DestroyBitSet( &world->sensorTaskContexts.data[i].eventBits );
 	}
@@ -450,6 +452,16 @@ static void b2CollideTask( int startIndex, int endIndex, int workerIndex, void* 
 
 		b2Shape* shapeA = shapes + contactSim->shapeIdA;
 		b2Shape* shapeB = shapes + contactSim->shapeIdB;
+		// Use the pass-start snapshot so toggling the world-wide listener from a
+		// serial callback cannot make a contact get skipped by both passes.
+		bool invokesPreSolve = stepContext->collisionPreSolveCallbackEnabled &&
+			( stepContext->collisionGlobalPreSolveEvents || shapeA->enablePreSolveEvents || shapeB->enablePreSolveEvents );
+
+		if ( ( stepContext->collisionPass == 1 && invokesPreSolve ) ||
+			 ( stepContext->collisionPass == 2 && invokesPreSolve == false ) )
+		{
+			continue;
+		}
 
 		// Do proxies still overlap?
 		bool overlap = b2AABB_Overlaps( shapeA->fatAABB, shapeB->fatAABB );
@@ -483,7 +495,8 @@ static void b2CollideTask( int startIndex, int endIndex, int workerIndex, void* 
 			// Contact recycling optimization. Please cite this code if you use this optimization.
 			// This is inspired by persistent contact manifolds used in some physics engines, such as PhysX.
 			// However, this allows larger relative motion and has fewer tuning parameters (just one).
-			if ( recycleDistance > 0.0f && ( contactSim->simFlags & b2_simRelativeTransformValid ) &&
+			if ( invokesPreSolve == false && recycleDistance > 0.0f &&
+				 ( contactSim->simFlags & b2_simRelativeTransformValid ) &&
 				 ( contactSim->simFlags & b2_contactRecycleFlag ) )
 			{
 				b2Transform xf = b2InvMulTransforms( transformA, transformB );
@@ -668,9 +681,27 @@ static void b2Collide( b2StepContext* context )
 		world->taskContexts.data[i].recycledContactCount = 0;
 	}
 
+	context->collisionPreSolveCallbackEnabled = world->preSolveFcn != NULL;
+	context->collisionGlobalPreSolveEvents = world->enableGlobalPreSolveEvents;
+	bool hasPreSolveCallbacks = context->collisionPreSolveCallbackEnabled &&
+		( context->collisionGlobalPreSolveEvents || world->preSolveShapeCount > 0 );
+	context->collisionPass = hasPreSolveCallbacks ? 1 : 0;
+
 	// Task should take at least 40us on a 4GHz CPU (10K cycles)
 	int minRange = 64;
 	b2ParallelFor( world, &b2CollideTask, contactCount, minRange, context );
+
+	if ( hasPreSolveCallbacks )
+	{
+		// All worker tasks have completed. Process contacts that may invoke the
+		// user callback on the thread that called b2World_Step. The gathered
+		// contact order is independent of worker scheduling.
+		context->collisionPass = 2;
+		b2CollideTask( 0, contactCount, 0, context );
+	}
+	context->collisionPass = 0;
+	context->collisionPreSolveCallbackEnabled = false;
+	context->collisionGlobalPreSolveEvents = false;
 
 	b2StackFree( &world->stack, contactSims );
 	context->contactSims = NULL;
@@ -2643,6 +2674,20 @@ void b2World_SetPreSolveCallback( b2WorldId worldId, b2PreSolveFcn* fcn, void* c
 	b2World* world = b2GetWorldFromId( worldId );
 	world->preSolveFcn = fcn;
 	world->preSolveContext = context;
+}
+
+void b2World_EnableGlobalPreSolveEvents( b2WorldId worldId, bool flag )
+{
+	// This flag may be toggled by a listener while a serial pre-solve callback
+	// is running. No structural world state is changed here.
+	b2World* world = b2GetWorldFromId( worldId );
+	world->enableGlobalPreSolveEvents = flag;
+}
+
+bool b2World_AreGlobalPreSolveEventsEnabled( b2WorldId worldId )
+{
+	b2World* world = b2GetWorldFromId( worldId );
+	return world->enableGlobalPreSolveEvents;
 }
 
 void b2World_SetGravity( b2WorldId worldId, b2Vec2 gravity )

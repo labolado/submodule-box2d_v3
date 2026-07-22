@@ -163,6 +163,7 @@ static b2Shape* b2CreateShapeInternal( b2World* world, b2Body* body, b2Transform
 	shape->enableCustomFiltering = def->enableCustomFiltering;
 	shape->enableHitEvents = def->enableHitEvents;
 	shape->enablePreSolveEvents = def->enablePreSolveEvents;
+	world->preSolveShapeCount += def->enablePreSolveEvents ? 1 : 0;
 	shape->proxyKey = B2_NULL_INDEX;
 	shape->localCentroid = b2GetShapeCentroid( shape );
 	shape->aabbMargin = b2ComputeShapeMargin( shape );
@@ -300,6 +301,8 @@ b2ShapeId b2CreateChainSegmentShape( b2BodyId bodyId, const b2ShapeDef* def, con
 static void b2DestroyShapeInternal( b2World* world, b2Shape* shape, b2Body* body, bool wakeBodies )
 {
 	int shapeId = shape->id;
+	world->preSolveShapeCount -= shape->enablePreSolveEvents ? 1 : 0;
+	B2_ASSERT( world->preSolveShapeCount >= 0 );
 
 	// Remove the shape from the body's doubly linked list.
 	if ( shape->prevShapeId != B2_NULL_INDEX )
@@ -1441,6 +1444,13 @@ void b2Shape_EnablePreSolveEvents( b2ShapeId shapeId, bool flag )
 	}
 
 	b2Shape* shape = b2GetShape( world, shapeId );
+	if ( shape->enablePreSolveEvents == flag )
+	{
+		return;
+	}
+
+	world->preSolveShapeCount += flag ? 1 : -1;
+	B2_ASSERT( world->preSolveShapeCount >= 0 );
 	shape->enablePreSolveEvents = flag;
 }
 

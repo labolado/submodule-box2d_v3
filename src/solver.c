@@ -357,11 +357,12 @@ static bool b2ContinuousQueryCallback( int proxyId, uint64_t userData, void* con
 			}
 		}
 
-		if ( didHit && ( shape->enablePreSolveEvents || fastShape->enablePreSolveEvents ) && world->preSolveFcn != NULL )
+		if ( didHit && world->preSolveFcn != NULL &&
+			 ( world->enableGlobalPreSolveEvents || shape->enablePreSolveEvents || fastShape->enablePreSolveEvents ) )
 		{
 			b2ShapeId shapeIdA = { shape->id + 1, world->worldId, shape->generation };
 			b2ShapeId shapeIdB = { fastShape->id + 1, world->worldId, fastShape->generation };
-			didHit = world->preSolveFcn( shapeIdA, shapeIdB, output.point, output.normal, world->preSolveContext );
+			didHit = world->preSolveFcn( shapeIdA, shapeIdB, output.point, output.normal, 0.0f, world->preSolveContext );
 		}
 
 		if ( didHit )
@@ -649,7 +650,16 @@ static void b2FinalizeBodiesTask( int startIndex, int endIndex, int workerIndex,
 				}
 				else
 				{
-					b2SolveContinuous( world, simIndex, taskContext );
+					bool deferPreSolve = world->preSolveFcn != NULL &&
+						( world->enableGlobalPreSolveEvents || world->preSolveShapeCount > 0 );
+					if ( deferPreSolve )
+					{
+						b2SetBit( &taskContext->deferredContinuousBitSet, simIndex );
+					}
+					else
+					{
+						b2SolveContinuous( world, simIndex, taskContext );
+					}
 				}
 			}
 			else
@@ -1623,12 +1633,36 @@ void b2Solve( b2World* world, b2StepContext* stepContext )
 			taskContext->sensorHits.count = 0;
 			b2SetBitCountAndClear( &taskContext->enlargedSimBitSet, awakeBodyCount );
 			b2SetBitCountAndClear( &taskContext->awakeIslandBitSet, awakeIslandCount );
+			b2SetBitCountAndClear( &taskContext->deferredContinuousBitSet, awakeBodyCount );
 			taskContext->splitIslandId = B2_NULL_INDEX;
 			taskContext->splitSleepTime = 0.0f;
 		}
 
 		// Finalize bodies. Must happen after the constraint solver and after island splitting.
 		b2ParallelFor( world, &b2FinalizeBodiesTask, awakeBodyCount, 64, stepContext );
+
+		// Continuous collision can invoke the user pre-solve callback. The
+		// parallel body-finalization pass records those bodies instead, then the
+		// calling thread performs their CCD work here after the worker barrier.
+		b2BitSet* deferredContinuousBitSet = &world->taskContexts.data[0].deferredContinuousBitSet;
+		for ( int i = 1; i < world->workerCount; ++i )
+		{
+			b2InPlaceUnion( deferredContinuousBitSet, &world->taskContexts.data[i].deferredContinuousBitSet );
+		}
+
+		uint32_t deferredWordCount = deferredContinuousBitSet->blockCount;
+		uint64_t* deferredBits = deferredContinuousBitSet->bits;
+		for ( uint32_t k = 0; k < deferredWordCount; ++k )
+		{
+			uint64_t word = deferredBits[k];
+			while ( word != 0 )
+			{
+				uint32_t ctz = b2CTZ64( word );
+				int bodySimIndex = (int)( 64 * k + ctz );
+				b2SolveContinuous( world, bodySimIndex, world->taskContexts.data );
+				word = word & ( word - 1 );
+			}
+		}
 
 		b2StackFree( &world->stack, graphBlocks );
 		b2StackFree( &world->stack, jointBlocks );
@@ -1904,8 +1938,21 @@ void b2Solve( b2World* world, b2StepContext* stepContext )
 
 		// Fast bullet bodies
 		// Note: a bullet body may be moving slow
-		int minRange = 8;
-		b2ParallelFor( world, &b2BulletBodyTask, bulletBodyCount, minRange, stepContext );
+		bool runPreSolveOnCallingThread = world->preSolveFcn != NULL &&
+			( world->enableGlobalPreSolveEvents || world->preSolveShapeCount > 0 );
+		if ( runPreSolveOnCallingThread )
+		{
+			b2TaskContext* taskContext = world->taskContexts.data;
+			for ( int i = 0; i < bulletBodyCount; ++i )
+			{
+				b2SolveContinuous( world, stepContext->bulletBodies[i], taskContext );
+			}
+		}
+		else
+		{
+			int minRange = 8;
+			b2ParallelFor( world, &b2BulletBodyTask, bulletBodyCount, minRange, stepContext );
+		}
 
 		// Serially enlarge broad-phase proxies for bullet shapes
 		b2BroadPhase* broadPhase = &world->broadPhase;

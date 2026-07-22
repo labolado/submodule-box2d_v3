@@ -134,6 +134,16 @@ B2_API void b2World_SetCustomFilterCallback( b2WorldId worldId, b2CustomFilterFc
 /// Register the pre-solve callback. This is optional.
 B2_API void b2World_SetPreSolveCallback( b2WorldId worldId, b2PreSolveFcn* fcn, void* context );
 
+/// Enable pre-solve callbacks for every solid contact in this world. Shape-level
+/// pre-solve flags remain unchanged. This is useful for a world-wide listener.
+/// This flag may be changed from a pre-solve callback.
+/// @ingroup world
+B2_API void b2World_EnableGlobalPreSolveEvents( b2WorldId worldId, bool flag );
+
+/// Are world-wide pre-solve callbacks enabled?
+/// @ingroup world
+B2_API bool b2World_AreGlobalPreSolveEventsEnabled( b2WorldId worldId );
+
 /// Set the gravity vector for the entire world. Box2D has no concept of an up direction and this
 /// is left as a decision for the application. Usually in m/s^2.
 /// @see b2WorldDef

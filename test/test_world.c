@@ -252,14 +252,187 @@ static bool CustomFilter( b2ShapeId shapeIdA, b2ShapeId shapeIdB, void* context 
 	return true;
 }
 
-static bool PreSolveStatic( b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Vec2 point, b2Vec2 normal, void* context )
+static bool PreSolveStatic( b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Vec2 point, b2Vec2 normal, float separation,
+							void* context )
 {
 	(void)shapeIdA;
 	(void)shapeIdB;
 	(void)point;
 	(void)normal;
+	(void)separation;
 	ENSURE( context == NULL );
 	return false;
+}
+
+#if defined( _MSC_VER )
+__declspec( thread ) static bool sPreSolveStepThread;
+#else
+static _Thread_local bool sPreSolveStepThread;
+#endif
+
+typedef struct PreSolveThreadContext
+{
+	int callbackCount;
+	bool wrongThread;
+	float minimumSeparation;
+	bool disableGlobalOnFirstCallback;
+	b2WorldId worldId;
+} PreSolveThreadContext;
+
+static bool PreSolveThreadCheck( b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Vec2 point, b2Vec2 normal, float separation,
+								 void* context )
+{
+	(void)shapeIdA;
+	(void)shapeIdB;
+	(void)point;
+	(void)normal;
+	PreSolveThreadContext* threadContext = context;
+	threadContext->callbackCount += 1;
+	threadContext->wrongThread |= sPreSolveStepThread == false;
+	threadContext->minimumSeparation = b2MinFloat( threadContext->minimumSeparation, separation );
+	if ( threadContext->disableGlobalOnFirstCallback && threadContext->callbackCount == 1 )
+	{
+		b2World_EnableGlobalPreSolveEvents( threadContext->worldId, false );
+	}
+	return true;
+}
+
+static int PreSolveCallingThreadTest( void )
+{
+	b2WorldDef worldDef = b2DefaultWorldDef();
+	worldDef.workerCount = 4;
+	worldDef.gravity = (b2Vec2){ 0.0f, -10.0f };
+	b2WorldId worldId = b2CreateWorld( &worldDef );
+	ENSURE( b2World_GetWorkerCount( worldId ) == 4 );
+
+	PreSolveThreadContext context = { 0 };
+	b2World_SetPreSolveCallback( worldId, PreSolveThreadCheck, &context );
+
+	b2BodyDef groundDef = b2DefaultBodyDef();
+	b2BodyId groundId = b2CreateBody( worldId, &groundDef );
+	b2Polygon groundBox = b2MakeBox( 5.0f, 0.5f );
+	b2ShapeDef groundShapeDef = b2DefaultShapeDef();
+	b2CreatePolygonShape( groundId, &groundShapeDef, &groundBox );
+
+	b2BodyDef bodyDef = b2DefaultBodyDef();
+	bodyDef.type = b2_dynamicBody;
+	bodyDef.position = (b2Vec2){ 0.0f, 0.75f };
+	b2BodyId bodyId = b2CreateBody( worldId, &bodyDef );
+	b2Polygon box = b2MakeBox( 0.5f, 0.5f );
+	b2ShapeDef shapeDef = b2DefaultShapeDef();
+	shapeDef.enablePreSolveEvents = true;
+	b2ShapeId shapeId = b2CreatePolygonShape( bodyId, &shapeDef, &box );
+
+	sPreSolveStepThread = true;
+	b2World_Step( worldId, 1.0f / 60.0f, 4, NULL, NULL );
+	sPreSolveStepThread = false;
+
+	ENSURE( context.callbackCount > 0 );
+	ENSURE( context.wrongThread == false );
+	ENSURE( context.minimumSeparation < 0.0f );
+
+	// Verify the world-wide mode invokes the same calling-thread callback even
+	// when no individual shape has pre-solve events enabled.
+	b2Shape_EnablePreSolveEvents( shapeId, false );
+	b2World_EnableGlobalPreSolveEvents( worldId, true );
+	ENSURE( b2World_AreGlobalPreSolveEventsEnabled( worldId ) == true );
+	context.callbackCount = 0;
+	sPreSolveStepThread = true;
+	b2World_Step( worldId, 1.0f / 60.0f, 4, NULL, NULL );
+	sPreSolveStepThread = false;
+
+	ENSURE( context.callbackCount > 0 );
+	ENSURE( context.wrongThread == false );
+
+	b2World_EnableGlobalPreSolveEvents( worldId, false );
+	ENSURE( b2World_AreGlobalPreSolveEventsEnabled( worldId ) == false );
+	b2DestroyWorld( worldId );
+	return 0;
+}
+
+static int PreSolveCcdCallingThreadTest( void )
+{
+	b2WorldDef worldDef = b2DefaultWorldDef();
+	worldDef.workerCount = 4;
+	worldDef.gravity = b2Vec2_zero;
+	b2WorldId worldId = b2CreateWorld( &worldDef );
+
+	PreSolveThreadContext context = { 0 };
+	b2World_SetPreSolveCallback( worldId, PreSolveThreadCheck, &context );
+	b2World_EnableGlobalPreSolveEvents( worldId, true );
+
+	// A thin wall and a fast bullet exercise the continuous-collision path. No
+	// shape has enabled pre-solve events, so this also covers world-wide mode in
+	// CCD rather than only the discrete contact update.
+	b2BodyDef wallDef = b2DefaultBodyDef();
+	b2BodyId wallId = b2CreateBody( worldId, &wallDef );
+	b2Polygon wall = b2MakeBox( 0.05f, 2.0f );
+	b2ShapeDef shapeDef = b2DefaultShapeDef();
+	b2CreatePolygonShape( wallId, &shapeDef, &wall );
+
+	b2BodyDef bulletDef = b2DefaultBodyDef();
+	bulletDef.type = b2_dynamicBody;
+	bulletDef.isBullet = true;
+	bulletDef.position = (b2Vec2){ -1.0f, 0.0f };
+	bulletDef.linearVelocity = (b2Vec2){ 100.0f, 0.0f };
+	b2BodyId bulletId = b2CreateBody( worldId, &bulletDef );
+	b2Circle circle = { b2Vec2_zero, 0.1f };
+	b2CreateCircleShape( bulletId, &shapeDef, &circle );
+
+	sPreSolveStepThread = true;
+	b2World_Step( worldId, 1.0f / 60.0f, 4, NULL, NULL );
+	sPreSolveStepThread = false;
+
+	ENSURE( context.callbackCount > 0 );
+	ENSURE( context.wrongThread == false );
+
+	b2DestroyWorld( worldId );
+	return 0;
+}
+
+static int PreSolveGlobalToggleTest( void )
+{
+	b2WorldDef worldDef = b2DefaultWorldDef();
+	worldDef.workerCount = 4;
+	worldDef.gravity = b2Vec2_zero;
+	b2WorldId worldId = b2CreateWorld( &worldDef );
+
+	PreSolveThreadContext context = { 0 };
+	context.disableGlobalOnFirstCallback = true;
+	context.worldId = worldId;
+	b2World_SetPreSolveCallback( worldId, PreSolveThreadCheck, &context );
+	b2World_EnableGlobalPreSolveEvents( worldId, true );
+
+	b2BodyDef groundDef = b2DefaultBodyDef();
+	b2BodyId groundId = b2CreateBody( worldId, &groundDef );
+	b2Polygon ground = b2MakeBox( 5.0f, 0.5f );
+	b2ShapeDef groundShapeDef = b2DefaultShapeDef();
+	b2CreatePolygonShape( groundId, &groundShapeDef, &ground );
+
+	b2Polygon box = b2MakeBox( 0.5f, 0.5f );
+	b2ShapeDef shapeDef = b2DefaultShapeDef();
+	shapeDef.enableContactEvents = true;
+	for ( int i = 0; i < 2; ++i )
+	{
+		b2BodyDef bodyDef = b2DefaultBodyDef();
+		bodyDef.type = b2_dynamicBody;
+		bodyDef.position = (b2Vec2){ i == 0 ? -1.0f : 1.0f, 0.75f };
+		b2BodyId bodyId = b2CreateBody( worldId, &bodyDef );
+		b2CreatePolygonShape( bodyId, &shapeDef, &box );
+	}
+
+	sPreSolveStepThread = true;
+	b2World_Step( worldId, 1.0f / 60.0f, 4, NULL, NULL );
+	sPreSolveStepThread = false;
+
+	b2ContactEvents events = b2World_GetContactEvents( worldId );
+	ENSURE( context.callbackCount == 1 );
+	ENSURE( context.wrongThread == false );
+	ENSURE( events.beginCount == 2 );
+	ENSURE( b2World_AreGlobalPreSolveEventsEnabled( worldId ) == false );
+
+	b2DestroyWorld( worldId );
+	return 0;
 }
 
 // This test is here to ensure all API functions link correctly.
@@ -661,6 +834,9 @@ int WorldTest( void )
 	RUN_SUBTEST( TestIsValid );
 	RUN_SUBTEST( TestWorldRecycle );
 	RUN_SUBTEST( TestWorldCoverage );
+	RUN_SUBTEST( PreSolveCallingThreadTest );
+	RUN_SUBTEST( PreSolveCcdCallingThreadTest );
+	RUN_SUBTEST( PreSolveGlobalToggleTest );
 	RUN_SUBTEST( TestSensor );
 	RUN_SUBTEST( TestSetWorkerCount );
 	RUN_SUBTEST( ChainSegmentShapeTest );

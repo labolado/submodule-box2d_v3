@@ -560,7 +560,8 @@ bool b2UpdateContact( b2World* world, b2ContactSim* contactSim, b2Shape* shapeA,
 	int pointCount = contactSim->manifold.pointCount;
 	bool touching = pointCount > 0;
 
-	if ( touching && world->preSolveFcn != NULL && ( contactSim->simFlags & b2_simEnablePreSolveEvents ) != 0 )
+	if ( touching && world->preSolveFcn != NULL &&
+		 ( world->enableGlobalPreSolveEvents || shapeA->enablePreSolveEvents || shapeB->enablePreSolveEvents ) )
 	{
 		b2ShapeId shapeIdA = { shapeA->id + 1, world->worldId, shapeA->generation };
 		b2ShapeId shapeIdB = { shapeB->id + 1, world->worldId, shapeB->generation };
@@ -580,8 +581,7 @@ bool b2UpdateContact( b2World* world, b2ContactSim* contactSim, b2Shape* shapeA,
 			}
 		}
 
-		// this call assumes thread safety
-		touching = world->preSolveFcn( shapeIdA, shapeIdB, bestPoint, manifold->normal, world->preSolveContext );
+		touching = world->preSolveFcn( shapeIdA, shapeIdB, bestPoint, manifold->normal, bestSeparation, world->preSolveContext );
 		if ( touching == false )
 		{
 			// disable contact

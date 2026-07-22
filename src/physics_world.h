@@ -49,6 +49,10 @@ typedef struct b2TaskContext
 	// Used to put islands to sleep
 	b2BitSet awakeIslandBitSet;
 
+	// Fast bodies whose continuous collision pass must run on the b2World_Step
+	// calling thread because it may invoke the user pre-solve callback.
+	b2BitSet deferredContinuousBitSet;
+
 	// Per worker split island candidate
 	float splitSleepTime;
 	int splitIslandId;
@@ -177,6 +181,8 @@ typedef struct b2World
 
 	b2PreSolveFcn* preSolveFcn;
 	void* preSolveContext;
+	int preSolveShapeCount;
+	bool enableGlobalPreSolveEvents;
 
 	b2CustomFilterFcn* customFilterFcn;
 	void* customFilterContext;

@@ -193,6 +193,14 @@ typedef struct b2StepContext
 	// - parallel-for collide with no gaps, includes touching and non-touching
 	b2ContactSim** contactSims;
 
+	// Collision pass selector. Contacts that can invoke the user pre-solve
+	// callback are deferred until the parallel pass has completed so the
+	// callback always runs on the thread that called b2World_Step.
+	// 0: all contacts, 1: contacts without pre-solve callbacks, 2: contacts with pre-solve callbacks
+	int collisionPass;
+	bool collisionPreSolveCallbackEnabled;
+	bool collisionGlobalPreSolveEvents;
+
 	// Flat view of the wide contact constraint array used by prepare and store.
 	// prepareSpans has activeColorCount + 1 entries, the last being a sentinel
 	// at wideContactCount. wideContactConstraints is the contiguous base

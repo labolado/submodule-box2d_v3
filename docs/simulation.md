@@ -1260,15 +1260,17 @@ This is called after collision detection, but before collision
 resolution. This gives you a chance to disable the contact based on the contact geometry. For example, you can implement a one-sided platform using this callback.
 
 The contact will be re-enabled each time through collision processing,
-so you will need to disable the contact every time-step. This function must be thread-safe
-and must not read from or write to the Box2D world.
+so you will need to disable the contact every time-step. The callback runs on the thread
+that calls `b2World_Step` after the parallel narrow-phase worker barrier. The world remains
+locked, so the callback must not structurally modify the Box2D world. The world-wide pre-solve
+event flag is the one exception and may be changed from this callback.
 
 ```c
-bool MyPreSolve(b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Manifold* manifold, void* context)
+bool MyPreSolve(b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Vec2 point, b2Vec2 normal, float separation, void* context)
 {
     MyGame* myGame = context;
 
-    if (myGame->IsHittingBelowPlatform(shapeIdA, shapeIdB, manifold))
+    if (myGame->IsHittingBelowPlatform(shapeIdA, shapeIdB, point, normal))
     {
         return false;
     }
@@ -1897,8 +1899,9 @@ are known. This is necessary for obtaining good simulation results efficiently. 
 of the time step then new contact points would not be known to the constraint solver and shapes would sink into each
 other.
 
-The `b2PreSolveFcn` is called within the parallel-for so it should be efficient and thread-safe. This is only called for
-shapes that have `enablePreSolveEvents == true`.
+Contacts that cannot invoke `b2PreSolveFcn` are updated by the parallel-for. Contacts that can invoke it are updated
+after the worker barrier on the thread calling `b2World_Step`. This is only called for shapes that have
+`enablePreSolveEvents == true`, unless world-wide pre-solve events have been enabled.
 
 ### merge islands
 Simulation islands are merged when shapes begin touching. Existing islands that have shapes that stop touching
