@@ -32,6 +32,7 @@ extern int DeterminismTest( void );
 extern int DistanceTest( void );
 extern int DynamicTreeTest( void );
 extern int IdTest( void );
+extern int JointTest( void );
 extern int MathTest( void );
 extern int ShapeTest( void );
 extern int TableTest( void );
@@ -90,6 +91,7 @@ int main( int argc, char** argv )
 	MAYBE_RUN_TEST( DistanceTest );
 	MAYBE_RUN_TEST( DynamicTreeTest );
 	MAYBE_RUN_TEST( IdTest );
+	MAYBE_RUN_TEST( JointTest );
 	MAYBE_RUN_TEST( ShapeTest );
 	MAYBE_RUN_TEST( ThreadTest );
 	MAYBE_RUN_TEST( WorldTest );

@@ -195,6 +195,7 @@ typedef struct b2WeldJoint
 	b2Transform frameB;
 	b2Vec2 deltaCenter;
 	float axialMass;
+	bool enableBlockSolve;
 } b2WeldJoint;
 
 typedef struct b2WheelJoint

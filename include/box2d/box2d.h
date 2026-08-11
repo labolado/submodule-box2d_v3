@@ -1278,6 +1278,14 @@ B2_API void b2WeldJoint_SetAngularDampingRatio( b2JointId jointId, float damping
 /// Get the weld joint angular damping ratio, non-dimensional
 B2_API float b2WeldJoint_GetAngularDampingRatio( b2JointId jointId );
 
+/// Enable the experimental coupled block solver for a rigid weld.
+/// This is only active when both linear and angular Hertz are zero.
+B2_API void b2WeldJoint_EnableBlockSolve( b2JointId jointId, bool enableBlockSolve );
+
+/// Is the experimental coupled block solver enabled?
+/// This may be enabled but inactive when either linear or angular Hertz is non-zero.
+B2_API bool b2WeldJoint_IsBlockSolveEnabled( b2JointId jointId );
+
 /** @} */
 
 /**

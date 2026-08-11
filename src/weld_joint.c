@@ -11,45 +11,66 @@
 // needed for dll export
 #include "box2d/box2d.h"
 
-#define B2_WELD_BLOCK_SOLVE 0
+#include <float.h>
 
-#if B2_WELD_BLOCK_SOLVE
 typedef struct
 {
 	float x, y, z;
-} b2Vec3;
+} b2WeldVec3;
 
 // A 3-by-3 matrix. Stored in column-major order.
 typedef struct
 {
-	b2Vec3 cx, cy, cz;
-} b2Mat33;
+	b2WeldVec3 cx, cy, cz;
+} b2WeldMat33;
 
-static inline float b2Dot3( b2Vec3 a, b2Vec3 b )
+static inline float b2DotWeldVec3( b2WeldVec3 a, b2WeldVec3 b )
 {
 	return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
-static inline b2Vec3 b2Cross3( b2Vec3 a, b2Vec3 b )
+static inline b2WeldVec3 b2CrossWeldVec3( b2WeldVec3 a, b2WeldVec3 b )
 {
-	return (b2Vec3){ a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x };
+	return (b2WeldVec3){ a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x };
 }
 
-static inline b2Vec3 b2Solve33(const b2Mat33* m, b2Vec3 b )
+static bool b2SolveWeld33( const b2WeldMat33* m, b2WeldVec3 b, b2WeldVec3* result )
 {
-	float det = b2Dot3( m->cx, b2Cross3( m->cy, m->cz ) );
-	if ( det != 0.0f )
+	float scale = b2AbsFloat( m->cx.x );
+	scale = b2MaxFloat( scale, b2AbsFloat( m->cx.y ) );
+	scale = b2MaxFloat( scale, b2AbsFloat( m->cx.z ) );
+	scale = b2MaxFloat( scale, b2AbsFloat( m->cy.x ) );
+	scale = b2MaxFloat( scale, b2AbsFloat( m->cy.y ) );
+	scale = b2MaxFloat( scale, b2AbsFloat( m->cy.z ) );
+	scale = b2MaxFloat( scale, b2AbsFloat( m->cz.x ) );
+	scale = b2MaxFloat( scale, b2AbsFloat( m->cz.y ) );
+	scale = b2MaxFloat( scale, b2AbsFloat( m->cz.z ) );
+
+	if ( scale == 0.0f )
 	{
-		det = 1.0f / det;
+		return false;
 	}
 
-	b2Vec3 x;
-	x.x = det * b2Dot3( b, b2Cross3( m->cy, m->cz ) );
-	x.y = det * b2Dot3( m->cx, b2Cross3( b, m->cz ) );
-	x.z = det * b2Dot3( m->cx, b2Cross3( m->cy, b ) );
-	return x;
+	float invScale = 1.0f / scale;
+	b2WeldMat33 n = {
+		{ invScale * m->cx.x, invScale * m->cx.y, invScale * m->cx.z },
+		{ invScale * m->cy.x, invScale * m->cy.y, invScale * m->cy.z },
+		{ invScale * m->cz.x, invScale * m->cz.y, invScale * m->cz.z },
+	};
+
+	float det = b2DotWeldVec3( n.cx, b2CrossWeldVec3( n.cy, n.cz ) );
+	if ( b2AbsFloat( det ) <= 100.0f * FLT_EPSILON )
+	{
+		return false;
+	}
+
+	float invDetScale = invScale / det;
+	result->x = invDetScale * b2DotWeldVec3( b, b2CrossWeldVec3( n.cy, n.cz ) );
+	result->y = invDetScale * b2DotWeldVec3( n.cx, b2CrossWeldVec3( b, n.cz ) );
+	result->z = invDetScale * b2DotWeldVec3( n.cx, b2CrossWeldVec3( n.cy, b ) );
+
+	return b2IsValidFloat( result->x ) && b2IsValidFloat( result->y ) && b2IsValidFloat( result->z );
 }
-#endif
 
 void b2WeldJoint_SetLinearHertz( b2JointId jointId, float hertz )
 {
@@ -101,6 +122,18 @@ float b2WeldJoint_GetAngularDampingRatio( b2JointId jointId )
 {
 	b2JointSim* joint = b2GetJointSimCheckType( jointId, b2_weldJoint );
 	return joint->weldJoint.angularDampingRatio;
+}
+
+void b2WeldJoint_EnableBlockSolve( b2JointId jointId, bool enableBlockSolve )
+{
+	b2JointSim* joint = b2GetJointSimCheckType( jointId, b2_weldJoint );
+	joint->weldJoint.enableBlockSolve = enableBlockSolve;
+}
+
+bool b2WeldJoint_IsBlockSolveEnabled( b2JointId jointId )
+{
+	b2JointSim* joint = b2GetJointSimCheckType( jointId, b2_weldJoint );
+	return joint->weldJoint.enableBlockSolve;
 }
 
 b2Vec2 b2GetWeldJointForce( b2World* world, b2JointSim* base )
@@ -263,167 +296,145 @@ void b2SolveWeldJoint( b2JointSim* base, b2StepContext* context, bool useBias )
 	b2Vec2 vB = stateB->linearVelocity;
 	float wB = stateB->angularVelocity;
 
-	// Block solve doesn't work correctly with mixed stiffness values
-#if B2_WELD_BLOCK_SOLVE
-	// J = [-I -r1_skew I r2_skew]
-	//     [ 0       -1 0       1]
-	// r_skew = [-ry; rx]
-
-	// Matlab
-	// K = [ mA+r1y^2*iA+mB+r2y^2*iB,  -r1y*iA*r1x-r2y*iB*r2x,          -r1y*iA-r2y*iB]
-	//     [  -r1y*iA*r1x-r2y*iB*r2x, mA+r1x^2*iA+mB+r2x^2*iB,           r1x*iA+r2x*iB]
-	//     [          -r1y*iA-r2y*iB,           r1x*iA+r2x*iB,                   iA+iB]
-	b2Vec2 rA = b2RotateVector( stateA->deltaRotation, joint->frameA.p );
-	b2Vec2 rB = b2RotateVector( stateB->deltaRotation, joint->frameB.p );
-
-	b2Mat33 K;
-	K.cx.x = mA + mB + rA.y * rA.y * iA + rB.y * rB.y * iB;
-	K.cy.x = -rA.y * rA.x * iA - rB.y * rB.x * iB;
-	K.cz.x = -rA.y * iA - rB.y * iB;
-	K.cx.y = K.cy.x;
-	K.cy.y = mA + mB + rA.x * rA.x * iA + rB.x * rB.x * iB;
-	K.cz.y = rA.x * iA + rB.x * iB;
-	K.cx.z = K.cz.x;
-	K.cy.z = K.cz.y;
-	K.cz.z = iA + iB;
-
-	b2Vec3 bias = {0.0f, 0.0f, 0.0f};
-	float linearMassScale = 1.0f;
-	float linearImpulseScale = 0.0f;
-	if ( useBias || joint->linearHertz > 0.0f )
+	bool solved = false;
+	if ( joint->enableBlockSolve && joint->linearHertz == 0.0f && joint->angularHertz == 0.0f )
 	{
-		// linear
-		b2Vec2 dcA = stateA->deltaPosition;
-		b2Vec2 dcB = stateB->deltaPosition;
-		b2Vec2 jointTranslation = b2Add( b2Add( b2Sub( dcB, dcA ), b2Sub( rB, rA ) ), joint->deltaCenter );
+		// Block solving requires matching softness for all three constraint rows.
+		// Hard-hard welds use the same base constraint softness for linear and angular correction.
+		B2_ASSERT( joint->linearSpring.biasRate == joint->angularSpring.biasRate );
+		B2_ASSERT( joint->linearSpring.massScale == joint->angularSpring.massScale );
+		B2_ASSERT( joint->linearSpring.impulseScale == joint->angularSpring.impulseScale );
 
-		bias.x = joint->linearSpring.biasRate * jointTranslation.x;
-		bias.y = joint->linearSpring.biasRate * jointTranslation.y;
-		
-		linearMassScale = joint->linearSpring.massScale;
-		linearImpulseScale = joint->linearSpring.impulseScale;
-	}
-
-	float angularMassScale = 1.0f;
-	float angularImpulseScale = 0.0f;
-	if ( useBias || joint->angularHertz > 0.0f )
-	{
-		// angular
-		b2Rot qA = b2MulRot( stateA->deltaRotation, joint->frameA.q );
-		b2Rot qB = b2MulRot( stateB->deltaRotation, joint->frameB.q );
-		b2Rot relQ = b2InvMulRot( qA, qB );
-		float jointAngle = b2Rot_GetAngle( relQ );
-
-		bias.z = joint->angularSpring.biasRate * jointAngle;
-
-		angularMassScale = joint->angularSpring.massScale;
-		angularImpulseScale = joint->angularSpring.impulseScale;
-	}
-
-	b2Vec2 Cdot1 = b2Sub( b2Add( vB, b2CrossSV( wB, rB ) ), b2Add( vA, b2CrossSV( wA, rA ) ) );
-	float Cdot2 = wB - wA;
-
-	b2Vec3 Cdot = {Cdot1.x + bias.x, Cdot1.y + bias.y, Cdot2 + bias.z};
-
-	b2Vec3 b = b2Solve33( &K, Cdot );
-
-	b2Vec2 linearImpulse = {
-		-linearMassScale * b.x - linearImpulseScale * joint->linearImpulse.x,
-		-linearMassScale * b.y - linearImpulseScale * joint->linearImpulse.y,
-	};
-	joint->linearImpulse = b2Add( joint->linearImpulse, linearImpulse );
-
-	float angularImpulse = -angularMassScale * b.z - angularImpulseScale * joint->angularImpulse;
-	joint->angularImpulse += angularImpulse;
-
-	vA = b2MulSub( vA, mA, linearImpulse );
-	wA -= iA * (b2Cross( rA, linearImpulse ) + angularImpulse);
-	vB = b2MulAdd( vB, mB, linearImpulse );
-	wB += iB * (b2Cross( rB, linearImpulse ) + angularImpulse);
-
-	// todo debugging
-	Cdot1 = b2Sub( b2Add( vB, b2CrossSV( wB, rB ) ), b2Add( vA, b2CrossSV( wA, rA ) ) );
-	Cdot2 = wB - wA;
-
-	if ( useBias == false && b2Length(Cdot1) > 0.0001f )
-	{
-		Cdot1.x += 0.0f;
-	}
-
-	if ( useBias == false && b2AbsFloat( Cdot2 ) > 0.0001f )
-	{
-		Cdot2 += 0.0f;
-	}
-
-#else
-
-	// angular constraint
-	{
-		b2Rot qA = b2MulRot( stateA->deltaRotation, joint->frameA.q );
-		b2Rot qB = b2MulRot( stateB->deltaRotation, joint->frameB.q );
-		b2Rot relQ = b2InvMulRot( qA, qB );
-		float jointAngle = b2Rot_GetAngle( relQ );
-
-		float bias = 0.0f;
-		float massScale = 1.0f;
-		float impulseScale = 0.0f;
-		if ( useBias || joint->angularHertz > 0.0f )
-		{
-			float C = jointAngle;
-			bias = joint->angularSpring.biasRate * C;
-			massScale = joint->angularSpring.massScale;
-			impulseScale = joint->angularSpring.impulseScale;
-		}
-
-		float Cdot = wB - wA;
-		float impulse = -massScale * joint->axialMass * ( Cdot + bias ) - impulseScale * joint->angularImpulse;
-		joint->angularImpulse += impulse;
-
-		wA -= iA * impulse;
-		wB += iB * impulse;
-	}
-
-	// linear constraint
-	{
+		// J = [-I -r1_skew I r2_skew]
+		//     [ 0       -1 0       1]
+		// r_skew = [-ry; rx]
 		b2Vec2 rA = b2RotateVector( stateA->deltaRotation, joint->frameA.p );
 		b2Vec2 rB = b2RotateVector( stateB->deltaRotation, joint->frameB.p );
 
-		b2Vec2 bias = b2Vec2_zero;
+		b2WeldMat33 K;
+		K.cx.x = mA + mB + rA.y * rA.y * iA + rB.y * rB.y * iB;
+		K.cy.x = -rA.y * rA.x * iA - rB.y * rB.x * iB;
+		K.cz.x = -rA.y * iA - rB.y * iB;
+		K.cx.y = K.cy.x;
+		K.cy.y = mA + mB + rA.x * rA.x * iA + rB.x * rB.x * iB;
+		K.cz.y = rA.x * iA + rB.x * iB;
+		K.cx.z = K.cz.x;
+		K.cy.z = K.cz.y;
+		K.cz.z = iA + iB;
+
+		b2WeldVec3 bias = { 0.0f, 0.0f, 0.0f };
 		float massScale = 1.0f;
 		float impulseScale = 0.0f;
-		if ( useBias || joint->linearHertz > 0.0f )
+		if ( useBias )
 		{
 			b2Vec2 dcA = stateA->deltaPosition;
 			b2Vec2 dcB = stateB->deltaPosition;
-			b2Vec2 C = b2Add( b2Add( b2Sub( dcB, dcA ), b2Sub( rB, rA ) ), joint->deltaCenter );
+			b2Vec2 jointTranslation = b2Add( b2Add( b2Sub( dcB, dcA ), b2Sub( rB, rA ) ), joint->deltaCenter );
+			bias.x = joint->linearSpring.biasRate * jointTranslation.x;
+			bias.y = joint->linearSpring.biasRate * jointTranslation.y;
 
-			bias = b2MulSV( joint->linearSpring.biasRate, C );
+			b2Rot qA = b2MulRot( stateA->deltaRotation, joint->frameA.q );
+			b2Rot qB = b2MulRot( stateB->deltaRotation, joint->frameB.q );
+			b2Rot relQ = b2InvMulRot( qA, qB );
+			bias.z = joint->angularSpring.biasRate * b2Rot_GetAngle( relQ );
+
 			massScale = joint->linearSpring.massScale;
 			impulseScale = joint->linearSpring.impulseScale;
 		}
 
-		b2Vec2 Cdot = b2Sub( b2Add( vB, b2CrossSV( wB, rB ) ), b2Add( vA, b2CrossSV( wA, rA ) ) );
+		b2Vec2 Cdot1 = b2Sub( b2Add( vB, b2CrossSV( wB, rB ) ), b2Add( vA, b2CrossSV( wA, rA ) ) );
+		float Cdot2 = wB - wA;
+		b2WeldVec3 Cdot = { Cdot1.x + bias.x, Cdot1.y + bias.y, Cdot2 + bias.z };
 
-		b2Mat22 K;
-		K.cx.x = mA + mB + rA.y * rA.y * iA + rB.y * rB.y * iB;
-		K.cy.x = -rA.y * rA.x * iA - rB.y * rB.x * iB;
-		K.cx.y = K.cy.x;
-		K.cy.y = mA + mB + rA.x * rA.x * iA + rB.x * rB.x * iB;
-		b2Vec2 b = b2Solve22( K, b2Add( Cdot, bias ) );
+		b2WeldVec3 blockImpulse;
+		if ( b2SolveWeld33( &K, Cdot, &blockImpulse ) )
+		{
+			b2Vec2 linearImpulse = {
+				-massScale * blockImpulse.x - impulseScale * joint->linearImpulse.x,
+				-massScale * blockImpulse.y - impulseScale * joint->linearImpulse.y,
+			};
+			float angularImpulse = -massScale * blockImpulse.z - impulseScale * joint->angularImpulse;
 
-		b2Vec2 impulse = {
-			-massScale * b.x - impulseScale * joint->linearImpulse.x,
-			-massScale * b.y - impulseScale * joint->linearImpulse.y,
-		};
+			joint->linearImpulse = b2Add( joint->linearImpulse, linearImpulse );
+			joint->angularImpulse += angularImpulse;
 
-		joint->linearImpulse = b2Add( joint->linearImpulse, impulse );
-
-		vA = b2MulSub( vA, mA, impulse );
-		wA -= iA * b2Cross( rA, impulse );
-		vB = b2MulAdd( vB, mB, impulse );
-		wB += iB * b2Cross( rB, impulse );
+			vA = b2MulSub( vA, mA, linearImpulse );
+			wA -= iA * ( b2Cross( rA, linearImpulse ) + angularImpulse );
+			vB = b2MulAdd( vB, mB, linearImpulse );
+			wB += iB * ( b2Cross( rB, linearImpulse ) + angularImpulse );
+			solved = true;
+		}
 	}
-#endif
+
+	if ( solved == false )
+	{
+		// angular constraint
+		{
+			b2Rot qA = b2MulRot( stateA->deltaRotation, joint->frameA.q );
+			b2Rot qB = b2MulRot( stateB->deltaRotation, joint->frameB.q );
+			b2Rot relQ = b2InvMulRot( qA, qB );
+			float jointAngle = b2Rot_GetAngle( relQ );
+
+			float bias = 0.0f;
+			float massScale = 1.0f;
+			float impulseScale = 0.0f;
+			if ( useBias || joint->angularHertz > 0.0f )
+			{
+				float C = jointAngle;
+				bias = joint->angularSpring.biasRate * C;
+				massScale = joint->angularSpring.massScale;
+				impulseScale = joint->angularSpring.impulseScale;
+			}
+
+			float Cdot = wB - wA;
+			float impulse = -massScale * joint->axialMass * ( Cdot + bias ) - impulseScale * joint->angularImpulse;
+			joint->angularImpulse += impulse;
+
+			wA -= iA * impulse;
+			wB += iB * impulse;
+		}
+
+		// linear constraint
+		{
+			b2Vec2 rA = b2RotateVector( stateA->deltaRotation, joint->frameA.p );
+			b2Vec2 rB = b2RotateVector( stateB->deltaRotation, joint->frameB.p );
+
+			b2Vec2 bias = b2Vec2_zero;
+			float massScale = 1.0f;
+			float impulseScale = 0.0f;
+			if ( useBias || joint->linearHertz > 0.0f )
+			{
+				b2Vec2 dcA = stateA->deltaPosition;
+				b2Vec2 dcB = stateB->deltaPosition;
+				b2Vec2 C = b2Add( b2Add( b2Sub( dcB, dcA ), b2Sub( rB, rA ) ), joint->deltaCenter );
+
+				bias = b2MulSV( joint->linearSpring.biasRate, C );
+				massScale = joint->linearSpring.massScale;
+				impulseScale = joint->linearSpring.impulseScale;
+			}
+
+			b2Vec2 Cdot = b2Sub( b2Add( vB, b2CrossSV( wB, rB ) ), b2Add( vA, b2CrossSV( wA, rA ) ) );
+
+			b2Mat22 K;
+			K.cx.x = mA + mB + rA.y * rA.y * iA + rB.y * rB.y * iB;
+			K.cy.x = -rA.y * rA.x * iA - rB.y * rB.x * iB;
+			K.cx.y = K.cy.x;
+			K.cy.y = mA + mB + rA.x * rA.x * iA + rB.x * rB.x * iB;
+			b2Vec2 b = b2Solve22( K, b2Add( Cdot, bias ) );
+
+			b2Vec2 impulse = {
+				-massScale * b.x - impulseScale * joint->linearImpulse.x,
+				-massScale * b.y - impulseScale * joint->linearImpulse.y,
+			};
+
+			joint->linearImpulse = b2Add( joint->linearImpulse, impulse );
+
+			vA = b2MulSub( vA, mA, impulse );
+			wA -= iA * b2Cross( rA, impulse );
+			vB = b2MulAdd( vB, mB, impulse );
+			wB += iB * b2Cross( rB, impulse );
+		}
+	}
 
 	B2_ASSERT( b2IsValidVec2( vA ) );
 	B2_ASSERT( b2IsValidFloat( wA ) );
