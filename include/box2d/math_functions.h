@@ -700,6 +700,21 @@ B2_API void b2SetLengthUnitsPerMeter( float lengthUnits );
 /// Get the current length units per meter.
 B2_API float b2GetLengthUnitsPerMeter( void );
 
+/// Enable or disable pass-through for speculative polygon corner contacts.
+///
+/// When enabled, polygon contacts are discarded while the normal separation is
+/// within a small tolerance and the shapes only touch (or barely overlap) along
+/// the contact tangent. This can prevent an exactly fitting polygon from being
+/// supported by speculative contacts at both corners of a gap.
+///
+/// This setting is global, affects polygon-polygon collision in every world,
+/// and should not be changed while a world is stepping. It is disabled by
+/// default.
+B2_API void b2SetSpeculativeCornerPassThrough( bool flag );
+
+/// Get whether speculative polygon corner pass-through is enabled.
+B2_API bool b2GetSpeculativeCornerPassThrough( void );
+
 /**@}*/
 
 /**

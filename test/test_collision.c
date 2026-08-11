@@ -194,10 +194,48 @@ static int AABBRayCastTest( void )
 	return 0;
 }
 
+static int SpeculativeCornerPassThroughTest( void )
+{
+	b2Polygon square = b2MakeSquare( 0.5f );
+	b2Transform lowerTransform = { { -1.0f, 0.0f }, b2Rot_identity };
+	b2Transform fallingTransform = { { 0.0f, 1.01f }, b2Rot_identity };
+
+	b2SetSpeculativeCornerPassThrough( false );
+	ENSURE( b2GetSpeculativeCornerPassThrough() == false );
+
+	b2Manifold manifold = b2CollidePolygons( &square, lowerTransform, &square, fallingTransform );
+	ENSURE( manifold.pointCount > 0 );
+	ENSURE( manifold.normal.y > 0.99f );
+
+	b2SetSpeculativeCornerPassThrough( true );
+	ENSURE( b2GetSpeculativeCornerPassThrough() == true );
+
+	manifold = b2CollidePolygons( &square, lowerTransform, &square, fallingTransform );
+	ENSURE( manifold.pointCount == 0 );
+
+	// Once the falling square has entered the gap, preserve its side contact.
+	fallingTransform.p.y = 0.99f;
+	manifold = b2CollidePolygons( &square, lowerTransform, &square, fallingTransform );
+	ENSURE( manifold.pointCount > 0 );
+	ENSURE( manifold.normal.x > 0.99f );
+
+	// Keep ordinary speculative face contacts with meaningful tangent overlap.
+	fallingTransform.p.y = 1.01f;
+	fallingTransform.p.x = -1.0f;
+	manifold = b2CollidePolygons( &square, lowerTransform, &square, fallingTransform );
+	ENSURE( manifold.pointCount == 2 );
+	ENSURE( manifold.normal.y > 0.99f );
+
+	// Restore the default because this is a process-wide setting.
+	b2SetSpeculativeCornerPassThrough( false );
+	return 0;
+}
+
 int CollisionTest( void )
 {
 	RUN_SUBTEST( AABBTest );
 	RUN_SUBTEST( AABBRayCastTest );
+	RUN_SUBTEST( SpeculativeCornerPassThroughTest );
 
 	return 0;
 }

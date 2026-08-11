@@ -7,6 +7,7 @@
 
 #include "box2d/box2d.h"
 #include "box2d/collision.h"
+#include "box2d/constants.h"
 #include "box2d/math_functions.h"
 
 #include <GLFW/glfw3.h>
@@ -435,6 +436,220 @@ public:
 };
 
 static int sampleShapeDistance = RegisterSample( "Collision", "Shape Distance", ShapeDistance::Create );
+
+class SpeculativeCornerPassThrough : public Sample
+{
+public:
+	explicit SpeculativeCornerPassThrough( SampleContext* context )
+		: Sample( context )
+	{
+		if ( m_context->restart == false )
+		{
+			m_context->camera.center = { 0.0f, 1.5f };
+			m_context->camera.zoom = 5.0f;
+			m_context->subStepCount = 8;
+		}
+
+		m_enabled = false;
+		m_dropped = false;
+		m_lockHorizontal = true;
+		m_showManifolds = true;
+		m_gapDelta = 0.0f;
+		m_cornerSeparation = 0.01f;
+		m_friction = 0.6f;
+		b2WorldDef defaultWorldDef = b2DefaultWorldDef();
+		m_contactHertz = defaultWorldDef.contactHertz;
+		m_contactDampingRatio = defaultWorldDef.contactDampingRatio;
+		m_contactSpeed = defaultWorldDef.contactSpeed;
+		m_leftBodyId = b2_nullBodyId;
+		m_rightBodyId = b2_nullBodyId;
+		m_fallingBodyId = b2_nullBodyId;
+		m_square = b2MakeSquare( 1.0f );
+
+		b2SetSpeculativeCornerPassThrough( m_enabled );
+		b2World_SetContactTuning( m_worldId, m_contactHertz, m_contactDampingRatio, m_contactSpeed );
+		CreateScene();
+	}
+
+	~SpeculativeCornerPassThrough() override
+	{
+		// Do not let this process-wide diagnostic setting leak into other samples.
+		b2SetSpeculativeCornerPassThrough( false );
+	}
+
+	void CreateScene()
+	{
+		if ( B2_IS_NON_NULL( m_leftBodyId ) )
+		{
+			b2DestroyBody( m_leftBodyId );
+			b2DestroyBody( m_rightBodyId );
+			b2DestroyBody( m_fallingBodyId );
+		}
+
+		const float halfWidth = 1.0f;
+		const float gapWidth = 2.0f + m_gapDelta;
+		const float lowerCenterX = halfWidth + 0.5f * gapWidth;
+
+		b2ShapeDef shapeDef = b2DefaultShapeDef();
+		shapeDef.material.friction = m_friction;
+
+		b2BodyDef bodyDef = b2DefaultBodyDef();
+		bodyDef.position = { 0.0f, -2.0f };
+		m_leftBodyId = b2CreateBody( m_worldId, &bodyDef );
+		b2Polygon box = b2MakeBox( 3.0f, 1.0f );
+		b2CreatePolygonShape( m_leftBodyId, &shapeDef, &box );
+
+		bodyDef.type = b2_dynamicBody;
+		bodyDef.position = { -lowerCenterX, 0.0f };
+		m_leftBodyId = b2CreateBody( m_worldId, &bodyDef );
+		b2CreatePolygonShape( m_leftBodyId, &shapeDef, &m_square );
+
+		bodyDef.position = { lowerCenterX, 0.0f };
+		m_rightBodyId = b2CreateBody( m_worldId, &bodyDef );
+		b2CreatePolygonShape( m_rightBodyId, &shapeDef, &m_square );
+
+		bodyDef = b2DefaultBodyDef();
+		bodyDef.type = b2_dynamicBody;
+		bodyDef.position = { 0.0f, 2.0f + m_cornerSeparation };
+		bodyDef.gravityScale = 0.0f;
+		bodyDef.motionLocks.linearX = m_lockHorizontal;
+		bodyDef.motionLocks.angularZ = m_lockHorizontal;
+		m_fallingBodyId = b2CreateBody( m_worldId, &bodyDef );
+
+		shapeDef.density = 1.0f;
+		b2Polygon box2 = b2MakeBox( 1.0f, 0.5f );
+		b2CreatePolygonShape( m_fallingBodyId, &shapeDef, &box2 );
+		m_dropped = false;
+	}
+
+	void Drop()
+	{
+		b2Body_SetGravityScale( m_fallingBodyId, 1.0f );
+		b2Body_SetAwake( m_fallingBodyId, true );
+		m_dropped = true;
+	}
+
+	bool DrawControls() override
+	{
+		bool rebuild = false;
+
+		if ( ImGui::Checkbox( "corner pass-through", &m_enabled ) )
+		{
+			b2SetSpeculativeCornerPassThrough( m_enabled );
+			rebuild = true;
+		}
+
+		ImGui::Checkbox( "show manifolds", &m_showManifolds );
+
+		if ( ImGui::Checkbox( "lock x and rotation", &m_lockHorizontal ) )
+		{
+			rebuild = true;
+		}
+
+		ImGui::PushItemWidth( 7.0f * ImGui::GetFontSize() );
+		rebuild = ImGui::SliderFloat( "gap delta", &m_gapDelta, -0.02f, 0.05f, "%.4f" ) || rebuild;
+		rebuild = ImGui::SliderFloat( "corner separation", &m_cornerSeparation, 0.0f, 0.04f, "%.4f" ) || rebuild;
+		rebuild = ImGui::SliderFloat( "friction", &m_friction, 0.0f, 1.0f, "%.2f" ) || rebuild;
+
+		bool tuningChanged = false;
+		tuningChanged = ImGui::SliderFloat( "contact hertz", &m_contactHertz, 0.0f, 240.0f, "%.1f" ) || tuningChanged;
+		tuningChanged =
+			ImGui::SliderFloat( "contact damping", &m_contactDampingRatio, 0.0f, 20.0f, "%.1f" ) || tuningChanged;
+		tuningChanged = ImGui::SliderFloat( "contact speed", &m_contactSpeed, 0.0f, 10.0f, "%.1f" ) || tuningChanged;
+		ImGui::PopItemWidth();
+
+		if ( tuningChanged )
+		{
+			b2World_SetContactTuning( m_worldId, m_contactHertz, m_contactDampingRatio, m_contactSpeed );
+		}
+
+		if ( rebuild )
+		{
+			CreateScene();
+		}
+
+		if ( ImGui::Button( "Reset" ) )
+		{
+			CreateScene();
+		}
+
+		ImGui::SameLine();
+		if ( ImGui::Button( "Drop" ) )
+		{
+			Drop();
+		}
+
+		return true;
+	}
+
+	int DrawManifold( b2BodyId lowerBodyId, b2HexColor color )
+	{
+		b2Transform lowerTransform = b2Body_GetTransform( lowerBodyId );
+		b2Transform fallingTransform = b2Body_GetTransform( m_fallingBodyId );
+		b2Manifold manifold = b2CollidePolygons( &m_square, lowerTransform, &m_square, fallingTransform );
+
+		if ( m_showManifolds )
+		{
+			for ( int i = 0; i < manifold.pointCount; ++i )
+			{
+				b2Vec2 point = manifold.points[i].clipPoint;
+				DrawPoint( m_draw, point, 8.0f, color );
+				DrawLine( m_draw, point, point + 0.6f * manifold.normal, color );
+			}
+		}
+
+		return manifold.pointCount;
+	}
+
+	void Step() override
+	{
+		Sample::Step();
+
+		int pointCount = DrawManifold( m_leftBodyId, b2_colorRed );
+		pointCount += DrawManifold( m_rightBodyId, b2_colorYellow );
+
+		b2Vec2 position = b2Body_GetPosition( m_fallingBodyId );
+		b2Vec2 velocity = b2Body_GetLinearVelocity( m_fallingBodyId );
+		float gapWidth = 2.0f + m_gapDelta;
+
+		DrawWorldString( m_draw, m_camera, { -2.0f, -1.25f }, b2_colorWhite, "static" );
+		DrawWorldString( m_draw, m_camera, { 1.4f, -1.25f }, b2_colorWhite, "static" );
+		DrawWorldString( m_draw, m_camera, position + b2Vec2{ -0.45f, 1.25f }, b2_colorWhite, "dynamic" );
+
+		DrawScreenTextLine( "corner pass-through = %s", m_enabled ? "ON" : "OFF (original)" );
+		DrawScreenTextLine( "square width = 2.0000, gap width = %.4f", gapWidth );
+		DrawScreenTextLine( "corner separation = %.4f, speculative distance = %.4f", m_cornerSeparation,
+					  B2_SPECULATIVE_DISTANCE );
+		DrawScreenTextLine( "contact tuning = %.1f Hz, %.1f damping, %.1f speed", m_contactHertz, m_contactDampingRatio,
+					  m_contactSpeed );
+		DrawScreenTextLine( "diagnostic manifold points = %d", pointCount );
+		DrawScreenTextLine( "body y = %.4f, vy = %.4f, state = %s", position.y, velocity.y, m_dropped ? "dropped" : "ready" );
+		DrawScreenTextLine( "Toggle the option to reset, inspect corner normals, then press Drop." );
+	}
+
+	static Sample* Create( SampleContext* context )
+	{
+		return new SpeculativeCornerPassThrough( context );
+	}
+
+	b2BodyId m_leftBodyId;
+	b2BodyId m_rightBodyId;
+	b2BodyId m_fallingBodyId;
+	b2Polygon m_square;
+	float m_gapDelta;
+	float m_cornerSeparation;
+	float m_friction;
+	float m_contactHertz;
+	float m_contactDampingRatio;
+	float m_contactSpeed;
+	bool m_enabled;
+	bool m_dropped;
+	bool m_lockHorizontal;
+	bool m_showManifolds;
+};
+
+static int sampleSpeculativeCornerPassThrough =
+	RegisterSample( "Collision", "Speculative Corner Pass-Through", SpeculativeCornerPassThrough::Create );
 
 enum UpdateType
 {

@@ -5,6 +5,8 @@
 
 #include "box2d/base.h"
 
+#include <stdbool.h>
+
 // clang-format off
 
 // for performance comparisons
@@ -148,6 +150,8 @@ typedef struct b2AtomicU32
 {
 	uint32_t value;
 } b2AtomicU32;
+
+extern bool b2_speculativeCornerPassThrough;
 
 void* b2Alloc( int size );
 void* b2AllocZeroInit( int size );

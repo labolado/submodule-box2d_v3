@@ -35,6 +35,9 @@
 // This allows the user to change the length units at runtime
 static float b2_lengthUnitsPerMeter = 1.0f;
 
+// Global opt-in for resolving degenerate speculative polygon corner contacts.
+bool b2_speculativeCornerPassThrough = false;
+
 void b2SetLengthUnitsPerMeter( float lengthUnits )
 {
 	B2_ASSERT( b2IsValidFloat( lengthUnits ) && lengthUnits > 0.0f );
@@ -44,6 +47,16 @@ void b2SetLengthUnitsPerMeter( float lengthUnits )
 float b2GetLengthUnitsPerMeter( void )
 {
 	return b2_lengthUnitsPerMeter;
+}
+
+void b2SetSpeculativeCornerPassThrough( bool flag )
+{
+	b2_speculativeCornerPassThrough = flag;
+}
+
+bool b2GetSpeculativeCornerPassThrough( void )
+{
+	return b2_speculativeCornerPassThrough;
 }
 
 static int b2DefaultAssertFcn( const char* condition, const char* fileName, int lineNumber )

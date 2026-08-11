@@ -715,6 +715,30 @@ static float b2FindMaxSeparation( int* edgeIndex, const b2Polygon* poly1, const 
 	return maxSeparation;
 }
 
+static float b2ComputePolygonProjectionOverlap( const b2Polygon* polyA, const b2Polygon* polyB, b2Vec2 axis )
+{
+	float lowerA = FLT_MAX;
+	float upperA = -FLT_MAX;
+	for ( int i = 0; i < polyA->count; ++i )
+	{
+		float projection = b2Dot( polyA->vertices[i], axis );
+		lowerA = b2MinFloat( lowerA, projection );
+		upperA = b2MaxFloat( upperA, projection );
+	}
+
+	float lowerB = FLT_MAX;
+	float upperB = -FLT_MAX;
+	for ( int i = 0; i < polyB->count; ++i )
+	{
+		float projection = b2Dot( polyB->vertices[i], axis );
+		lowerB = b2MinFloat( lowerB, projection );
+		upperB = b2MaxFloat( upperB, projection );
+	}
+
+	float radius = polyA->radius + polyB->radius;
+	return b2MinFloat( upperA, upperB ) - b2MaxFloat( lowerA, lowerB ) + radius;
+}
+
 // Due to speculation, every polygon is rounded
 // Algorithm:
 //
@@ -821,6 +845,27 @@ b2Manifold b2CollidePolygons( const b2Polygon* polygonA, b2Transform xfA, const 
 			{
 				minDot = dot;
 				edgeA = i;
+			}
+		}
+	}
+
+	if ( b2_speculativeCornerPassThrough )
+	{
+		// A speculative face normal can incorrectly support a polygon at the
+		// two corners of an exactly fitting gap. Only discard the manifold when
+		// the normal is not meaningfully penetrating and the tangent intervals
+		// have no meaningful overlap. Once the polygon enters the gap, the side
+		// contacts gain tangent overlap and are generated normally.
+		float normalSeparation = b2MaxFloat( separationA, separationB ) - radius;
+		float cornerTolerance = 0.1f * linearSlop;
+		if ( normalSeparation >= -cornerTolerance )
+		{
+			b2Vec2 normal = flip ? localPolyB.normals[edgeB] : localPolyA.normals[edgeA];
+			b2Vec2 tangent = b2RightPerp( normal );
+			float tangentOverlap = b2ComputePolygonProjectionOverlap( &localPolyA, &localPolyB, tangent );
+			if ( tangentOverlap <= cornerTolerance )
+			{
+				return (b2Manifold){ 0 };
 			}
 		}
 	}
