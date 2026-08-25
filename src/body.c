@@ -381,6 +381,9 @@ void b2DestroyBody( b2BodyId bodyId )
 	while ( shapeId != B2_NULL_INDEX )
 	{
 		b2Shape* shape = b2Array_Get( world->shapes, shapeId );
+		// Keep the world-wide count in sync, just as b2DestroyShapeInternal does.
+		world->preSolveShapeCount -= shape->enablePreSolveEvents ? 1 : 0;
+		B2_ASSERT( world->preSolveShapeCount >= 0 );
 
 		if ( shape->sensorIndex != B2_NULL_INDEX )
 		{
