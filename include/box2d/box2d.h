@@ -5,6 +5,7 @@
 
 #include "base.h"
 #include "collision.h"
+#include "constants.h"
 #include "id.h"
 #include "types.h"
 
@@ -252,9 +253,6 @@ B2_API bool b2World_IsLocked( b2WorldId worldId );
 
 /// This is for internal testing
 B2_API void b2World_RebuildStaticTree( b2WorldId worldId );
-
-/// This is for internal testing
-B2_API void b2World_EnableSpeculative( b2WorldId worldId, bool flag );
 
 /// Compute a deterministic hash of the simulation state: body transforms and velocities, contact and
 /// joint impulses, and the index bookkeeping that drives the solve. Reproduces exactly across worker
@@ -598,6 +596,12 @@ B2_API void b2Body_SetSleepThreshold( b2BodyId bodyId, float sleepThreshold );
 /// Get the sleep threshold, usually in meters per second.
 B2_API float b2Body_GetSleepThreshold( b2BodyId bodyId );
 
+/// Set the continuous collision safety factor. Smaller is safer but can lead to hitching. Recommended range [0.01, 0.5]. Non-dimensional.
+B2_API void b2Body_SetSafetyFactor( b2BodyId bodyId, float safetyFactor );
+
+/// Get the continuous collision safety factor. Non-dimensional.
+B2_API float b2Body_GetSafetyFactor( b2BodyId bodyId );
+
 /// Returns true if this body is enabled
 B2_API bool b2Body_IsEnabled( b2BodyId bodyId );
 
@@ -684,6 +688,15 @@ B2_API int b2Body_GetContactData( b2BodyId bodyId, b2ContactData* contactData, i
 /// Get the current world AABB that contains all the attached shapes. Note that this may not encompass the body origin.
 /// If there are no shapes attached then the returned AABB is empty and centered on the body origin.
 B2_API b2AABB b2Body_ComputeAABB( b2BodyId bodyId );
+
+/// The minimum distance from any point on the body shapes to the center of mass.
+B2_API float b2Body_GetMinExtent( b2BodyId bodyId );
+
+/// The maximum distance from any point on the body shapes to the center of mass.
+B2_API float b2Body_GetMaxExtent( b2BodyId bodyId );
+
+/// The maximum distance from any point on the body shapes to the body origin. Conservative.
+B2_API float b2Body_GetMaxExtentOrigin( b2BodyId bodyId );
 
 /** @} */
 

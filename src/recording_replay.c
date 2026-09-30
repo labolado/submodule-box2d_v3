@@ -328,6 +328,7 @@ b2BodyDef b2RecR_BODYDEF( b2RecReader* rdr )
 	def.angularDamping = b2RecR_F32( rdr );
 	def.gravityScale = b2RecR_F32( rdr );
 	def.sleepThreshold = b2RecR_F32( rdr );
+	def.safetyFactor = b2RecR_F32( rdr );
 
 	// b2RecR_STR handles the over-length clamp and skips the full recorded length, so the
 	// cursor stays aligned even for names longer than B2_NAME_LENGTH. Valid until the create call.
@@ -843,11 +844,6 @@ static void b2RecDispatch_WorldRebuildStaticTree( const b2RecArgs_WorldRebuildSt
 	b2World_RebuildStaticTree( rdr->replayWorldId );
 }
 
-static void b2RecDispatch_WorldEnableSpeculative( const b2RecArgs_WorldEnableSpeculative* a, b2RecReader* rdr )
-{
-	b2World_EnableSpeculative( rdr->replayWorldId, a->flag );
-}
-
 // Append a created body to the outliner tracking list. Ordinals are creation order and never reused.
 static void b2RecTrackBodyCreate( b2RecPlayer* player, b2BodyId id )
 {
@@ -1019,6 +1015,11 @@ static void b2RecDispatch_BodyEnableSleep( const b2RecArgs_BodyEnableSleep* a, b
 static void b2RecDispatch_BodySetSleepThreshold( const b2RecArgs_BodySetSleepThreshold* a, b2RecReader* rdr )
 {
 	b2Body_SetSleepThreshold( b2RecMakeBodyId( rdr, a->body ), a->threshold );
+}
+
+static void b2RecDispatch_BodySetSafetyFactor( const b2RecArgs_BodySetSafetyFactor* a, b2RecReader* rdr )
+{
+	b2Body_SetSafetyFactor( b2RecMakeBodyId( rdr, a->body ), a->value );
 }
 
 static void b2RecDispatch_BodyDisable( const b2RecArgs_BodyDisable* a, b2RecReader* rdr )

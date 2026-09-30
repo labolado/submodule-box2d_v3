@@ -89,6 +89,61 @@ Use the `*-debug` build presets for a debug build (not recommended for the repla
 - cmake --build . --config Release
 - cmake --install . (might need sudo)
 
+Installing also provides a pkg-config file, so `pkg-config --modversion box2d` reports the installed version and `pkg-config --cflags --libs box2d` gives the build flags.
+
+## Building with zig
+
+Fetch and link Box2D from a Zig project:
+
+- `zig fetch --save git+https://github.com/erincatto/box2d`
+
+In `build.zig`:
+
+```zig
+const box2d_dep = b.dependency("box2d", .{});
+exe.root_module.addImport("box2d", box2d_dep.module("box2d"));
+```
+
+In Zig code, start using box2d
+
+```zig
+const box2d = @import("box2d");
+
+pub fn main(init: std.process.Init) !void {
+    var world_def = box2d.b2DefaultWorldDef();
+    world_def.gravity.y = 9.8;
+    const world_id = box2d.b2CreateWorld(&world_def);
+}
+```
+
+## Building with Swift Package Manager
+
+Add box2d as a dependency in your `Package.swift`:
+
+```swift
+.package(url: "https://github.com/erincatto/box2d.git", from: "main")
+```
+
+And add the product to your target:
+
+```swift
+.target(
+    name: "MyGame",
+    dependencies: [.product(name: "box2d", package: "box2d")]
+),
+```
+
+In Swift code, the C API is imported directly:
+
+```swift
+import box2d
+
+var worldDef = b2DefaultWorldDef()
+let worldId = b2CreateWorld(&worldDef)
+```
+
+C structs are passed as `inout` arguments using `&`.
+
 ## Replay viewer
 
 The samples app doubles as a viewer for Box2D recordings (`.b2rec` files). Any preset above builds it. Pass a recording on the command line to open it directly:
@@ -122,7 +177,7 @@ Box2D uses SSE2 and Neon SIMD math to improve performance. This can be disabled 
 
 Please do not submit pull requests. Instead, please file an issue for bugs or feature requests. For support, please visit the Discord server.
 
-# Giving Feedback
+## Giving feedback
 
 Please file an issue or start a chat on discord. You can also use [GitHub Discussions](https://github.com/erincatto/box2d/discussions).
 

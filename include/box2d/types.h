@@ -128,9 +128,6 @@ typedef struct b2WorldDef
 	/// Enable continuous collision
 	bool enableContinuous;
 
-	/// Contact softening when mass ratios are large. Experimental.
-	bool enableContactSoftening;
-
 	/// Number of workers for multithreading. Box2D performs best when using performance cores and
 	/// accessing a single L3 cache (uniform memory). Efficiency cores and SMT provide
 	/// little benefit and may even harm performance.
@@ -236,6 +233,13 @@ typedef struct b2BodyDef
 
 	/// Sleep speed threshold, default is 0.05 meters per second
 	float sleepThreshold;
+
+	/// Continuous collision safety factor. The solver only uses continuous collision if there is a
+	/// risk of tunneling. If the body is moving fast enough to risk tunneling then it is considered a "fast body".
+	/// This improves performance and prevents movement hitches. If a body moving N meter risks tunneling, then the
+	/// body will be considered fast if it moves more than a safetyFactor times N meters over one full time step.
+	/// Non-dimensional. Recommended range [0.01, 0.5]. Default is 0.5 for high performance with low tunneling risk.
+	float safetyFactor;
 
 	/// Optional body name for debugging. Up to B2_NAME_LENGTH characters
 	const char* name;
@@ -540,7 +544,6 @@ typedef struct b2Profile
 	float solveImpulses;
 	float integratePositions;
 	float relaxImpulses;
-	float applyRestitution;
 	float storeImpulses;
 	float splitIslands;
 	float transforms;

@@ -81,7 +81,6 @@ typedef enum b2SolverStageType
 	b2_stageSolve,
 	b2_stageIntegratePositions,
 	b2_stageRelax,
-	b2_stageRestitution,
 	b2_stageStoreImpulses
 } b2SolverStageType;
 
@@ -208,7 +207,7 @@ typedef struct b2StepContext
 	b2ContactConstraintWide* wideContactConstraints;
 	b2ContactPrepareSpan* contactPrepareSpans;
 	int wideContactCount;
-	
+
 	b2JointPrepareSpan* jointPrepareSpans;
 	int jointCount;
 

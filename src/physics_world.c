@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 Erin Catto
+// SPDX-FileCopyrightText: 2026 Erin Catto
 // SPDX-License-Identifier: MIT
 
 #if defined( _MSC_VER ) && !defined( _CRT_SECURE_NO_WARNINGS )
@@ -292,9 +292,7 @@ b2WorldId b2CreateWorld( const b2WorldDef* def )
 	world->enableSleep = def->enableSleep;
 	world->locked = false;
 	world->enableWarmStarting = true;
-	world->enableContactSoftening = def->enableContactSoftening;
 	world->enableContinuous = def->enableContinuous;
-	world->enableSpeculative = true;
 	world->userTreeTask = NULL;
 	world->userData = def->userData;
 
@@ -460,6 +458,7 @@ static void b2CollideTask( int startIndex, int endIndex, int workerIndex, void* 
 	b2ContactSim** contactSims = stepContext->contactSims;
 	b2Shape* shapes = world->shapes.data;
 	b2Body* bodies = world->bodies.data;
+	b2BodyState* states = world->solverSets.data[b2_awakeSet].bodyStates.data;
 
 	B2_ASSERT( startIndex < endIndex );
 
@@ -515,6 +514,8 @@ static void b2CollideTask( int startIndex, int endIndex, int workerIndex, void* 
 			contactSim->invMassB = bodySimB->invMass;
 			contactSim->invIB = bodySimB->invInertia;
 
+			bool isFast = ( bodyA->flags & b2_isFast ) || ( bodyB->flags & b2_isFast );
+
 			// Contact recycling optimization. Please cite this code if you use this optimization.
 			// This is inspired by persistent contact manifolds used in some physics engines, such as PhysX.
 			// However, this allows larger relative motion and has fewer tuning parameters (just one).
@@ -522,7 +523,7 @@ static void b2CollideTask( int startIndex, int endIndex, int workerIndex, void* 
 			// Must match the filter check in b2UpdateContact.
 			bool useSeamFilter = world->enableSeamContactFilter ||
 								 ( ( bodyA->flags | bodyB->flags ) & b2_bodyEnableSeamContactFilter ) != 0;
-			if ( invokesPreSolve == false && useSeamFilter == false && recycleDistance > 0.0f &&
+			if ( invokesPreSolve == false && useSeamFilter == false && isFast == false && recycleDistance > 0.0f &&
 				 ( contactSim->simFlags & b2_simRelativeTransformValid ) &&
 				 ( contactSim->simFlags & b2_contactRecycleFlag ) )
 			{
@@ -563,6 +564,34 @@ static void b2CollideTask( int startIndex, int endIndex, int workerIndex, void* 
 						b2Vec2 rB = b2RotateVector( dqB, mp->anchorB );
 						b2Vec2 dp = b2Add( dc, b2Sub( rB, rA ) );
 						mp->separation = mp->baseSeparation + b2Dot( dp, normal );
+
+						if ( mp->totalNormalImpulse > 0.0f && mp->normalVelocity < -world->restitutionThreshold )
+						{
+							mp->restitutionVelocity = -contactSim->restitution * mp->normalVelocity;
+						}
+						else
+						{
+							mp->restitutionVelocity = 0.0f;
+						}
+
+						int indexA = contactSim->bodySimIndexA;
+						b2Vec2 vrA = b2Vec2_zero;
+						if ( indexA != B2_NULL_INDEX )
+						{
+							b2BodyState* stateA = states + indexA;
+							vrA = b2Add( stateA->linearVelocity, b2CrossSV( stateA->angularVelocity, mp->anchorA ) );
+						}
+
+						int indexB = contactSim->bodySimIndexB;
+						b2Vec2 vrB = b2Vec2_zero;
+						if ( indexB != B2_NULL_INDEX )
+						{
+							b2BodyState* stateB = states + indexB;
+							vrB = b2Add( stateB->linearVelocity, b2CrossSV( stateB->angularVelocity, mp->anchorB ) );
+						}
+
+						mp->normalVelocity = b2Dot( contactSim->manifold.normal, b2Sub( vrB, vrA ) );
+
 						mp->persisted = true;
 					}
 
@@ -599,10 +628,32 @@ static void b2CollideTask( int startIndex, int endIndex, int workerIndex, void* 
 				b2SetBit( &taskContext->contactStateBitSet, contactId );
 			}
 
-			for ( int i = 0; i < contactSim->manifold.pointCount; ++i )
+			if ( touching )
 			{
-				b2ManifoldPoint* mp = contactSim->manifold.points + i;
-				mp->baseSeparation = mp->separation;
+				for ( int i = 0; i < contactSim->manifold.pointCount; ++i )
+				{
+					b2ManifoldPoint* mp = contactSim->manifold.points + i;
+					mp->baseSeparation = mp->separation;
+
+					// Save relative velocity for restitution and hit events reporting.
+					int indexA = contactSim->bodySimIndexA;
+					b2Vec2 vrA = b2Vec2_zero;
+					if ( indexA != B2_NULL_INDEX )
+					{
+						b2BodyState* stateA = states + indexA;
+						vrA = b2Add( stateA->linearVelocity, b2CrossSV( stateA->angularVelocity, mp->anchorA ) );
+					}
+
+					int indexB = contactSim->bodySimIndexB;
+					b2Vec2 vrB = b2Vec2_zero;
+					if ( indexB != B2_NULL_INDEX )
+					{
+						b2BodyState* stateB = states + indexB;
+						vrB = b2Add( stateB->linearVelocity, b2CrossSV( stateB->angularVelocity, mp->anchorB ) );
+					}
+
+					mp->normalVelocity = b2Dot( contactSim->manifold.normal, b2Sub( vrB, vrA ) );
+				}
 			}
 
 			// To make this work, the time of impact code needs to adjust the target
@@ -1156,7 +1207,7 @@ static bool DrawQueryCallback( int proxyId, uint64_t userData, void* context )
 		{
 			color = b2_colorYellow;
 		}
-		else if ( bodySim->flags & b2_isFast )
+		else if ( body->flags & b2_isFast )
 		{
 			color = b2_colorSalmon;
 		}
@@ -1250,7 +1301,7 @@ void b2World_Draw( b2WorldId worldId, b2DebugDraw* draw )
 				b2WorldTransform transform = { bodySim->center, bodySim->transform.q };
 				draw->GetBodyTransformFcn( &transform, body->userData, draw->context );
 				b2Pos p = b2TransformWorldPoint( transform, offset );
-				draw->DrawStringFcn( p, body->name, b2_colorBlueViolet, draw->context );
+				draw->DrawStringFcn( p, body->name, b2_colorWhiteSmoke, draw->context );
 			}
 
 			if ( draw->drawMass && body->type == b2_dynamicBody )
@@ -3071,7 +3122,7 @@ void b2World_SetPreSolveCallback( b2WorldId worldId, b2PreSolveFcn* preSolveFcn,
 								  void* context )
 {
 	b2World* world = b2GetWorldFromId( worldId );
-	if ( (preSolveFcn != NULL || preContinuousFcn != NULL) && world->recording != NULL )
+	if ( ( preSolveFcn != NULL || preContinuousFcn != NULL ) && world->recording != NULL )
 	{
 		printf( "b2World_SetPreSolveCallback: preSolve not supported while recording\n" );
 		B2_ASSERT( false && "preSolve callbacks are not supported while recording" );
@@ -3245,13 +3296,6 @@ void b2World_RebuildStaticTree( b2WorldId worldId )
 
 	b2DynamicTree* staticTree = world->broadPhase.trees + b2_staticBody;
 	b2DynamicTree_Rebuild( staticTree, true );
-}
-
-void b2World_EnableSpeculative( b2WorldId worldId, bool flag )
-{
-	b2World* world = b2GetWorldFromId( worldId );
-	B2_REC( world, WorldEnableSpeculative, worldId, flag );
-	world->enableSpeculative = flag;
 }
 
 #if B2_ENABLE_VALIDATION
