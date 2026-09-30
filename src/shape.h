@@ -44,8 +44,8 @@ typedef struct b2Shape
 	bool enableCustomFiltering;
 	bool enableHitEvents;
 	bool enablePreSolveEvents;
-	bool enlargedAABB;
 
+	// Solar2D: character mover plane settings reported by b2Shape_GetPushLimit/GetClipVelocity
 	float pushLimit;
 	bool clipVelocity;
 } b2Shape;
@@ -55,11 +55,9 @@ typedef struct b2ChainShape
 	int id;
 	int bodyId;
 	int nextChainId;
-	int count;
-	int materialCount;
-	int* shapeIndices;
-	b2SurfaceMaterial* materials;
+	int segmentCount;
 	uint16_t generation;
+	int* shapeIndices;
 } b2ChainShape;
 
 typedef struct b2ShapeExtent

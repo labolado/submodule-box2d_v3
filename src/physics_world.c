@@ -9,17 +9,17 @@
 
 #include "aabb.h"
 #include "arena_allocator.h"
-#include "atomic.h"
 #include "bitset.h"
 #include "body.h"
 #include "broad_phase.h"
 #include "constraint_graph.h"
 #include "contact.h"
 #include "core.h"
-#include "ctz.h"
+#include "dynamic_tree.h"
 #include "island.h"
 #include "joint.h"
 #include "parallel_for.h"
+#include "platform.h"
 #include "recording.h"
 #include "scheduler.h"
 #include "sensor.h"
@@ -33,12 +33,6 @@
 #include <float.h>
 #include <stdio.h>
 #include <string.h>
-
-#if defined( _M_X64 ) || defined( __x86_64__ ) || defined( _M_IX86 ) || defined( __i386__ )
-#include <xmmintrin.h>
-#elif ( defined( _M_ARM64 ) || defined( __aarch64__ ) ) && defined( _MSC_VER )
-#include <intrin.h>
-#endif
 
 _Static_assert( B2_MAX_WORLDS > 0, "must be 1 or more" );
 _Static_assert( B2_MAX_WORLDS < UINT16_MAX, "B2_MAX_WORLDS limit exceeded" );
@@ -126,6 +120,7 @@ static void b2CreateWorkerContexts( b2World* world )
 	for ( int i = 0; i < world->workerCount; ++i )
 	{
 		b2Array_CreateN( world->taskContexts.data[i].sensorHits, 8 );
+		b2Array_Create( world->taskContexts.data[i].pairKeys );
 		world->taskContexts.data[i].contactStateBitSet = b2CreateBitSet( 1024 );
 		world->taskContexts.data[i].hitEventBitSet = b2CreateBitSet( 1024 );
 		world->taskContexts.data[i].hasHitEvents = false;
@@ -144,6 +139,7 @@ static void b2DestroyWorkerContexts( b2World* world )
 	for ( int i = 0; i < world->workerCount; ++i )
 	{
 		b2Array_Destroy( world->taskContexts.data[i].sensorHits );
+		b2Array_Destroy( world->taskContexts.data[i].pairKeys );
 		b2DestroyBitSet( &world->taskContexts.data[i].contactStateBitSet );
 		b2DestroyBitSet( &world->taskContexts.data[i].hitEventBitSet );
 		b2DestroyBitSet( &world->taskContexts.data[i].jointStateBitSet );
@@ -382,7 +378,6 @@ void b2DestroyWorld( b2WorldId worldId )
 		else
 		{
 			B2_ASSERT( chain->shapeIndices == NULL );
-			B2_ASSERT( chain->materials == NULL );
 		}
 	}
 
@@ -513,6 +508,12 @@ static void b2CollideTask( int startIndex, int endIndex, int workerIndex, void* 
 			contactSim->bodySimIndexB = bodyB->setIndex == b2_awakeSet ? bodyB->localIndex : B2_NULL_INDEX;
 			contactSim->invMassB = bodySimB->invMass;
 			contactSim->invIB = bodySimB->invInertia;
+
+			// todo plan to get rid of b2Body from this hot path due to cache misses.
+			// B2_VALIDATE( ( bodyA->flags & b2_isFast ) == ( bodySimA->flags & b2_isFast ) );
+			// B2_VALIDATE( ( bodyB->flags & b2_isFast ) == ( bodySimB->flags & b2_isFast ) );
+			// B2_VALIDATE( bodyA->setIndex == b2_staticSet || bodyA->setIndex == b2_awakeSet );
+			// B2_VALIDATE( bodyB->setIndex == b2_staticSet || bodyB->setIndex == b2_awakeSet );
 
 			bool isFast = ( bodyA->flags & b2_isFast ) || ( bodyB->flags & b2_isFast );
 
@@ -789,7 +790,7 @@ static void b2Collide( b2StepContext* context )
 	contactSims = NULL;
 
 	// Serially update contact state
-	// todo_erin bring this zone together with island merge
+	// todo bring this zone together with island merge
 	b2TracyCZoneNC( contact_state, "Contact State", b2_colorLightSlateGray, true );
 
 	// Bitwise OR all contact bits
@@ -2233,8 +2234,7 @@ void b2World_DumpMemoryStats( b2WorldId worldId )
 			continue;
 		}
 
-		chainDataBytes += chain->count * (int)sizeof( int );
-		chainDataBytes += chain->materialCount * (int)sizeof( b2SurfaceMaterial );
+		chainDataBytes += chain->segmentCount * (int)sizeof( int );
 	}
 
 	// Sensors own overlap tracking arrays. The sensor array is dense.
@@ -2257,22 +2257,14 @@ void b2World_DumpMemoryStats( b2WorldId worldId )
 	int staticTreeBytes = b2DynamicTree_GetByteCount( world->broadPhase.trees + b2_staticBody );
 	int kinematicTreeBytes = b2DynamicTree_GetByteCount( world->broadPhase.trees + b2_kinematicBody );
 	int dynamicTreeBytes = b2DynamicTree_GetByteCount( world->broadPhase.trees + b2_dynamicBody );
-	int movedBytes = 0;
-	for ( int i = 0; i < b2_bodyTypeCount; ++i )
-	{
-		movedBytes += b2GetBitSetBytes( &world->broadPhase.movedProxies[i] );
-	}
-	int moveArrayBytes = b2Array_ByteCount( world->broadPhase.moveArray );
 	b2HashSet* pairSet = &world->broadPhase.pairSet;
 	int pairSetBytes = b2GetHashSetBytes( pairSet );
-	total += staticTreeBytes + kinematicTreeBytes + dynamicTreeBytes + movedBytes + moveArrayBytes + pairSetBytes;
+	total += staticTreeBytes + kinematicTreeBytes + dynamicTreeBytes + pairSetBytes;
 
 	fprintf( file, "broad-phase\n" );
 	fprintf( file, "static tree: %d\n", staticTreeBytes );
 	fprintf( file, "kinematic tree: %d\n", kinematicTreeBytes );
 	fprintf( file, "dynamic tree: %d\n", dynamicTreeBytes );
-	fprintf( file, "movedProxies: %d\n", movedBytes );
-	fprintf( file, "moveArray: %d\n", moveArrayBytes );
 	fprintf( file, "pairSet: %d (%u, %u)\n", pairSetBytes, pairSet->count, pairSet->capacity );
 	fprintf( file, "\n" );
 
@@ -2341,6 +2333,7 @@ void b2World_DumpMemoryStats( b2WorldId worldId )
 	{
 		b2TaskContext* taskContext = world->taskContexts.data + i;
 		taskContextBytes += b2Array_ByteCount( taskContext->sensorHits );
+		taskContextBytes += b2Array_ByteCount( taskContext->pairKeys );
 		taskContextBytes += b2GetBitSetBytes( &taskContext->contactStateBitSet );
 		taskContextBytes += b2GetBitSetBytes( &taskContext->hitEventBitSet );
 		taskContextBytes += b2GetBitSetBytes( &taskContext->jointStateBitSet );
@@ -2693,7 +2686,7 @@ b2TreeStats b2World_CastRay( b2WorldId worldId, b2Pos origin, b2Vec2 translation
 	for ( int i = 0; i < b2_bodyTypeCount; ++i )
 	{
 		b2TreeStats treeResult =
-			b2DynamicTree_RayCast( world->broadPhase.trees + i, &input, filter.maskBits, RayCastCallback, &worldContext );
+			b2DynamicTree_CastRay( world->broadPhase.trees + i, &input, filter.maskBits, RayCastCallback, &worldContext );
 		treeStats.nodeVisits += treeResult.nodeVisits;
 		treeStats.leafVisits += treeResult.leafVisits;
 
@@ -2753,7 +2746,7 @@ b2RayResult b2World_CastRayClosest( b2WorldId worldId, b2Pos origin, b2Vec2 tran
 	for ( int i = 0; i < b2_bodyTypeCount; ++i )
 	{
 		b2TreeStats treeResult =
-			b2DynamicTree_RayCast( world->broadPhase.trees + i, &input, filter.maskBits, RayCastCallback, &worldContext );
+			b2DynamicTree_CastRay( world->broadPhase.trees + i, &input, filter.maskBits, RayCastCallback, &worldContext );
 		result.nodeVisits += treeResult.nodeVisits;
 		result.leafVisits += treeResult.leafVisits;
 
@@ -2887,7 +2880,7 @@ b2TreeStats b2World_CastShape( b2WorldId worldId, b2Pos origin, const b2ShapePro
 	for ( int i = 0; i < b2_bodyTypeCount; ++i )
 	{
 		b2TreeStats treeResult =
-			b2DynamicTree_BoxCast( world->broadPhase.trees + i, &treeInput, filter.maskBits, ShapeCastCallback, &worldContext );
+			b2DynamicTree_CastBox( world->broadPhase.trees + i, &treeInput, filter.maskBits, ShapeCastCallback, &worldContext );
 		treeStats.nodeVisits += treeResult.nodeVisits;
 		treeStats.leafVisits += treeResult.leafVisits;
 
@@ -2986,7 +2979,7 @@ float b2World_CastMover( b2WorldId worldId, b2Pos origin, const b2Capsule* mover
 
 	for ( int i = 0; i < b2_bodyTypeCount; ++i )
 	{
-		b2DynamicTree_BoxCast( world->broadPhase.trees + i, &treeInput, filter.maskBits, MoverCastCallback, &worldContext );
+		b2DynamicTree_CastBox( world->broadPhase.trees + i, &treeInput, filter.maskBits, MoverCastCallback, &worldContext );
 
 		if ( worldContext.fraction == 0.0f )
 		{
@@ -3283,6 +3276,7 @@ void b2World_Explode( b2WorldId worldId, const b2ExplosionDef* explosionDef )
 	b2DynamicTree_Query( world->broadPhase.trees + b2_dynamicBody, aabb, maskBits, ExplosionCallback, &explosionContext );
 }
 
+// This is for internal testing. Not optimized.
 void b2World_RebuildStaticTree( b2WorldId worldId )
 {
 	b2World* world = b2GetWorldFromId( worldId );
@@ -3295,7 +3289,28 @@ void b2World_RebuildStaticTree( b2WorldId worldId )
 	B2_REC( world, WorldRebuildStaticTree, worldId );
 
 	b2DynamicTree* staticTree = world->broadPhase.trees + b2_staticBody;
+
+	// Moved proxies must retain the flag in the rebuild.
+	int movedCount = 0;
+	int* movedProxies = NULL;
+	int proxyCount = b2DynamicTree_GetProxyCount( staticTree );
+	if ( b2HasTreeMoved( staticTree ) )
+	{
+		movedProxies = b2Alloc( proxyCount * sizeof( int ) );
+		movedCount = b2DynamicTree_GatherMovedProxies( staticTree, movedProxies );
+	}
+
 	b2DynamicTree_Rebuild( staticTree, true );
+
+	for ( int i = 0; i < movedCount; ++i )
+	{
+		b2DynamicTree_MarkProxyMovedSerial( staticTree, movedProxies[i] );
+	}
+
+	if ( movedProxies != NULL )
+	{
+		b2Free( movedProxies, proxyCount * sizeof( int ) );
+	}
 }
 
 #if B2_ENABLE_VALIDATION

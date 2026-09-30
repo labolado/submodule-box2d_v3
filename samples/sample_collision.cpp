@@ -359,8 +359,7 @@ public:
 			DrawPoint( m_draw, b2ToPos( output.pointA ), 10.0f, b2_colorWhite );
 			DrawPoint( m_draw, b2ToPos( output.pointB ), 10.0f, b2_colorWhite );
 
-			DrawLine( m_draw, b2ToPos( output.pointA ), b2ToPos( output.pointA + 0.5f * output.normal ),
-						   b2_colorYellow );
+			DrawLine( m_draw, b2ToPos( output.pointA ), b2ToPos( output.pointA + 0.5f * output.normal ), b2_colorYellow );
 		}
 
 		if ( m_showIndices )
@@ -706,7 +705,6 @@ public:
 		memset( &m_tree, 0, sizeof( m_tree ) );
 		BuildTree();
 		m_timeStamp = 0;
-		m_updateType = Update_Incremental;
 
 		m_startPoint = { 0.0f, 0.0f };
 		m_endPoint = { 0.0f, 0.0f };
@@ -826,24 +824,6 @@ public:
 
 		ImGui::PopItemWidth();
 
-		if ( ImGui::RadioButton( "Incremental", m_updateType == Update_Incremental ) )
-		{
-			m_updateType = Update_Incremental;
-			changed = true;
-		}
-
-		if ( ImGui::RadioButton( "Full Rebuild", m_updateType == Update_FullRebuild ) )
-		{
-			m_updateType = Update_FullRebuild;
-			changed = true;
-		}
-
-		if ( ImGui::RadioButton( "Partial Rebuild", m_updateType == Update_PartialRebuild ) )
-		{
-			m_updateType = Update_PartialRebuild;
-			changed = true;
-		}
-
 		ImGui::Separator();
 
 		ImGui::Text( "mouse button 1: ray cast" );
@@ -906,7 +886,7 @@ public:
 		if ( m_rayDrag )
 		{
 			b2RayCastInput input = { b2ToVec2( m_startPoint ), m_endPoint - m_startPoint, 1.0f };
-			b2TreeStats result = b2DynamicTree_RayCast( &m_tree, &input, B2_DEFAULT_MASK_BITS, RayCallback, this );
+			b2TreeStats result = b2DynamicTree_CastRay( &m_tree, &input, B2_DEFAULT_MASK_BITS, RayCallback, this );
 
 			DrawLine( m_draw, m_startPoint, m_endPoint, b2_colorWhite );
 			DrawPoint( m_draw, m_startPoint, 5.0f, b2_colorGreen );
@@ -964,62 +944,18 @@ public:
 			}
 		}
 
-		switch ( m_updateType )
 		{
-			case Update_Incremental:
+			uint64_t ticks = b2GetTicks();
+			for ( int i = 0; i < m_proxyCount; ++i )
 			{
-				uint64_t ticks = b2GetTicks();
-				for ( int i = 0; i < m_proxyCount; ++i )
+				Proxy* p = m_proxies + i;
+				if ( p->moved )
 				{
-					Proxy* p = m_proxies + i;
-					if ( p->moved )
-					{
-						b2DynamicTree_MoveProxy( &m_tree, p->proxyId, p->fatBox );
-					}
+					b2DynamicTree_MoveProxy( &m_tree, p->proxyId, p->fatBox );
 				}
-				float ms = b2GetMilliseconds( ticks );
-				DrawScreenTextLine( "incremental : %.3f ms", ms );
 			}
-			break;
-
-			case Update_FullRebuild:
-			{
-				for ( int i = 0; i < m_proxyCount; ++i )
-				{
-					Proxy* p = m_proxies + i;
-					if ( p->moved )
-					{
-						b2DynamicTree_EnlargeProxy( &m_tree, p->proxyId, p->fatBox );
-					}
-				}
-
-				uint64_t ticks = b2GetTicks();
-				int boxCount = b2DynamicTree_Rebuild( &m_tree, true );
-				float ms = b2GetMilliseconds( ticks );
-				DrawScreenTextLine( "full build %d : %.3f ms", boxCount, ms );
-			}
-			break;
-
-			case Update_PartialRebuild:
-			{
-				for ( int i = 0; i < m_proxyCount; ++i )
-				{
-					Proxy* p = m_proxies + i;
-					if ( p->moved )
-					{
-						b2DynamicTree_EnlargeProxy( &m_tree, p->proxyId, p->fatBox );
-					}
-				}
-
-				uint64_t ticks = b2GetTicks();
-				int boxCount = b2DynamicTree_Rebuild( &m_tree, false );
-				float ms = b2GetMilliseconds( ticks );
-				DrawScreenTextLine( "partial rebuild %d : %.3f ms", boxCount, ms );
-			}
-			break;
-
-			default:
-				break;
+			float ms = b2GetMilliseconds( ticks );
+			DrawScreenTextLine( "incremental : %.3f ms", ms );
 		}
 
 		int height = b2DynamicTree_GetHeight( &m_tree );
@@ -1046,7 +982,6 @@ public:
 	int m_proxyCapacity;
 	int m_proxyCount;
 	int m_timeStamp;
-	int m_updateType;
 	float m_fill;
 	float m_moveFraction;
 	float m_moveDelta;
@@ -1728,8 +1663,9 @@ public:
 		{
 			b2Vec2 points[4] = { { 1.0f, 0.0f }, { -1.0f, 0.0f }, { -1.0f, -1.0f }, { 1.0f, -1.0f } };
 			b2ChainDef chainDef = b2DefaultChainDef();
+			chainDef.userData = shapeDef.userData;
 			chainDef.points = points;
-			chainDef.count = 4;
+			chainDef.pointCount = 4;
 			chainDef.isLoop = true;
 			b2CreateChain( m_bodyIds[m_bodyIndex], &chainDef );
 		}
@@ -1994,13 +1930,12 @@ public:
 					}
 					else if ( m_castType == e_capsuleCast )
 					{
-						DrawCapsule( m_draw, b2OffsetPos( c, capsule.center1 ), b2OffsetPos( c, capsule.center2 ),
-										  m_castRadius, b2_colorYellow );
+						DrawCapsule( m_draw, b2OffsetPos( c, capsule.center1 ), b2OffsetPos( c, capsule.center2 ), m_castRadius,
+									 b2_colorYellow );
 					}
 					else if ( m_castType == e_polygonCast )
 					{
-						DrawSolidPolygon( m_draw, { c, b2Rot_identity }, box.vertices, box.count, box.radius,
-											   b2_colorYellow );
+						DrawSolidPolygon( m_draw, { c, b2Rot_identity }, box.vertices, box.count, box.radius, b2_colorYellow );
 					}
 				}
 			}
@@ -2016,12 +1951,11 @@ public:
 				else if ( m_castType == e_capsuleCast )
 				{
 					DrawCapsule( m_draw, b2OffsetPos( m_rayEnd, capsule.center1 ), b2OffsetPos( m_rayEnd, capsule.center2 ),
-									  m_castRadius, b2_colorYellow );
+								 m_castRadius, b2_colorYellow );
 				}
 				else if ( m_castType == e_polygonCast )
 				{
-					DrawSolidPolygon( m_draw, { m_rayEnd, b2Rot_identity }, box.vertices, box.count, box.radius,
-										   b2_colorYellow );
+					DrawSolidPolygon( m_draw, { m_rayEnd, b2Rot_identity }, box.vertices, box.count, box.radius, b2_colorYellow );
 				}
 			}
 		}
@@ -2364,7 +2298,7 @@ public:
 			};
 			proxy = b2MakeProxy( &capsule.center1, 2, capsule.radius );
 			DrawCapsule( m_draw, b2OffsetPos( m_position, capsule.center1 ), b2OffsetPos( m_position, capsule.center2 ),
-							  capsule.radius, b2_colorWhite );
+						 capsule.radius, b2_colorWhite );
 		}
 		else if ( m_shapeType == e_boxShape )
 		{
@@ -2751,7 +2685,8 @@ public:
 			b2WorldTransform transform1 = b2MakeWorldTransform( { offset, b2Rot_identity } );
 			b2WorldTransform transform2 = b2MakeWorldTransform( { b2Add( m_transform.p, offset ), m_transform.q } );
 
-			b2LocalManifold m = b2CollideSegmentAndCapsule( &segment, &capsule, b2InvMulWorldTransforms( transform1, transform2 ) );
+			b2LocalManifold m =
+				b2CollideSegmentAndCapsule( &segment, &capsule, b2InvMulWorldTransforms( transform1, transform2 ) );
 
 			b2Pos p1 = b2TransformWorldPoint( transform1, segment.point1 );
 			b2Pos p2 = b2TransformWorldPoint( transform1, segment.point2 );
@@ -2948,7 +2883,8 @@ public:
 			b2WorldTransform transform1 = b2MakeWorldTransform( { offset, b2Rot_identity } );
 			b2WorldTransform transform2 = b2MakeWorldTransform( { b2Add( m_transform.p, offset ), m_transform.q } );
 
-			b2LocalManifold m = b2CollideChainSegmentAndCircle( &segment, &circle, b2InvMulWorldTransforms( transform1, transform2 ) );
+			b2LocalManifold m =
+				b2CollideChainSegmentAndCircle( &segment, &circle, b2InvMulWorldTransforms( transform1, transform2 ) );
 
 			b2Pos g1 = b2TransformWorldPoint( transform1, segment.ghost1 );
 			b2Pos g2 = b2TransformWorldPoint( transform1, segment.ghost2 );
@@ -3338,7 +3274,8 @@ public:
 			for ( int i = 0; i < m_count; ++i )
 			{
 				const b2ChainSegment* segment = m_segments + i;
-				b2LocalManifold m = b2CollideChainSegmentAndCircle( segment, &circle, b2InvMulWorldTransforms( transform1, transform2 ) );
+				b2LocalManifold m =
+					b2CollideChainSegmentAndCircle( segment, &circle, b2InvMulWorldTransforms( transform1, transform2 ) );
 				DrawManifold( &m, transform1 );
 			}
 		}
@@ -3352,7 +3289,8 @@ public:
 			{
 				const b2ChainSegment* segment = m_segments + i;
 				b2SimplexCache cache = {};
-				b2LocalManifold m = b2CollideChainSegmentAndPolygon( segment, &rox, b2InvMulWorldTransforms( transform1, transform2 ), &cache );
+				b2LocalManifold m =
+					b2CollideChainSegmentAndPolygon( segment, &rox, b2InvMulWorldTransforms( transform1, transform2 ), &cache );
 				DrawManifold( &m, transform1 );
 			}
 		}
@@ -3691,9 +3629,10 @@ public:
 
 		b2CastOutput output = b2ShapeCast( &input );
 
+		float t = output.hit ? output.fraction : 1.0f;
 		b2Transform transform;
 		transform.q = m_transform.q;
-		transform.p = b2MulAdd( m_transform.p, output.fraction, input.translationB );
+		transform.p = b2MulAdd( m_transform.p, t, input.translationB );
 
 		b2DistanceInput distanceInput;
 		distanceInput.proxyA = m_proxyA;
@@ -3836,7 +3775,7 @@ public:
 		// Draw B at t = 0
 		b2WorldTransform transformB = b2MakeWorldTransform( b2GetSweepTransform( &sweepB, 0.0f ) );
 		DrawCapsule( m_draw, b2TransformWorldPoint( transformB, m_verticesB[0] ),
-						  b2TransformWorldPoint( transformB, m_verticesB[1] ), m_radiusB, b2_colorGreen );
+					 b2TransformWorldPoint( transformB, m_verticesB[1] ), m_radiusB, b2_colorGreen );
 
 		// Draw B at t = hit_time
 		transformB = b2MakeWorldTransform( b2GetSweepTransform( &sweepB, output.fraction ) );
@@ -3845,7 +3784,7 @@ public:
 		// Draw B at t = 1
 		transformB = b2MakeWorldTransform( b2GetSweepTransform( &sweepB, 1.0f ) );
 		DrawCapsule( m_draw, b2TransformWorldPoint( transformB, m_verticesB[0] ),
-						  b2TransformWorldPoint( transformB, m_verticesB[1] ), m_radiusB, b2_colorRed );
+					 b2TransformWorldPoint( transformB, m_verticesB[1] ), m_radiusB, b2_colorRed );
 
 		if ( output.state == b2_toiStateHit )
 		{

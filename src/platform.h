@@ -8,13 +8,28 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#if defined( _MSC_VER )
+#if defined( _MSC_VER ) && ( defined( _M_ARM ) || defined( _M_ARM64 ) || defined( _M_ARM64EC ) )
 #include <intrin.h>
+#elif defined( _MSC_VER )
+#include <intrin0.h>
 #endif
 
 #if defined( _M_X64 ) || defined( __x86_64__ ) || defined( _M_IX86 ) || defined( __i386__ )
-#include <immintrin.h>
+#include <xmmintrin.h>
 #endif
+
+#if defined( _MSC_VER )
+#if defined( _M_X64 ) || defined( __x86_64__ ) || defined( _M_IX86 ) || defined( __i386__ )
+#define b2Prefetch( addr ) _mm_prefetch( (const char*)( addr ), _MM_HINT_T0 )
+#else
+#define b2Prefetch( addr ) __prefetch( (const void*)( addr ) )
+#endif
+#elif defined( __GNUC__ ) || defined( __clang__ )
+#define b2Prefetch( addr ) __builtin_prefetch( (const void*)( addr ), 0, 3 )
+#else
+#define b2Prefetch( addr ) ( (void)( addr ) )
+#endif
+
 
 static inline void b2AtomicStoreInt( b2AtomicInt* a, int value )
 {
@@ -55,6 +70,17 @@ static inline int b2AtomicFetchAddInt( b2AtomicInt* a, int increment )
 #endif
 }
 
+static inline uint16_t b2AtomicFetchOrU16( uint16_t* a, uint16_t mask )
+{
+#if defined( _MSC_VER )
+	return (uint16_t)_InterlockedOr16( (short*)a, (short)mask );
+#elif defined( __GNUC__ ) || defined( __clang__ )
+	return __atomic_fetch_or( a, mask, __ATOMIC_SEQ_CST );
+#else
+#error "Unsupported platform"
+#endif
+}
+
 static inline bool b2AtomicCompareExchangeInt( b2AtomicInt* a, int expected, int desired )
 {
 #if defined( _MSC_VER )
@@ -78,6 +104,17 @@ static inline void b2AtomicStoreU32( b2AtomicU32* a, uint32_t value )
 #endif
 }
 
+static inline uint16_t b2AtomicLoadU16( const uint16_t* a )
+{
+#if defined( _MSC_VER ) && !defined( __clang__ )
+	return (uint16_t)__iso_volatile_load16( (const volatile __int16*)a );
+#elif defined( __GNUC__ ) || defined( __clang__ )
+	return __atomic_load_n( a, __ATOMIC_RELAXED );
+#else
+#error "Unsupported platform"
+#endif
+}
+
 static inline uint32_t b2AtomicLoadU32( b2AtomicU32* a )
 {
 #if defined( _MSC_VER ) && !defined( __clang__ )
@@ -90,6 +127,28 @@ static inline uint32_t b2AtomicLoadU32( b2AtomicU32* a )
 	return value;
 #elif defined( __GNUC__ ) || defined( __clang__ )
 	return __atomic_load_n( &a->value, __ATOMIC_SEQ_CST );
+#else
+#error "Unsupported platform"
+#endif
+}
+
+static inline uint32_t b2AtomicLoadU32Raw( uint32_t* a )
+{
+#if defined( _MSC_VER ) && !defined( __clang__ )
+	return (uint32_t)__iso_volatile_load32( (volatile __int32*)a );
+#elif defined( __GNUC__ ) || defined( __clang__ )
+	return __atomic_load_n( a, __ATOMIC_RELAXED );
+#else
+#error "Unsupported platform"
+#endif
+}
+
+static inline uint32_t b2AtomicFetchOrU32( uint32_t* a, uint32_t mask )
+{
+#if defined( _MSC_VER )
+	return (uint32_t)_InterlockedOr( (long*)a, (long)mask );
+#elif defined( __GNUC__ ) || defined( __clang__ )
+	return __atomic_fetch_or( a, mask, __ATOMIC_SEQ_CST );
 #else
 #error "Unsupported platform"
 #endif
@@ -147,4 +206,124 @@ static inline bool b2IsDenormalFlushEnabled( void )
 	// wasm has no flush mode
 	return false;
 #endif
+}
+
+#if defined( _MSC_VER ) && !defined( __clang__ )
+
+#include <intrin0.h>
+
+// https://en.wikipedia.org/wiki/Find_first_set
+
+static inline uint32_t b2CTZ32( uint32_t block )
+{
+	unsigned long index;
+	_BitScanForward( &index, block );
+	return index;
+}
+
+// This function doesn't need to be fast, so using the Ivy Bridge fallback.
+static inline uint32_t b2CLZ32( uint32_t value )
+{
+	#if 1
+
+	// Use BSR (Bit Scan Reverse) which is available on Ivy Bridge
+	unsigned long index;
+	if ( _BitScanReverse( &index, value ) )
+	{
+		// BSR gives the index of the most significant 1-bit
+		// We need to invert this to get the number of leading zeros
+		return 31 - index;
+	}
+	else
+	{
+		// If x is 0, BSR sets the zero flag and doesn't modify index
+		// LZCNT should return 32 for an input of 0
+		return 32;
+	}
+
+	#else
+
+	return __lzcnt( value );
+
+	#endif
+}
+
+static inline uint32_t b2CTZ64( uint64_t block )
+{
+	unsigned long index;
+
+	#ifdef _WIN64
+	_BitScanForward64( &index, block );
+	#else
+	// 32-bit fall back
+	if ( (uint32_t)block != 0 )
+	{
+		_BitScanForward( &index, (uint32_t)block );
+	}
+	else
+	{
+		_BitScanForward( &index, (uint32_t)( block >> 32 ) );
+		index += 32;
+	}
+	#endif
+
+	return index;
+}
+
+static inline int b2PopCount64( uint64_t block )
+{
+	#ifdef _WIN64
+	return (int)__popcnt64( block );
+	#else
+	// 32-bit MSVC has no __popcnt64: count both halves
+	return (int)( __popcnt( (uint32_t)block ) + __popcnt( (uint32_t)( block >> 32 ) ) );
+	#endif
+}
+
+#else
+
+static inline uint32_t b2CTZ32( uint32_t block )
+{
+	return __builtin_ctz( block );
+}
+
+static inline uint32_t b2CLZ32( uint32_t value )
+{
+	return __builtin_clz( value );
+}
+
+static inline uint32_t b2CTZ64( uint64_t block )
+{
+	return __builtin_ctzll( block );
+}
+
+static inline int b2PopCount64( uint64_t block )
+{
+	return __builtin_popcountll( block );
+}
+#endif
+
+static inline bool b2IsPowerOf2( int x )
+{
+	return ( x & ( x - 1 ) ) == 0;
+}
+
+static inline int b2BoundingPowerOf2( int x )
+{
+	if ( x <= 1 )
+	{
+		return 1;
+	}
+
+	return 32 - (int)b2CLZ32( (uint32_t)x - 1 );
+}
+
+static inline int b2RoundUpPowerOf2( int x )
+{
+	if ( x <= 1 )
+	{
+		return 1;
+	}
+
+	return 1 << ( 32 - (int)b2CLZ32( (uint32_t)x - 1 ) );
 }

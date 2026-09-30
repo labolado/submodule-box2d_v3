@@ -6,7 +6,11 @@
 #include "core.h"
 
 #include <stddef.h>
+#if defined( _MSC_VER )
+#include <vcruntime_string.h>
+#else
 #include <string.h>
+#endif
 
 #define b2DeclareArray( T )                                                                                                      \
 	typedef struct b2DynamicArray_##T                                                                                            \
@@ -157,3 +161,7 @@ B2_INLINE int b2RemoveHelper( void* data, int* count, int index, int elementSize
 #define b2Array_ByteCount( a ) ( ( a ).capacity * (int)sizeof( *( a ).data ) )
 
 b2DeclareArrayNative( int );
+b2DeclareArrayNative( uint64_t );
+b2DeclareArray( b2Body );
+b2DeclareArray( b2BodySim );
+b2DeclareArray( b2BodyState );
