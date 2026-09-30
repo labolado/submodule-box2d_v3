@@ -72,27 +72,27 @@ static const char* ReplayJointTypeName( b2JointType type )
 	}
 }
 
-static const char* ReplayQueryTypeName( b2RecQueryType type )
+static const char* ReplayQueryTypeName( b2ReplayQueryType type )
 {
 	switch ( type )
 	{
-		case b2_recQueryOverlapAABB:
+		case b2_replayQueryOverlapAABB:
 			return "overlap AABB";
-		case b2_recQueryOverlapShape:
+		case b2_replayQueryOverlapShape:
 			return "overlap shape";
-		case b2_recQueryCastRay:
+		case b2_replayQueryCastRay:
 			return "cast ray";
-		case b2_recQueryCastShape:
+		case b2_replayQueryCastShape:
 			return "cast shape";
-		case b2_recQueryCollideMover:
+		case b2_replayQueryCollideMover:
 			return "collide mover";
-		case b2_recQueryCastRayClosest:
+		case b2_replayQueryCastRayClosest:
 			return "cast ray closest";
-		case b2_recQueryCastMover:
+		case b2_replayQueryCastMover:
 			return "cast mover";
-		case b2_recQueryShapeTestPoint:
+		case b2_replayQueryShapeTestPoint:
 			return "shape test point";
-		case b2_recQueryShapeRayCast:
+		case b2_replayQueryShapeRayCast:
 			return "shape ray cast";
 		default:
 			return "?";
@@ -136,7 +136,7 @@ public:
 			m_context->camera.zoom = 10.0f;
 		}
 
-		// The timeline scrubber lives in the diagnostics drawer, so open it for the replay
+		// The timeline scrubber lives in the metrics drawer, so open it for the replay
 		m_prevShowMetrics = m_context->showMetrics;
 		m_context->showMetrics = true;
 		m_context->pause = true;
@@ -177,7 +177,7 @@ public:
 	{
 		if ( m_player != nullptr )
 		{
-			b2RecPlayer_Destroy( m_player );
+			b2DestroyReplay( m_player );
 			m_player = nullptr;
 		}
 		m_worldId = b2_nullWorldId;
@@ -208,7 +208,7 @@ public:
 
 			// Use a large worker count so key frame generation is fast
 			m_context->workerCount = b2MinInt( 8, GetNumberOfCores() / 2 );
-			m_player = b2RecPlayer_Create( data, byteCount, m_context->workerCount );
+			m_player = b2CreateReplay( data, byteCount, m_context->workerCount );
 		}
 		else
 		{
@@ -219,33 +219,24 @@ public:
 		m_frameAccumulator = 0.0f;
 		if ( m_player != nullptr )
 		{
-			m_worldId = b2RecPlayer_GetWorldId( m_player );
-			m_info = b2RecPlayer_GetInfo( m_player );
+			m_worldId = b2Replay_GetWorldId( m_player );
+			m_info = b2Replay_GetInfo( m_player );
 
 			// Apply the persisted keyframe policy before any stepping captures keyframes. A freshly
 			// created player starts at the engine defaults, so the ring rebuilds under our spacing.
 			size_t bytes = (size_t)m_context->replayKeyframeBudgetMB * 1024 * 1024;
-			b2RecPlayer_SetKeyframePolicy( m_player, bytes, m_context->replayKeyframeMinInterval );
+			b2Replay_SetKeyframePolicy( m_player, bytes, m_context->replayKeyframeMinInterval );
 
 			snprintf( m_status, sizeof( m_status ), "loaded" );
 
 			if ( m_context->restart == false )
 			{
-				// Frame the whole recorded motion. Older recordings lack stored bounds, so fall
-				// back to the live frame-0 bounds when the recorded extents are empty.
-				b2AABB bounds = m_info.bounds;
-				b2Vec2 extents = b2AABB_Extents( bounds );
-				if ( extents.x <= 0.0f && extents.y <= 0.0f )
-				{
-					bounds = b2World_GetBounds( m_worldId );
-				}
-				FocusOnBounds( &m_context->camera, bounds );
-				m_context->camera.zoom *= 1.5f;
+				FrameRecording();
 			}
 		}
 		else
 		{
-			m_info = b2RecPlayerInfo{};
+			m_info = b2ReplayInfo{};
 			snprintf( m_status, sizeof( m_status ), "failed to open file" );
 		}
 	}
@@ -287,12 +278,12 @@ public:
 			// Step forward in wall-clock slices so the bar animates. Forward stepping captures
 			// keyframes at the interval; a restart then returns to frame 0 with the ring kept.
 			uint64_t ticks = b2GetTicks();
-			while ( b2RecPlayer_IsAtEnd( m_player ) == false && b2GetMilliseconds( ticks ) < 12.0f )
+			while ( b2Replay_IsAtEnd( m_player ) == false && b2GetMilliseconds( ticks ) < 12.0f )
 			{
-				b2RecPlayer_StepFrame( m_player );
+				b2Replay_StepFrame( m_player );
 			}
 
-			int frame = b2RecPlayer_GetFrame( m_player );
+			int frame = b2Replay_GetFrame( m_player );
 			int total = m_info.frameCount > 0 ? m_info.frameCount : 1;
 			float frac = frame >= total ? 1.0f : (float)frame / (float)total;
 			char overlay[32];
@@ -300,10 +291,10 @@ public:
 			ImGui::TextUnformatted( "Generating keyframes" );
 			ImGui::ProgressBar( frac, ImVec2( -FLT_MIN, 0.0f ), overlay );
 
-			if ( b2RecPlayer_IsAtEnd( m_player ) )
+			if ( b2Replay_IsAtEnd( m_player ) )
 			{
-				b2RecPlayer_Restart( m_player );
-				m_worldId = b2RecPlayer_GetWorldId( m_player );
+				b2Replay_Restart( m_player );
+				m_worldId = b2Replay_GetWorldId( m_player );
 				m_generating = false;
 				m_context->pause = true;
 				ImGui::CloseCurrentPopup();
@@ -353,8 +344,64 @@ public:
 	// Advance one recorded step and keep the world pointer current
 	void AdvanceOne()
 	{
-		b2RecPlayer_StepFrame( m_player );
-		m_worldId = b2RecPlayer_GetWorldId( m_player );
+		b2Replay_StepFrame( m_player );
+		m_worldId = b2Replay_GetWorldId( m_player );
+	}
+
+	// Frame the whole recorded motion. Older recordings lack stored bounds, so fall back to the
+	// live frame-0 bounds when the recorded extents are empty.
+	void FrameRecording()
+	{
+		b2AABB bounds = m_info.bounds;
+		b2Vec2 extents = b2AABB_Extents( bounds );
+		if ( extents.x <= 0.0f && extents.y <= 0.0f )
+		{
+			bounds = b2World_GetBounds( m_worldId );
+		}
+		FocusOnBounds( &m_context->camera, bounds );
+		m_context->camera.zoom *= 1.5f;
+	}
+
+	// The recording loads after construction, so home is the fit made on load, not the view the
+	// constructor set up
+	void FocusHome() override
+	{
+		if ( m_player != nullptr )
+		{
+			FrameRecording();
+		}
+		else
+		{
+			Sample::FocusHome();
+		}
+	}
+
+	// , steps backward. Forward is the global single step on . so it works in every sample.
+	// Shift moves five frames, matching that key. Esc drops the selection.
+	void Keyboard( int key, int action, int mods ) override
+	{
+		if ( m_generating || m_player == nullptr || action != GLFW_PRESS )
+		{
+			return;
+		}
+
+		if ( ( mods & ( GLFW_MOD_CONTROL | GLFW_MOD_ALT ) ) != 0 )
+		{
+			return;
+		}
+
+		if ( key == GLFW_KEY_ESCAPE )
+		{
+			m_selKind = SelNone;
+		}
+		else if ( key == GLFW_KEY_COMMA )
+		{
+			int back = ( mods & GLFW_MOD_SHIFT ) ? 5 : 1;
+			b2Replay_SeekFrame( m_player, b2MaxInt( 0, b2Replay_GetFrame( m_player ) - back ) );
+			m_worldId = b2Replay_GetWorldId( m_player );
+			m_frameAccumulator = 0.0f;
+			m_context->pause = true;
+		}
 	}
 
 	void Step() override
@@ -365,20 +412,24 @@ public:
 		// owns the screen and shows the progress bar until generation finishes.
 		if ( m_generating )
 		{
-			m_stepCount = b2RecPlayer_GetFrame( m_player );
+			m_stepCount = b2Replay_GetFrame( m_player );
+			m_context->singleStep = 0;
 			return;
 		}
 
 		if ( m_player == nullptr )
 		{
 			DrawScreenTextLine( "%s", m_status );
+			m_context->singleStep = 0;
 			return;
 		}
 
-		if ( m_context->pause && m_context->singleStep )
+		if ( m_context->singleStep > 0 )
 		{
-			m_context->singleStep = false;
-			if ( b2RecPlayer_IsAtEnd( m_player ) == false )
+			// Stepping takes over from playback, like the transport buttons
+			m_context->singleStep = b2MaxInt( 0, m_context->singleStep - 1 );
+			m_context->pause = true;
+			if ( b2Replay_IsAtEnd( m_player ) == false )
 			{
 				AdvanceOne();
 			}
@@ -392,12 +443,12 @@ public:
 			while ( m_frameAccumulator >= 1.0f )
 			{
 				m_frameAccumulator -= 1.0f;
-				if ( b2RecPlayer_IsAtEnd( m_player ) )
+				if ( b2Replay_IsAtEnd( m_player ) )
 				{
 					if ( m_loop )
 					{
-						b2RecPlayer_Restart( m_player );
-						m_worldId = b2RecPlayer_GetWorldId( m_player );
+						b2Replay_Restart( m_player );
+						m_worldId = b2Replay_GetWorldId( m_player );
 					}
 					else
 					{
@@ -410,7 +461,7 @@ public:
 		}
 
 		// Keep the base panel "step N" line tracking the replay frame
-		m_stepCount = b2RecPlayer_GetFrame( m_player );
+		m_stepCount = b2Replay_GetFrame( m_player );
 
 		m_context->debugDraw.drawingBounds = GetViewBounds( &m_context->camera );
 
@@ -419,14 +470,14 @@ public:
 			b2World_Draw( m_worldId, &m_context->debugDraw );
 			if ( m_selKind == SelQuery )
 			{
-				b2RecPlayer_DrawFrameQueries( m_player, &m_context->debugDraw, m_selQuery );
+				b2Replay_DrawFrameQueries( m_player, &m_context->debugDraw, m_selQuery );
 			}
 			DrawSelectionHighlight();
 		}
 
 		if ( m_context->showUI )
 		{
-			DrawInspectorPanel();
+			DrawOutlinePanel();
 		}
 	}
 
@@ -438,19 +489,19 @@ public:
 			return;
 		}
 
-		int frame = b2RecPlayer_GetFrame( m_player );
+		int frame = b2Replay_GetFrame( m_player );
 
 		if ( ImGui::Button( "|<" ) )
 		{
-			b2RecPlayer_SeekFrame( m_player, 0 );
-			m_worldId = b2RecPlayer_GetWorldId( m_player );
+			b2Replay_SeekFrame( m_player, 0 );
+			m_worldId = b2Replay_GetWorldId( m_player );
 			m_frameAccumulator = 0.0f;
 		}
 		ImGui::SameLine();
 		if ( ImGui::Button( "<" ) )
 		{
-			b2RecPlayer_SeekFrame( m_player, frame - 1 );
-			m_worldId = b2RecPlayer_GetWorldId( m_player );
+			b2Replay_SeekFrame( m_player, frame - 1 );
+			m_worldId = b2Replay_GetWorldId( m_player );
 			m_frameAccumulator = 0.0f;
 			m_context->pause = true;
 		}
@@ -482,16 +533,16 @@ public:
 		ImGui::SameLine();
 		if ( ImGui::Button( ">" ) )
 		{
-			b2RecPlayer_SeekFrame( m_player, frame + 1 );
-			m_worldId = b2RecPlayer_GetWorldId( m_player );
+			b2Replay_SeekFrame( m_player, frame + 1 );
+			m_worldId = b2Replay_GetWorldId( m_player );
 			m_frameAccumulator = 0.0f;
 			m_context->pause = true;
 		}
 		ImGui::SameLine();
 		if ( ImGui::Button( ">|" ) )
 		{
-			b2RecPlayer_SeekFrame( m_player, m_info.frameCount );
-			m_worldId = b2RecPlayer_GetWorldId( m_player );
+			b2Replay_SeekFrame( m_player, m_info.frameCount );
+			m_worldId = b2Replay_GetWorldId( m_player );
 			m_frameAccumulator = 0.0f;
 		}
 	}
@@ -502,8 +553,19 @@ public:
 		return false;
 	}
 
-	// The inspector lives in the wide left panel. This right-panel control just reopens the
-	// diagnostics drawer and jumps to the timeline if it was closed.
+	bool HasProfile() const override
+	{
+		return false;
+	}
+
+	// Wider than the default so the detail pane, hosted in the info panel, has room for ids and vectors.
+	float InfoPanelWidthEm() const override
+	{
+		return 22.0f;
+	}
+
+	// Right info panel: a compact summary with the selection detail below it. The scene tree lives in
+	// the Outline window and the transport in the Timeline tab.
 	bool DrawControls() override
 	{
 		if ( ImGui::Button( "Show Timeline" ) )
@@ -512,13 +574,26 @@ public:
 			m_selectTimelineTab = true;
 		}
 
-		if ( b2RecPlayer_HasDiverged( m_player ) )
+		if ( m_player == nullptr )
+		{
+			return false;
+		}
+
+		if ( b2Replay_HasDiverged( m_player ) )
 		{
 			ImGui::TextColored( MakeColor( b2_colorRed ), "****DIVERGED****" );
 		}
 
-		ImGui::TextDisabled( "Frame %d / %d%s", b2RecPlayer_GetFrame( m_player ), m_info.frameCount,
-							 b2RecPlayer_IsAtEnd( m_player ) ? "  (end)" : "" );
+		ImGui::TextDisabled( "Frame %d / %d%s", b2Replay_GetFrame( m_player ), m_info.frameCount,
+							 b2Replay_IsAtEnd( m_player ) ? "  (end)" : "" );
+
+		// The child takes the remaining panel height and scrolls a long detail. Return false so the
+		// panel adds no trailing separator below this full height child.
+		ImGui::Separator();
+		ImGui::TextColored( ImVec4( 0.9f, 0.6f, 0.2f, 1.0f ), "Detail" );
+		ImGui::BeginChild( "detail" );
+		DrawDetail();
+		ImGui::EndChild();
 
 		return false;
 	}
@@ -532,7 +607,7 @@ public:
 		{
 			return b2_nullBodyId;
 		}
-		return b2RecPlayer_GetBodyId( m_player, m_selBodyOrdinal );
+		return b2Replay_GetBodyId( m_player, m_selBodyOrdinal );
 	}
 
 	b2ShapeId SelectedShape() const
@@ -561,10 +636,10 @@ public:
 
 	int FindBodyOrdinal( b2BodyId body ) const
 	{
-		int count = b2RecPlayer_GetBodyCount( m_player );
+		int count = b2Replay_GetBodyCount( m_player );
 		for ( int i = 0; i < count; ++i )
 		{
-			if ( B2_ID_EQUALS( b2RecPlayer_GetBodyId( m_player, i ), body ) )
+			if ( B2_ID_EQUALS( b2Replay_GetBodyId( m_player, i ), body ) )
 			{
 				return i;
 			}
@@ -629,7 +704,7 @@ public:
 	}
 
 	// Highlight the current selection without touching the world. Queries are already drawn by
-	// b2RecPlayer_DrawFrameQueries, so they need nothing here.
+	// b2Replay_DrawFrameQueries, so they need nothing here.
 	void DrawSelectionHighlight()
 	{
 		Draw* draw = m_context->draw;
@@ -682,10 +757,9 @@ public:
 		}
 	}
 
-	// Wide left panel: an outliner tree of the scene on top, the selected item's full detail below.
-	// Its own window, so it is not bound by the fixed-width right Info panel. Opened from Step, which
-	// runs inside the imgui frame.
-	void DrawInspectorPanel()
+	// Left Outline window holding the scene tree. The selection detail lives in the right info panel,
+	// so the tree owns the whole column. Opened from Step, which runs inside the imgui frame.
+	void DrawOutlinePanel()
 	{
 		if ( m_player == nullptr )
 		{
@@ -694,7 +768,7 @@ public:
 
 		float fontSize = ImGui::GetFontSize();
 		float menuBarHeight = ImGui::GetFrameHeight();
-		float drawerHeight = 16.0f * fontSize; // matches the diagnostics drawer in sample.cpp
+		float drawerHeight = 16.0f * fontSize; // matches the metrics drawer in sample.cpp
 		float top = menuBarHeight + 0.5f * fontSize;
 		// Stop above the timeline drawer, which this sample keeps open
 		float bottom = m_context->showMetrics ? m_context->camera.height - drawerHeight - fontSize
@@ -702,20 +776,13 @@ public:
 
 		ImGui::SetNextWindowPos( { 0.5f * fontSize, top } );
 		ImGui::SetNextWindowSize( { 22.0f * fontSize, bottom - top } );
-		ImGui::Begin( "Inspector", nullptr,
+		ImGui::Begin( "Outline", nullptr,
 					  ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
 						  ImGuiWindowFlags_NoTitleBar );
 
 		ImGui::TextColored( ImVec4( 0.9f, 0.6f, 0.2f, 1.0f ), "Outline" );
-		float avail = ImGui::GetContentRegionAvail().y;
-		ImGui::BeginChild( "tree", ImVec2( 0.0f, 0.55f * avail ) );
+		ImGui::BeginChild( "tree" );
 		DrawOutlineTree();
-		ImGui::EndChild();
-
-		ImGui::Separator();
-		ImGui::TextColored( ImVec4( 0.9f, 0.6f, 0.2f, 1.0f ), "Detail" );
-		ImGui::BeginChild( "detail" );
-		DrawDetail();
 		ImGui::EndChild();
 
 		ImGui::End();
@@ -729,10 +796,10 @@ public:
 		// the row. Consumed at the end so it never fights the user's own expand/collapse.
 		bool reveal = m_revealSelection;
 
-		int count = b2RecPlayer_GetBodyCount( m_player );
+		int count = b2Replay_GetBodyCount( m_player );
 		for ( int ord = 0; ord < count; ++ord )
 		{
-			b2BodyId body = b2RecPlayer_GetBodyId( m_player, ord );
+			b2BodyId body = b2Replay_GetBodyId( m_player, ord );
 			if ( B2_IS_NULL( body ) || b2Body_IsValid( body ) == false )
 			{
 				continue;
@@ -822,14 +889,14 @@ public:
 			ImGui::TreePop();
 		}
 
-		int qn = b2RecPlayer_GetFrameQueryCount( m_player );
+		int qn = b2Replay_GetFrameQueryCount( m_player );
 		char ql[32];
 		snprintf( ql, sizeof( ql ), "Queries (%d)###queries", qn );
 		if ( ImGui::TreeNodeEx( ql, ImGuiTreeNodeFlags_SpanAvailWidth ) )
 		{
 			for ( int i = 0; i < qn; ++i )
 			{
-				b2RecQueryInfo q = b2RecPlayer_GetFrameQuery( m_player, i );
+				b2ReplayQueryInfo q = b2Replay_GetFrameQuery( m_player, i );
 				char qi[64];
 				snprintf( qi, sizeof( qi ), "%s  (%d)###q%d", ReplayQueryTypeName( q.type ), q.hitCount, i );
 				ImGuiTreeNodeFlags lf =
@@ -1018,21 +1085,21 @@ public:
 
 	void DrawQueryDetail()
 	{
-		int count = b2RecPlayer_GetFrameQueryCount( m_player );
+		int count = b2Replay_GetFrameQueryCount( m_player );
 		if ( m_selQuery < 0 || m_selQuery >= count )
 		{
 			ImGui::TextDisabled( "Query not present at this frame." );
 			return;
 		}
 
-		b2RecQueryInfo q = b2RecPlayer_GetFrameQuery( m_player, m_selQuery );
+		b2ReplayQueryInfo q = b2Replay_GetFrameQuery( m_player, m_selQuery );
 		if ( ImGui::CollapsingHeader( "Query", ImGuiTreeNodeFlags_DefaultOpen ) == false )
 		{
 			return;
 		}
 
 		ImGui::Text( "type     %s", ReplayQueryTypeName( q.type ) );
-		bool shapeLocal = q.type == b2_recQueryShapeTestPoint || q.type == b2_recQueryShapeRayCast;
+		bool shapeLocal = q.type == b2_replayQueryShapeTestPoint || q.type == b2_replayQueryShapeRayCast;
 		if ( shapeLocal == false )
 		{
 			ImGui::Text( "category 0x%016llx", (unsigned long long)q.filter.categoryBits );
@@ -1049,7 +1116,7 @@ public:
 		int len = 0;
 		for ( int h = 0; h < q.hitCount && len < (int)sizeof( line ) - 12; ++h )
 		{
-			b2RecQueryHit hit = b2RecPlayer_GetFrameQueryHit( m_player, m_selQuery, h );
+			b2ReplayQueryHit hit = b2Replay_GetFrameQueryHit( m_player, m_selQuery, h );
 			len += snprintf( line + len, sizeof( line ) - len, "%d ", hit.shape.index1 );
 		}
 		if ( q.hitCount > 0 )
@@ -1058,7 +1125,7 @@ public:
 		}
 	}
 
-	// All replay controls live in the diagnostics drawer tab.
+	// All replay controls live in the metrics drawer tab.
 	void DrawMetricsTab() override
 	{
 		ImGuiTabItemFlags tabFlags = 0;
@@ -1125,23 +1192,23 @@ public:
 		// Live ring state: the effective spacing widens as the ring evicts under the budget, and the
 		// memory held grows as keyframes accumulate. Budget and min interval are chosen in the Load
 		// popup and persisted, so there is no live slider here.
-		ImGui::TextDisabled( "keyframe spacing %d frames, %.1f MB", b2RecPlayer_GetKeyframeInterval( m_player ),
-							 (double)b2RecPlayer_GetKeyframeBytes( m_player ) / ( 1024.0 * 1024.0 ) );
+		ImGui::TextDisabled( "keyframe spacing %d frames, %.1f MB", b2Replay_GetKeyframeInterval( m_player ),
+							 (double)b2Replay_GetKeyframeBytes( m_player ) / ( 1024.0 * 1024.0 ) );
 
 		// Scrubber: full width, seeks both directions
-		int scrub = b2RecPlayer_GetFrame( m_player );
+		int scrub = b2Replay_GetFrame( m_player );
 		ImGui::PushItemWidth( -1.0f );
 		if ( ImGui::SliderInt( "##frame", &scrub, 0, m_info.frameCount ) )
 		{
-			b2RecPlayer_SeekFrame( m_player, scrub );
-			m_worldId = b2RecPlayer_GetWorldId( m_player );
+			b2Replay_SeekFrame( m_player, scrub );
+			m_worldId = b2Replay_GetWorldId( m_player );
 			m_frameAccumulator = 0.0f;
 			m_context->pause = true;
 		}
 		ImGui::PopItemWidth();
 
 		// Mark where the replay first diverged on the scrubber track
-		int divergeFrame = b2RecPlayer_GetDivergeFrame( m_player );
+		int divergeFrame = b2Replay_GetDivergeFrame( m_player );
 		if ( divergeFrame >= 0 && m_info.frameCount > 0 )
 		{
 			ImVec2 lo = ImGui::GetItemRectMin();
@@ -1157,6 +1224,11 @@ public:
 		{
 			ImGui::SameLine();
 			ImGui::Text( "   %.0f hz, %d sub-steps", 1.0f / m_info.timeStep, m_info.subStepCount );
+		}
+		if ( m_info.lengthScale > 0.0f )
+		{
+			ImGui::SameLine();
+			ImGui::Text( "   %g units/m", m_info.lengthScale );
 		}
 		if ( B2_IS_NON_NULL( m_worldId ) )
 		{
@@ -1206,11 +1278,11 @@ public:
 		return new ReplayViewer( context );
 	}
 
-	b2RecPlayer* m_player;
+	b2Replay* m_player;
 	char m_path[256];
 	char m_status[64];
 
-	b2RecPlayerInfo m_info = {};
+	b2ReplayInfo m_info = {};
 	float m_speed = 1.0f;
 	float m_frameAccumulator = 0.0f;
 	bool m_loop = false;

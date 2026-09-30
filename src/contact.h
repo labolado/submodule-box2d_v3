@@ -7,6 +7,7 @@
 #include "core.h"
 
 #include "box2d/collision.h"
+#include "box2d/math_functions.h"
 #include "box2d/types.h"
 
 typedef struct b2Shape b2Shape;
@@ -114,9 +115,11 @@ typedef struct b2ContactSim
 	int bodyIdB;
 #endif
 
-	// Transient body indices
-	int bodySimIndexA;
-	int bodySimIndexB;
+	int encodedBodySimA;
+	int encodedBodySimB;
+
+	// b2ContactFlags
+	uint32_t simFlags;
 
 	int shapeIdA;
 	int shapeIdB;
@@ -135,13 +138,9 @@ typedef struct b2ContactSim
 	float rollingResistance;
 	float tangentSpeed;
 
-	// b2ContactFlags
-	uint32_t simFlags;
-
 	b2SimplexCache cache;
 } b2ContactSim;
 
-void b2InitializeContactRegisters( void );
 bool b2CanCollide( b2ShapeType typeA, b2ShapeType typeB );
 
 void b2CreateContact( b2World* world, b2Shape* shapeA, b2Shape* shapeB );
@@ -154,3 +153,13 @@ bool b2UpdateContact( b2World* world, b2ContactSim* contactSim, b2Shape* shapeA,
 
 b2DeclareArray( b2Contact );
 b2DeclareArray( b2ContactSim );
+
+static inline float b2MixFriction( float frictionA, float frictionB )
+{
+	return sqrtf( frictionA * frictionB );
+}
+
+static inline float b2MixRestitution( float restitutionA, float restitutionB )
+{
+	return b2MaxFloat( restitutionA, restitutionB );
+}

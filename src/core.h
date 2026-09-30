@@ -64,10 +64,11 @@
 			#define B2_SIMD_WIDTH 4
 		#endif
 	#elif defined( B2_CPU_ARM )
-		// todo comment: ARMv7 NEON always flushes denormals regardless of FPSCR, so 32 bit ARM takes the scalar path
 		#if defined( __aarch64__ ) || defined( _M_ARM64 )
 			#define B2_SIMD_NEON
 		#else
+			// arm32 gets scalar math because 32-bit Neon has determinism problems
+			// and unverifiable performance.
 			#define B2_SIMD_NONE
 		#endif
 		#define B2_SIMD_WIDTH 4
@@ -146,6 +147,31 @@
 
 #define B2_CHECK_DEF( DEF ) B2_ASSERT( DEF->internalValue == B2_SECRET_COOKIE )
 
+// Used to validate API inputs.
+#define B2_CHECK_INPUT( CONDITION )                                                                                              \
+	do                                                                                                                           \
+	{                                                                                                                            \
+		if ( ( CONDITION ) == false )                                                                                            \
+		{                                                                                                                        \
+			b2Log( "invalid input: %s in %s\n", #CONDITION, __func__ );                                                          \
+			B2_ASSERT( CONDITION );                                                                                              \
+			return;                                                                                                              \
+		}                                                                                                                        \
+	}                                                                                                                            \
+	while ( 0 )
+
+#define B2_CHECK_INPUT_RETURN( CONDITION, RESULT )                                                                               \
+	do                                                                                                                           \
+	{                                                                                                                            \
+		if ( ( CONDITION ) == false )                                                                                            \
+		{                                                                                                                        \
+			b2Log( "invalid input: %s in %s\n", #CONDITION, __func__ );                                                          \
+			B2_ASSERT( CONDITION );                                                                                              \
+			return RESULT;                                                                                                       \
+		}                                                                                                                        \
+	}                                                                                                                            \
+	while ( 0 )
+
 typedef struct b2AtomicInt
 {
 	int value;
@@ -161,6 +187,9 @@ typedef struct b2AtomicI64
 	// 64-bit atomic wants 8-byte alignment
 	_Alignas( 8 ) int64_t value;
 } b2AtomicI64;
+
+// Use 64 byte alignment for everything. Needed for tree nodes.
+#define B2_ALIGNMENT 64
 
 extern bool b2_speculativeCornerPassThrough;
 

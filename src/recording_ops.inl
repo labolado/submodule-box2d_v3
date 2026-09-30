@@ -38,6 +38,8 @@ B2_REC_OP( 0x09, WorldSetContactRecycleDistance, RET_NONE, ARG( WORLDID, world )
 B2_REC_OP( 0x0A, WorldSetMaximumLinearSpeed, RET_NONE, ARG( WORLDID, world ) ARG( F32, maximumLinearSpeed ) )
 B2_REC_OP( 0x0B, WorldEnableWarmStarting, RET_NONE, ARG( WORLDID, world ) ARG( BOOL, flag ) )
 B2_REC_OP( 0x0C, WorldRebuildStaticTree, RET_NONE, ARG( WORLDID, world ) )
+B2_REC_OP( 0x0D, WorldSetRestitutionIterations, RET_NONE, ARG( WORLDID, world ) ARG( I32, iterations ) )
+B2_REC_OP( 0x0E, WorldEnableRestitutionPropagation, RET_NONE, ARG( WORLDID, world ) ARG( BOOL, flag ) )
 
 // Body
 B2_REC_OP( 0x10, CreateBody, RET_BODYID, ARG( WORLDID, world ) ARG( BODYDEF, def ) )
@@ -56,7 +58,7 @@ B2_REC_OP( 0x2A, BodyApplyLinearImpulse, RET_NONE, ARG( BODYID, body ) ARG( VEC2
 B2_REC_OP( 0x2B, BodyApplyLinearImpulseToCenter, RET_NONE, ARG( BODYID, body ) ARG( VEC2, impulse ) ARG( BOOL, wake ) )
 B2_REC_OP( 0x2C, BodyApplyAngularImpulse, RET_NONE, ARG( BODYID, body ) ARG( F32, impulse ) ARG( BOOL, wake ) )
 B2_REC_OP( 0x2D, BodySetMassData, RET_NONE, ARG( BODYID, body ) ARG( MASSDATA, massData ) )
-B2_REC_OP( 0x2E, BodyApplyMassFromShapes, RET_NONE, ARG( BODYID, body ) )
+B2_REC_OP( 0x2E, BodyUpdateMassFromShapes, RET_NONE, ARG( BODYID, body ) )
 B2_REC_OP( 0x2F, BodySetLinearDamping, RET_NONE, ARG( BODYID, body ) ARG( F32, damping ) )
 B2_REC_OP( 0x30, BodySetAngularDamping, RET_NONE, ARG( BODYID, body ) ARG( F32, damping ) )
 B2_REC_OP( 0x31, BodySetGravityScale, RET_NONE, ARG( BODYID, body ) ARG( F32, scale ) )

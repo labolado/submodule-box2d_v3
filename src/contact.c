@@ -94,9 +94,6 @@ struct b2ContactRegister
 	bool primary;
 };
 
-static struct b2ContactRegister s_registers[b2_shapeTypeCount][b2_shapeTypeCount];
-static bool s_initialized = false;
-
 static b2LocalManifold b2CircleManifold( const b2Shape* shapeA, const b2Shape* shapeB, b2Transform xf, b2SimplexCache* cache )
 {
 	B2_UNUSED( cache );
@@ -176,44 +173,49 @@ static b2LocalManifold b2ChainSegmentAndPolygonManifold( const b2Shape* shapeA, 
 	return b2CollideChainSegmentAndPolygon( &shapeA->chainSegment, &shapeB->polygon, xf, cache );
 }
 
-static void b2AddType( b2ManifoldFcn* fcn, b2ShapeType type1, b2ShapeType type2 )
-{
-	B2_ASSERT( 0 <= type1 && type1 < b2_shapeTypeCount );
-	B2_ASSERT( 0 <= type2 && type2 < b2_shapeTypeCount );
-
-	s_registers[type1][type2].fcn = fcn;
-	s_registers[type1][type2].primary = true;
-
-	if ( type1 != type2 )
-	{
-		s_registers[type2][type1].fcn = fcn;
-		s_registers[type2][type1].primary = false;
-	}
-}
-
-void b2InitializeContactRegisters( void )
-{
-	if ( s_initialized == false )
-	{
-		b2AddType( b2CircleManifold, b2_circleShape, b2_circleShape );
-		b2AddType( b2CapsuleAndCircleManifold, b2_capsuleShape, b2_circleShape );
-		b2AddType( b2CapsuleManifold, b2_capsuleShape, b2_capsuleShape );
-		b2AddType( b2PolygonAndCircleManifold, b2_polygonShape, b2_circleShape );
-		b2AddType( b2PolygonAndCapsuleManifold, b2_polygonShape, b2_capsuleShape );
-		b2AddType( b2PolygonManifold, b2_polygonShape, b2_polygonShape );
-		b2AddType( b2SegmentAndCircleManifold, b2_segmentShape, b2_circleShape );
-		b2AddType( b2SegmentAndCapsuleManifold, b2_segmentShape, b2_capsuleShape );
-		b2AddType( b2SegmentAndPolygonManifold, b2_segmentShape, b2_polygonShape );
-		b2AddType( b2ChainSegmentAndCircleManifold, b2_chainSegmentShape, b2_circleShape );
-		b2AddType( b2ChainSegmentAndCapsuleManifold, b2_chainSegmentShape, b2_capsuleShape );
-		b2AddType( b2ChainSegmentAndPolygonManifold, b2_chainSegmentShape, b2_polygonShape );
-		s_initialized = true;
-	}
-}
+// This works with DLL hot reloading.
+static const struct b2ContactRegister b2_contactRegistry[b2_shapeTypeCount][b2_shapeTypeCount] = {
+	[b2_circleShape] =
+		{
+			[b2_circleShape] = { .fcn = b2CircleManifold, .primary = true },
+			[b2_capsuleShape] = { .fcn = b2CapsuleAndCircleManifold, .primary = false },
+			[b2_segmentShape] = { .fcn = b2SegmentAndCircleManifold, .primary = false },
+			[b2_polygonShape] = { .fcn = b2PolygonAndCircleManifold, .primary = false },
+			[b2_chainSegmentShape] = { .fcn = b2ChainSegmentAndCircleManifold, .primary = false },
+		},
+	[b2_capsuleShape] =
+		{
+			[b2_circleShape] = { .fcn = b2CapsuleAndCircleManifold, .primary = true },
+			[b2_capsuleShape] = { .fcn = b2CapsuleManifold, .primary = true },
+			[b2_segmentShape] = { .fcn = b2SegmentAndCapsuleManifold, .primary = false },
+			[b2_polygonShape] = { .fcn = b2PolygonAndCapsuleManifold, .primary = false },
+			[b2_chainSegmentShape] = { .fcn = b2ChainSegmentAndCapsuleManifold, .primary = false },
+		},
+	[b2_segmentShape] =
+		{
+			[b2_circleShape] = { .fcn = b2SegmentAndCircleManifold, .primary = true },
+			[b2_capsuleShape] = { .fcn = b2SegmentAndCapsuleManifold, .primary = true },
+			[b2_polygonShape] = { .fcn = b2SegmentAndPolygonManifold, .primary = true },
+		},
+	[b2_polygonShape] =
+		{
+			[b2_circleShape] = { .fcn = b2PolygonAndCircleManifold, .primary = true },
+			[b2_capsuleShape] = { .fcn = b2PolygonAndCapsuleManifold, .primary = true },
+			[b2_segmentShape] = { .fcn = b2SegmentAndPolygonManifold, .primary = false },
+			[b2_polygonShape] = { .fcn = b2PolygonManifold, .primary = true },
+			[b2_chainSegmentShape] = { .fcn = b2ChainSegmentAndPolygonManifold, .primary = false },
+		},
+	[b2_chainSegmentShape] =
+		{
+			[b2_circleShape] = { .fcn = b2ChainSegmentAndCircleManifold, .primary = true },
+			[b2_capsuleShape] = { .fcn = b2ChainSegmentAndCapsuleManifold, .primary = true },
+			[b2_polygonShape] = { .fcn = b2ChainSegmentAndPolygonManifold, .primary = true },
+		},
+};
 
 bool b2CanCollide( b2ShapeType typeA, b2ShapeType typeB )
 {
-	return s_registers[typeA][typeB].fcn != NULL;
+	return b2_contactRegistry[typeA][typeB].fcn != NULL;
 }
 
 // WARNING: this should never fail to create a contact because the pair already exists in the pairSet.
@@ -225,13 +227,13 @@ void b2CreateContact( b2World* world, b2Shape* shapeA, b2Shape* shapeB )
 	B2_ASSERT( 0 <= type1 && type1 < b2_shapeTypeCount );
 	B2_ASSERT( 0 <= type2 && type2 < b2_shapeTypeCount );
 
-	if ( s_registers[type1][type2].fcn == NULL )
+	if ( b2_contactRegistry[type1][type2].fcn == NULL )
 	{
 		// For example, no segment vs segment collision
 		return;
 	}
 
-	if ( s_registers[type1][type2].primary == false )
+	if ( b2_contactRegistry[type1][type2].primary == false )
 	{
 		// flip order
 		b2CreateContact( world, shapeB, shapeA );
@@ -342,8 +344,8 @@ void b2CreateContact( b2World* world, b2Shape* shapeA, b2Shape* shapeB )
 	contactSim->bodyIdB = shapeB->bodyId;
 #endif
 
-	contactSim->bodySimIndexA = B2_NULL_INDEX;
-	contactSim->bodySimIndexB = B2_NULL_INDEX;
+	contactSim->encodedBodySimA = b2EncodeBodySimIndex( bodyA );
+	contactSim->encodedBodySimB = b2EncodeBodySimIndex( bodyB );
 	contactSim->invMassA = 0.0f;
 	contactSim->invIA = 0.0f;
 	contactSim->invMassB = 0.0f;
@@ -354,10 +356,25 @@ void b2CreateContact( b2World* world, b2Shape* shapeA, b2Shape* shapeB )
 	contactSim->manifold = (b2Manifold){ 0 };
 
 	// These get updated in the narrow phase, but these are needed for first touch
-	contactSim->friction = world->frictionCallback( shapeA->material.friction, shapeA->material.userMaterialId,
-													shapeB->material.friction, shapeB->material.userMaterialId );
-	contactSim->restitution = world->restitutionCallback( shapeA->material.restitution, shapeA->material.userMaterialId,
-														  shapeB->material.restitution, shapeB->material.userMaterialId );
+	if ( world->frictionCallback == NULL )
+	{
+		contactSim->friction = b2MixFriction( shapeA->material.friction, shapeB->material.friction );
+	}
+	else
+	{
+		contactSim->friction = world->frictionCallback( shapeA->material.friction, shapeA->material.userMaterialId,
+														shapeB->material.friction, shapeB->material.userMaterialId );
+	}
+
+	if ( world->restitutionCallback == NULL )
+	{
+		contactSim->restitution = b2MixRestitution( shapeA->material.restitution, shapeB->material.restitution );
+	}
+	else
+	{
+		contactSim->restitution = world->restitutionCallback( shapeA->material.restitution, shapeA->material.userMaterialId,
+															  shapeB->material.restitution, shapeB->material.userMaterialId );
+	}
 
 	contactSim->tangentSpeed = 0.0f;
 	contactSim->simFlags = contact->flags;
@@ -465,7 +482,7 @@ void b2DestroyContact( b2World* world, b2Contact* contact )
 
 	bodyB->contactCount -= 1;
 
-	// Remove contact from the array that owns it
+	// Remove contact from island.
 	if ( contact->islandId != B2_NULL_INDEX )
 	{
 		b2UnlinkContact( world, contact );
@@ -571,7 +588,7 @@ bool b2UpdateContact( b2World* world, b2ContactSim* contactSim, b2Shape* shapeA,
 	// so precision is retained far from the origin.
 	// anchorB = worldPoint - pB = rot(qA, localAnchorA) + pA - pB = anchorA + (pA - pB)
 	b2Transform relativeTransform = b2InvMulWorldTransforms( transformA, transformB );
-	b2ManifoldFcn* fcn = s_registers[shapeA->type][shapeB->type].fcn;
+	b2ManifoldFcn* fcn = b2_contactRegistry[shapeA->type][shapeB->type].fcn;
 	b2LocalManifold local = fcn( shapeA, shapeB, relativeTransform, &contactSim->cache );
 
 	contactSim->manifold = (b2Manifold){ 0 };
@@ -589,10 +606,25 @@ bool b2UpdateContact( b2World* world, b2ContactSim* contactSim, b2Shape* shapeA,
 	}
 
 	// Keep these updated in case the values on the shapes are modified
-	contactSim->friction = world->frictionCallback( shapeA->material.friction, shapeA->material.userMaterialId,
-													shapeB->material.friction, shapeB->material.userMaterialId );
-	contactSim->restitution = world->restitutionCallback( shapeA->material.restitution, shapeA->material.userMaterialId,
-														  shapeB->material.restitution, shapeB->material.userMaterialId );
+	if ( world->frictionCallback == NULL )
+	{
+		contactSim->friction = b2MixFriction( shapeA->material.friction, shapeB->material.friction );
+	}
+	else
+	{
+		contactSim->friction = world->frictionCallback( shapeA->material.friction, shapeA->material.userMaterialId,
+														shapeB->material.friction, shapeB->material.userMaterialId );
+	}
+
+	if ( world->restitutionCallback == NULL )
+	{
+		contactSim->restitution = b2MixRestitution( shapeA->material.restitution, shapeB->material.restitution );
+	}
+	else
+	{
+		contactSim->restitution = world->restitutionCallback( shapeA->material.restitution, shapeA->material.userMaterialId,
+															  shapeB->material.restitution, shapeB->material.userMaterialId );
+	}
 
 	if ( shapeA->material.rollingResistance > 0.0f || shapeB->material.rollingResistance > 0.0f )
 	{
@@ -667,7 +699,6 @@ bool b2UpdateContact( b2World* world, b2ContactSim* contactSim, b2Shape* shapeA,
 			mp2->tangentImpulse = 0.0f;
 			mp2->totalNormalImpulse = 0.0f;
 			mp2->normalVelocity = 0.0f;
-			mp2->restitutionVelocity = 0.0f;
 			mp2->persisted = false;
 
 			uint16_t id2 = mp2->id;
@@ -680,23 +711,6 @@ bool b2UpdateContact( b2World* world, b2ContactSim* contactSim, b2Shape* shapeA,
 				{
 					mp2->normalImpulse = mp1->normalImpulse;
 					mp2->tangentImpulse = mp1->tangentImpulse;
-
-					// Restitution is computed from the approach velocity of the previous time step.
-					// This could be corrected using the energy balance:
-					// 0.5*m*v2^2 - 0.5*m*v1^2 = m*g*dot(n,delta_separation)
-					// This could also be corrected while sub-stepping. Another option is to reduce the
-					// CCD safety factor. In my opinion none of these extra measures are worthwhile. Box2D
-					// is not designed to be a restitution simulator. Also these constitutive models are
-					// fundamentally not physically accurate.
-					// See: A New Algebraic Rigid Body Collision Law Based On Impulse Space Considerations
-					// https://en.wikipedia.org/wiki/Constitutive_equation
-					// https://en.wikipedia.org/wiki/Coefficient_of_restitution
-
-					if ( mp1->totalNormalImpulse > 0.0f && mp1->normalVelocity < -world->restitutionThreshold )
-					{
-						mp2->restitutionVelocity = -contactSim->restitution * mp1->normalVelocity;
-					}
-
 					mp2->persisted = true;
 
 					break;

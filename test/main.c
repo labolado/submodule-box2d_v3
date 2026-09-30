@@ -34,6 +34,7 @@ extern int DeterminismTest( void );
 extern int DistanceTest( void );
 extern int DynamicTreeTest( void );
 extern int IdTest( void );
+extern int InvalidInputTest( void );
 extern int JointTest( void );
 extern int LargeWorldTest( void );
 extern int MathTest( void );
@@ -58,6 +59,11 @@ int TestAssertFcn( const char* condition, const char* fileName, int lineNumber )
 	return 1;
 }
 
+void TestLogFcn( const char* message )
+{
+	printf( "Box2D: %s\n", message );
+}
+
 int main( int argc, char** argv )
 {
 #if defined( _MSC_VER )
@@ -80,6 +86,7 @@ int main( int argc, char** argv )
 #endif
 
 	b2SetAssertFcn( TestAssertFcn );
+	b2SetLogFcn( TestLogFcn );
 
 	const char* filter = NULL;
 	if ( argc > 1 )
@@ -105,6 +112,7 @@ int main( int argc, char** argv )
 	MAYBE_RUN_TEST( DistanceTest );
 	MAYBE_RUN_TEST( DynamicTreeTest );
 	MAYBE_RUN_TEST( IdTest );
+	MAYBE_RUN_TEST( InvalidInputTest );
 	MAYBE_RUN_TEST( JointTest );
 	MAYBE_RUN_TEST( LargeWorldTest );
 	MAYBE_RUN_TEST( MathTest );

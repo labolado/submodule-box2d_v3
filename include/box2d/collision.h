@@ -548,17 +548,15 @@ typedef struct b2ManifoldPoint
 	/// The friction impulse
 	float tangentImpulse;
 
-	/// Velocity for restitution. From the last time step.
-	float restitutionVelocity;
-
 	/// The total normal impulse applied across sub-stepping and restitution. This is important
 	/// to identify speculative contact points that had an interaction in the time step.
 	/// This includes the warm starting impulse, the sub-step delta impulse, and the restitution
 	/// impulse.
 	float totalNormalImpulse;
 
-	/// Relative normal velocity pre-solve. Used for hit events. If the normal impulse is
-	/// zero then there was no hit. Negative means shapes are approaching.
+	/// Relative normal velocity pre-solve. Negative when approaching. This is only
+	/// computed if hit events are enabled. It may be computed otherwise as a side effect
+	/// of SIMD bundling, but that is not guaranteed.
 	float normalVelocity;
 
 	/// Cached separation used for contact recycling
@@ -691,9 +689,8 @@ typedef struct b2TreeNode
 
 	union
 	{
-		/// The total number of leaves below for an internal node.
-		/// todo not used
-		int32_t leafCount;
+		/// The height of an internal node. A leaf has zero height.
+		int32_t height;
 
 		/// The shape index for a leaf. Truncated from proxy user data.
 		int32_t shapeIndex;
@@ -788,16 +785,16 @@ typedef struct b2TreeStats
 } b2TreeStats;
 
 /// Constructing the tree initializes the node pool.
-B2_API b2DynamicTree b2DynamicTree_Create( int proxyCapacity );
+B2_API b2DynamicTree b2CreateDynamicTree( int proxyCapacity );
 
 /// Destroy the tree, freeing the node pool.
-B2_API void b2DynamicTree_Destroy( b2DynamicTree* tree );
+B2_API void b2DestroyDynamicTree( b2DynamicTree* tree );
 
 /// Create a proxy. Provide an AABB and a userData value.
-B2_API int b2DynamicTree_CreateProxy( b2DynamicTree* tree, b2AABB aabb, uint64_t categoryBits, uint64_t userData);
+B2_API int b2CreateTreeProxy( b2DynamicTree* tree, b2AABB aabb, uint64_t categoryBits, uint64_t userData);
 
 /// Destroy a proxy. This asserts if the id is invalid.
-B2_API void b2DynamicTree_DestroyProxy( b2DynamicTree* tree, int proxyId );
+B2_API void b2DestroyTreeProxy( b2DynamicTree* tree, int proxyId );
 
 /// Move a proxy to a new AABB by removing and reinserting into the tree.
 B2_API void b2DynamicTree_MoveProxy( b2DynamicTree* tree, int proxyId, b2AABB aabb );
@@ -877,7 +874,7 @@ typedef float b2TreeBoxCastCallbackFcn( const b2BoxCastInput* input, int proxyId
 B2_API b2TreeStats b2DynamicTree_CastBox( const b2DynamicTree* tree, const b2BoxCastInput* input, uint64_t maskBits,
 										  b2TreeBoxCastCallbackFcn* callback, void* context );
 
-/// Get the height of the binary tree. Expensive.
+/// Get the height of the binary tree.
 B2_API int b2DynamicTree_GetHeight( const b2DynamicTree* tree );
 
 /// Get the ratio of the sum of the internal node areas to the root area.

@@ -9,9 +9,9 @@
 /// problems in single precision, so 100km as a limit should be fine in all cases.
 /// In large world mode the broad-phase starts to have excessive padding at 10,000km.
 #if defined( BOX2D_DOUBLE_PRECISION )
-#define B2_HUGE ( 1.0e9f * b2GetLengthUnitsPerMeter() )
+#define B2_HUGE ( 1.0e9f * b2_lengthUnitsPerMeter )
 #else
-#define B2_HUGE ( 1.0e5f * b2GetLengthUnitsPerMeter() )
+#define B2_HUGE ( 1.0e5f * b2_lengthUnitsPerMeter )
 #endif
 
 /// Maximum parallel workers. Used for some fixed size arrays.
@@ -32,7 +32,7 @@
 /// chosen to be numerically significant, but visually insignificant. In meters.
 /// Normally this is 0.5cm.
 /// @warning modifying this can have a significant impact on stability
-#define B2_LINEAR_SLOP ( 0.005f * b2GetLengthUnitsPerMeter() )
+#define B2_LINEAR_SLOP ( 0.005f * b2_lengthUnitsPerMeter )
 
 /// Maximum number of simultaneous worlds that can be allocated
 #ifndef B2_MAX_WORLDS
@@ -46,7 +46,7 @@
 
 /// The maximum rotation of a body per time step. This limit is very large and is used
 /// to prevent numerical problems. You shouldn't need to adjust this.
-/// @warning increasing this to 0.5f * b2_pi or greater will break continuous collision.
+/// @warning increasing this to 0.5f * B2_PI or greater will break continuous collision.
 #define B2_MAX_ROTATION ( 0.25f * B2_PI )
 
 /// Box2D uses limited speculative collision. This reduces jitter.
@@ -63,11 +63,19 @@
 /// This is used to fatten AABBs in the dynamic tree. This allows proxies
 /// to move by a small amount without triggering a tree adjustment. This is in meters.
 /// Normally this is 5cm.
+/// This has been tuned on benchmarks and I found that keeping
+/// the margin small improves performance by reducing the number of contacts. I used
+/// to keep this larger in the past to avoid tree insert and remove churn. But the
+/// broad-phase no longer works that way and now uses a two-phase refit and rebuild
+/// setup similar to Jolt.
 /// @warning modifying this can have a significant impact on performance
-#define B2_MAX_AABB_MARGIN ( 0.05f * b2GetLengthUnitsPerMeter() )
+#define B2_MAX_AABB_MARGIN ( 0.05f * b2_lengthUnitsPerMeter )
 
 /// For small objects the margin is limited to this fraction times the maximum extent
 #define B2_AABB_MARGIN_FRACTION 0.125f
 
 /// The time that a body must be still before it will go to sleep. In seconds.
 #define B2_TIME_TO_SLEEP 0.5f
+
+/// The maximum number of restitution iterations. Needed to avoid a solver overflow.
+#define B2_MAX_RESTITUTION_ITERATIONS 63

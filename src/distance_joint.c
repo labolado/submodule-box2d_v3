@@ -18,6 +18,8 @@
 
 void b2DistanceJoint_SetLength( b2JointId jointId, float length )
 {
+	B2_CHECK_INPUT( b2IsValidFloat( length ) );
+
 	b2World* world = b2GetWorld( jointId.world0 );
 	B2_REC( world, DistanceJointSetLength, jointId, length );
 	b2JointSim* base = b2GetJointSimCheckType( jointId, b2_distanceJoint );
@@ -53,6 +55,9 @@ bool b2DistanceJoint_IsLimitEnabled( b2JointId jointId )
 
 void b2DistanceJoint_SetLengthRange( b2JointId jointId, float minLength, float maxLength )
 {
+	B2_CHECK_INPUT( b2IsValidFloat( minLength ) );
+	B2_CHECK_INPUT( b2IsValidFloat( maxLength ) );
+
 	b2World* world = b2GetWorld( jointId.world0 );
 	B2_REC( world, DistanceJointSetLengthRange, jointId, minLength, maxLength );
 	b2JointSim* base = b2GetJointSimCheckType( jointId, b2_distanceJoint );
@@ -117,12 +122,15 @@ bool b2DistanceJoint_IsSpringEnabled( b2JointId jointId )
 
 void b2DistanceJoint_SetSpringForceRange( b2JointId jointId, float lowerForce, float upperForce )
 {
+	B2_CHECK_INPUT( b2IsValidFloat( lowerForce ) );
+	B2_CHECK_INPUT( b2IsValidFloat( upperForce ) );
+
 	b2World* world = b2GetWorld( jointId.world0 );
 	B2_REC( world, DistanceJointSetSpringForceRange, jointId, lowerForce, upperForce );
 	B2_ASSERT( lowerForce <= upperForce );
 	b2JointSim* base = b2GetJointSimCheckType( jointId, b2_distanceJoint );
-	base->distanceJoint.lowerSpringForce = lowerForce;
-	base->distanceJoint.upperSpringForce = upperForce;
+	base->distanceJoint.lowerSpringForce = b2MinFloat( lowerForce, upperForce );
+	base->distanceJoint.upperSpringForce = b2MaxFloat( lowerForce, upperForce );
 }
 
 void b2DistanceJoint_GetSpringForceRange( b2JointId jointId, float* lowerForce, float* upperForce )
@@ -134,6 +142,8 @@ void b2DistanceJoint_GetSpringForceRange( b2JointId jointId, float* lowerForce, 
 
 void b2DistanceJoint_SetSpringHertz( b2JointId jointId, float hertz )
 {
+	B2_CHECK_INPUT( b2IsValidFloat( hertz ) );
+
 	b2World* world = b2GetWorld( jointId.world0 );
 	B2_REC( world, DistanceJointSetSpringHertz, jointId, hertz );
 	b2JointSim* base = b2GetJointSimCheckType( jointId, b2_distanceJoint );
@@ -142,6 +152,8 @@ void b2DistanceJoint_SetSpringHertz( b2JointId jointId, float hertz )
 
 void b2DistanceJoint_SetSpringDampingRatio( b2JointId jointId, float dampingRatio )
 {
+	B2_CHECK_INPUT( b2IsValidFloat( dampingRatio ) );
+
 	b2World* world = b2GetWorld( jointId.world0 );
 	B2_REC( world, DistanceJointSetSpringDampingRatio, jointId, dampingRatio );
 	b2JointSim* base = b2GetJointSimCheckType( jointId, b2_distanceJoint );
@@ -160,6 +172,19 @@ float b2DistanceJoint_GetSpringDampingRatio( b2JointId jointId )
 	b2JointSim* base = b2GetJointSimCheckType( jointId, b2_distanceJoint );
 	b2DistanceJoint* joint = &base->distanceJoint;
 	return joint->dampingRatio;
+}
+
+float b2DistanceJoint_GetSpringForce( b2JointId jointId )
+{
+	b2World* world = b2GetWorld( jointId.world0 );
+	b2JointSim* base = b2GetJointSimCheckType( jointId, b2_distanceJoint );
+	b2DistanceJoint* joint = &base->distanceJoint;
+	if ( joint->enableSpring )
+	{
+		return joint->impulse * world->inv_h;
+	}
+
+	return 0.0f;
 }
 
 void b2DistanceJoint_EnableMotor( b2JointId jointId, bool enableMotor )
@@ -182,6 +207,8 @@ bool b2DistanceJoint_IsMotorEnabled( b2JointId jointId )
 
 void b2DistanceJoint_SetMotorSpeed( b2JointId jointId, float motorSpeed )
 {
+	B2_CHECK_INPUT( b2IsValidFloat( motorSpeed ) );
+
 	b2World* world = b2GetWorld( jointId.world0 );
 	B2_REC( world, DistanceJointSetMotorSpeed, jointId, motorSpeed );
 	b2JointSim* joint = b2GetJointSimCheckType( jointId, b2_distanceJoint );
@@ -203,6 +230,8 @@ float b2DistanceJoint_GetMotorForce( b2JointId jointId )
 
 void b2DistanceJoint_SetMaxMotorForce( b2JointId jointId, float force )
 {
+	B2_CHECK_INPUT( b2IsValidFloat( force ) );
+
 	b2World* world = b2GetWorld( jointId.world0 );
 	B2_REC( world, DistanceJointSetMaxMotorForce, jointId, force );
 	b2JointSim* joint = b2GetJointSimCheckType( jointId, b2_distanceJoint );

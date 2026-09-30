@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2022 Erin Catto
+// SPDX-FileCopyrightText: 2026 Erin Catto
 // SPDX-License-Identifier: MIT
 
 #include "benchmarks.h"
@@ -805,6 +805,105 @@ float StepJunkyard( b2WorldId worldId, int stepCount )
 	return 0.0f;
 }
 
+#define SLEEP_PYRAMID_COUNT 10
+
+typedef struct
+{
+	b2BodyId bodyIdA[SLEEP_PYRAMID_COUNT];
+	b2BodyId bodyIdB[SLEEP_PYRAMID_COUNT];
+} SleepData;
+
+static SleepData g_sleepData;
+
+// Reports two bodies that are certain to share a touching contact, so the filter joint below always
+// lands inside one island.
+static void CreateSleepPyramid( b2WorldId worldId, int baseCount, float extent, float centerX, b2BodyId* bodyIdA,
+								b2BodyId* bodyIdB )
+{
+	b2BodyDef bodyDef = b2DefaultBodyDef();
+	bodyDef.type = b2_dynamicBody;
+	bodyDef.sleepThreshold = 1.0f;
+
+	b2ShapeDef shapeDef = b2DefaultShapeDef();
+	b2Polygon box = b2MakeSquare( extent );
+
+	for ( int i = 0; i < baseCount; ++i )
+	{
+		float y = ( 2.0f * i + 1.0f ) * extent;
+
+		for ( int j = i; j < baseCount; ++j )
+		{
+			float x = ( i + 1.0f ) * extent + 2.0f * ( j - i ) * extent + centerX;
+			bodyDef.position = (b2Pos){ x, y };
+
+			b2BodyId bodyId = b2CreateBody( worldId, &bodyDef );
+			b2CreatePolygonShape( bodyId, &shapeDef, &box );
+
+			if ( i == 0 && j == 0 )
+			{
+				*bodyIdA = bodyId;
+			}
+			else if ( i == 1 && j == 1 )
+			{
+				// Rests on the base body above, so the pair always has a touching contact
+				*bodyIdB = bodyId;
+			}
+		}
+	}
+}
+
+// Stress tests waking and sleeping.
+void CreateSleep( b2WorldId worldId )
+{
+	g_sleepData = (SleepData){ 0 };
+
+	int baseCount = BENCHMARK_DEBUG ? 8 : 60;
+	float extent = 0.5f;
+
+	float baseWidth = 2.0f * extent * baseCount;
+	float pitch = baseWidth + 8.0f * extent;
+	float span = pitch * ( SLEEP_PYRAMID_COUNT - 1 );
+
+	{
+		b2BodyDef bodyDef = b2DefaultBodyDef();
+		bodyDef.position = (b2Pos){ 0.0f, -1.0f };
+		b2BodyId groundId = b2CreateBody( worldId, &bodyDef );
+
+		b2Polygon box = b2MakeBox( 0.5f * span + baseWidth, 1.0f );
+		b2ShapeDef shapeDef = b2DefaultShapeDef();
+		b2CreatePolygonShape( groundId, &shapeDef, &box );
+	}
+
+	for ( int i = 0; i < SLEEP_PYRAMID_COUNT; ++i )
+	{
+		float centerX = -0.5f * span + i * pitch - 0.5f * baseWidth;
+		CreateSleepPyramid( worldId, baseCount, extent, centerX, g_sleepData.bodyIdA + i, g_sleepData.bodyIdB + i );
+	}
+}
+
+float StepSleep( b2WorldId worldId, int stepCount )
+{
+	for ( int i = 0; i < SLEEP_PYRAMID_COUNT; ++i )
+	{
+		if ( b2Body_IsAwake( g_sleepData.bodyIdA[i] ) == false )
+		{
+			// Creating and destroying a joint engages the island splitter
+			b2FilterJointDef jointDef = b2DefaultFilterJointDef();
+			jointDef.base.bodyIdA = g_sleepData.bodyIdA[i];
+			jointDef.base.bodyIdB = g_sleepData.bodyIdB[i];
+			b2JointId jointId = b2CreateFilterJoint( worldId, &jointDef );
+
+			// This wakes the island
+			b2DestroyJoint( jointId );
+
+			// Only one per step
+			break;
+		}
+	}
+
+	return 0.0f;
+}
+
 // Lifted from samples/sample_benchmark.cpp BenchmarkBarrel (e_compoundShape branch).
 // Each dynamic body is a compound of two triangular polygon shapes.
 void CreateCompounds( b2WorldId worldId )
@@ -1297,7 +1396,7 @@ static void TreeCastAddBox( b2Vec2 center, float hx, float hy, uint64_t category
 	int index = data->proxyCount;
 	data->tightBoxes[index] = tight;
 	data->proxyCount += 1;
-	b2DynamicTree_CreateProxy( &data->tree, fat, categoryBits, (uint64_t)index );
+	b2CreateTreeProxy( &data->tree, fat, categoryBits, (uint64_t)index );
 }
 
 void DestroyTreeCast( void )
@@ -1305,7 +1404,7 @@ void DestroyTreeCast( void )
 	TreeCastBenchmark* data = &g_treeCast;
 	if ( data->created )
 	{
-		b2DynamicTree_Destroy( &data->tree );
+		b2DestroyDynamicTree( &data->tree );
 		free( data->tightBoxes );
 	}
 
@@ -1337,7 +1436,7 @@ void CreateTreeCast( b2WorldId worldId )
 	// A tenth of the cells fill, the ground and the sensors come after
 	data->proxyCapacity = cellCount * cellCount / 5;
 	data->tightBoxes = malloc( data->proxyCapacity * sizeof( b2AABB ) );
-	data->tree = b2DynamicTree_Create( data->proxyCapacity );
+	data->tree = b2CreateDynamicTree( data->proxyCapacity );
 	data->created = true;
 
 	for ( int i = 0; i < cellCount; ++i )

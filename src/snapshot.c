@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Erin Catto
 // SPDX-License-Identifier: MIT
 
-#include "world_snapshot.h"
+#include "snapshot.h"
 
 #include "bitset.h"
 #include "body.h"
@@ -32,7 +32,7 @@
 
 // Bump this if any of the data structures below get modified. The layout hash only catches
 // size changes, a same-size reinterpretation like the contact cache reshape needs this bump.
-#define B2_SNAP_VERSION 9u // chain segment count
+#define B2_SNAP_VERSION 12u // post solve restitution
 
 // Header flag bits
 #define B2_SNAP_FLAG_VALIDATION 0x1u	   // image was built with validation, only used for diagnostics
@@ -358,12 +358,12 @@ static void b2DesTree( b2SnapReader* r, b2DynamicTree* tree )
 
 	// Free what the shell or a live world holds, rebuild scratch included. Destroy zeroes the
 	// struct, which covers every field the image does not carry.
-	b2DynamicTree_Destroy( tree );
+	b2DestroyDynamicTree( tree );
 
 	if ( !r->ok )
 	{
 		// Leave a valid empty tree so the shell can still be destroyed
-		*tree = b2DynamicTree_Create( 0 );
+		*tree = b2CreateDynamicTree( 0 );
 		return;
 	}
 
@@ -440,6 +440,7 @@ static void b2SerWorldConfig( b2RecBuffer* buf, const b2World* world )
 	b2SnapW_Bytes( buf, &world->gravity, sizeof( b2Vec2 ) );
 	b2SnapW_Bytes( buf, &world->hitEventThreshold, sizeof( float ) );
 	b2SnapW_Bytes( buf, &world->restitutionThreshold, sizeof( float ) );
+	b2SnapW_I32( buf, world->restitutionIterations );
 	b2SnapW_Bytes( buf, &world->maxLinearSpeed, sizeof( float ) );
 	b2SnapW_Bytes( buf, &world->contactSpeed, sizeof( float ) );
 	b2SnapW_Bytes( buf, &world->contactHertz, sizeof( float ) );
@@ -459,6 +460,7 @@ static void b2SerWorldConfig( b2RecBuffer* buf, const b2World* world )
 	flags |= world->enableSleep ? 0x01u : 0u;
 	flags |= world->enableWarmStarting ? 0x02u : 0u;
 	flags |= world->enableContinuous ? 0x08u : 0u;
+	flags |= world->enableRestitutionPropagation ? 0x10u : 0u;
 	b2RecBufAppend( buf, &flags, 1 );
 }
 
@@ -467,6 +469,7 @@ static void b2DesWorldConfig( b2SnapReader* r, b2World* world )
 	b2SnapR_Bytes( r, &world->gravity, sizeof( b2Vec2 ) );
 	b2SnapR_Bytes( r, &world->hitEventThreshold, sizeof( float ) );
 	b2SnapR_Bytes( r, &world->restitutionThreshold, sizeof( float ) );
+	world->restitutionIterations = b2SnapR_I32( r );
 	b2SnapR_Bytes( r, &world->maxLinearSpeed, sizeof( float ) );
 	b2SnapR_Bytes( r, &world->contactSpeed, sizeof( float ) );
 	b2SnapR_Bytes( r, &world->contactHertz, sizeof( float ) );
@@ -483,6 +486,7 @@ static void b2DesWorldConfig( b2SnapReader* r, b2World* world )
 	world->enableSleep = ( flags & 0x01u ) != 0;
 	world->enableWarmStarting = ( flags & 0x02u ) != 0;
 	world->enableContinuous = ( flags & 0x08u ) != 0;
+	world->enableRestitutionPropagation = ( flags & 0x10u ) != 0;
 }
 
 void b2SerializeWorld( b2World* world, b2RecBuffer* buf )
@@ -523,6 +527,7 @@ void b2SerializeWorld( b2World* world, b2RecBuffer* buf )
 	// Contacts have no userData, so they go out as raw POD.
 	b2SerSimArray( buf, world->bodies, b2Body );
 	b2SerSimArray( buf, world->shapes, b2Shape );
+	b2SerPodArray( buf, world->fatAABBs );
 	b2SerPodArray( buf, world->contacts );
 	b2SerSimArray( buf, world->joints, b2Joint );
 
@@ -674,6 +679,7 @@ static bool b2DeserializeIntoShell( b2SnapReader* r, b2World* world )
 	// it cleanly with no host pointers to scrub here.
 	b2DesPodArray( r, world->bodies );
 	b2DesPodArray( r, world->shapes );
+	b2DesPodArray( r, world->fatAABBs );
 	b2DesPodArray( r, world->contacts );
 	b2DesPodArray( r, world->joints );
 
@@ -953,7 +959,7 @@ bool b2World_Restore( b2WorldId worldId, const uint8_t* image, int size )
 	return b2DeserializeIntoShell( r, world );
 }
 
-int b2World_Snapshot( b2WorldId worldId, uint8_t* image, int capacity )
+int b2World_GetSnapshot( b2WorldId worldId, uint8_t* image, int capacity )
 {
 	b2World* world = b2GetWorldFromId( worldId );
 

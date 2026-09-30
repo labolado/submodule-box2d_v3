@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "base.h"
 #include "math_types.h"
 
 #include <float.h>
@@ -772,6 +773,13 @@ B2_API void b2SetSpeculativeCornerPassThrough( bool flag );
 
 /// Get whether speculative polygon corner pass-through is enabled.
 B2_API bool b2GetSpeculativeCornerPassThrough( void );
+
+// This value is exported for efficiency. Don't modify directly.
+#ifdef __cplusplus
+extern "C" BOX2D_EXPORT float b2_lengthUnitsPerMeter;
+#else
+BOX2D_EXPORT extern float b2_lengthUnitsPerMeter;
+#endif
 
 /**@}*/
 
