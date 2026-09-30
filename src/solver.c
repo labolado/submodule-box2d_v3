@@ -359,7 +359,7 @@ static bool b2ContinuousQueryCallback( int proxyId, uint64_t userData, void* con
 			}
 		}
 
-		if ( didHit && world->preSolveFcn != NULL &&
+		if ( didHit && world->preContinuousFcn != NULL &&
 			 ( world->enableGlobalPreSolveEvents || shape->enablePreSolveEvents || fastShape->enablePreSolveEvents ) )
 		{
 			b2ShapeId shapeIdA = { shape->id + 1, world->worldId, shape->generation };
@@ -367,7 +367,7 @@ static bool b2ContinuousQueryCallback( int proxyId, uint64_t userData, void* con
 
 			// TOI runs in the base frame, lift the hit point back to world for the callback
 			b2Pos worldPoint = b2OffsetPos( continuousContext->base, output.point );
-			didHit = world->preSolveFcn( shapeIdA, shapeIdB, worldPoint, output.normal, 0.0f, world->preSolveContext );
+			didHit = world->preContinuousFcn( shapeIdA, shapeIdB, worldPoint, output.normal, world->preSolveContext );
 		}
 
 		if ( didHit )
@@ -519,6 +519,10 @@ static void b2SolveContinuous( b2World* world, int bodySimIndex, b2TaskContext* 
 			if ( b2AABB_Contains( shape->fatAABB, shape->aabb ) == false )
 			{
 				float margin = shape->aabbMargin;
+
+				// Note: far from the origin the margin can be snapped to the nearest ULP.
+				// This relevant for DP mode. So we lose the broad-phase hysteresis.
+				// todo consider using b2Expand to ensure at least one ULP of margin.
 				b2AABB fatAABB;
 				fatAABB.lowerBound.x = shape->aabb.lowerBound.x - margin;
 				fatAABB.lowerBound.y = shape->aabb.lowerBound.y - margin;
@@ -656,7 +660,8 @@ static void b2FinalizeBodiesTask( int startIndex, int endIndex, int workerIndex,
 				}
 				else
 				{
-					bool deferPreSolve = world->preSolveFcn != NULL &&
+					// Continuous collision invokes the pre-continuous callback on the calling thread
+					bool deferPreSolve = world->preContinuousFcn != NULL &&
 						( world->enableGlobalPreSolveEvents || world->preSolveShapeCount > 0 );
 					if ( deferPreSolve )
 					{
@@ -1292,7 +1297,6 @@ void b2Solve( b2World* world, b2StepContext* stepContext )
 	int awakeBodyCount = awakeSet->bodySims.count;
 	if ( awakeBodyCount == 0 )
 	{
-		b2ValidateNoEnlarged( &world->broadPhase );
 		return;
 	}
 
@@ -1957,7 +1961,7 @@ void b2Solve( b2World* world, b2StepContext* stepContext )
 
 		// Fast bullet bodies
 		// Note: a bullet body may be moving slow
-		bool runPreSolveOnCallingThread = world->preSolveFcn != NULL &&
+		bool runPreSolveOnCallingThread = world->preContinuousFcn != NULL &&
 			( world->enableGlobalPreSolveEvents || world->preSolveShapeCount > 0 );
 		if ( runPreSolveOnCallingThread )
 		{

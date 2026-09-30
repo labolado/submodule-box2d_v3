@@ -30,7 +30,7 @@ b2DeclareArray( b2TaskContext );
 typedef struct b2TaskContext
 {
 	// Collect per thread sensor continuous hit events.
-	b2Array(b2SensorHit) sensorHits;
+	b2Array( b2SensorHit ) sensorHits;
 
 	// These bits align with the contact id capacity and signal a change in contact status
 	b2BitSet contactStateBitSet;
@@ -182,6 +182,7 @@ typedef struct b2World
 	b2Capacity maxCapacity;
 
 	b2PreSolveFcn* preSolveFcn;
+	b2PreContinuousFcn* preContinuousFcn;
 	void* preSolveContext;
 	int preSolveShapeCount;
 	bool enableGlobalPreSolveEvents;

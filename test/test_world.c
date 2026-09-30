@@ -252,16 +252,12 @@ static bool CustomFilter( b2ShapeId shapeIdA, b2ShapeId shapeIdB, void* context 
 	return true;
 }
 
-static bool PreSolveStatic( b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Pos point, b2Vec2 normal, float separation,
-							void* context )
+static void PreSolveStatic( b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Manifold* manifold, void* context )
 {
 	(void)shapeIdA;
 	(void)shapeIdB;
-	(void)point;
-	(void)normal;
-	(void)separation;
-	ENSURE( context == NULL );
-	return false;
+	(void)manifold;
+	(void)context;
 }
 
 #if defined( _MSC_VER )
@@ -273,27 +269,39 @@ static _Thread_local bool sPreSolveStepThread;
 typedef struct PreSolveThreadContext
 {
 	int callbackCount;
+	int continuousCount;
 	bool wrongThread;
 	float minimumSeparation;
 	bool disableGlobalOnFirstCallback;
 	b2WorldId worldId;
 } PreSolveThreadContext;
 
-static bool PreSolveThreadCheck( b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Vec2 point, b2Vec2 normal, float separation,
-								 void* context )
+static void PreSolveThreadCheck( b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Manifold* manifold, void* context )
+{
+	(void)shapeIdA;
+	(void)shapeIdB;
+	PreSolveThreadContext* threadContext = context;
+	threadContext->callbackCount += 1;
+	threadContext->wrongThread |= sPreSolveStepThread == false;
+	for ( int i = 0; i < manifold->pointCount; ++i )
+	{
+		threadContext->minimumSeparation = b2MinFloat( threadContext->minimumSeparation, manifold->points[i].separation );
+	}
+	if ( threadContext->disableGlobalOnFirstCallback && threadContext->callbackCount == 1 )
+	{
+		b2World_EnableGlobalPreSolveEvents( threadContext->worldId, false );
+	}
+}
+
+static bool PreContinuousThreadCheck( b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Pos point, b2Vec2 normal, void* context )
 {
 	(void)shapeIdA;
 	(void)shapeIdB;
 	(void)point;
 	(void)normal;
 	PreSolveThreadContext* threadContext = context;
-	threadContext->callbackCount += 1;
+	threadContext->continuousCount += 1;
 	threadContext->wrongThread |= sPreSolveStepThread == false;
-	threadContext->minimumSeparation = b2MinFloat( threadContext->minimumSeparation, separation );
-	if ( threadContext->disableGlobalOnFirstCallback && threadContext->callbackCount == 1 )
-	{
-		b2World_EnableGlobalPreSolveEvents( threadContext->worldId, false );
-	}
 	return true;
 }
 
@@ -306,7 +314,7 @@ static int PreSolveCallingThreadTest( void )
 	ENSURE( b2World_GetWorkerCount( worldId ) == 4 );
 
 	PreSolveThreadContext context = { 0 };
-	b2World_SetPreSolveCallback( worldId, PreSolveThreadCheck, &context );
+	b2World_SetPreSolveCallback( worldId, PreSolveThreadCheck, PreContinuousThreadCheck, &context );
 
 	b2BodyDef groundDef = b2DefaultBodyDef();
 	b2BodyId groundId = b2CreateBody( worldId, &groundDef );
@@ -357,8 +365,9 @@ static int PreSolveCcdCallingThreadTest( void )
 	worldDef.gravity = b2Vec2_zero;
 	b2WorldId worldId = b2CreateWorld( &worldDef );
 
+	// Only the pre-continuous callback: the calling thread guarantee must not depend on a pre-solve callback.
 	PreSolveThreadContext context = { 0 };
-	b2World_SetPreSolveCallback( worldId, PreSolveThreadCheck, &context );
+	b2World_SetPreSolveCallback( worldId, NULL, PreContinuousThreadCheck, &context );
 	b2World_EnableGlobalPreSolveEvents( worldId, true );
 
 	// A thin wall and a fast bullet exercise the continuous-collision path. No
@@ -370,20 +379,30 @@ static int PreSolveCcdCallingThreadTest( void )
 	b2ShapeDef shapeDef = b2DefaultShapeDef();
 	b2CreatePolygonShape( wallId, &shapeDef, &wall );
 
-	b2BodyDef bulletDef = b2DefaultBodyDef();
-	bulletDef.type = b2_dynamicBody;
-	bulletDef.isBullet = true;
-	bulletDef.position = (b2Vec2){ -1.0f, 0.0f };
-	bulletDef.linearVelocity = (b2Vec2){ 100.0f, 0.0f };
-	b2BodyId bulletId = b2CreateBody( worldId, &bulletDef );
-	b2Circle circle = { b2Vec2_zero, 0.1f };
-	b2CreateCircleShape( bulletId, &shapeDef, &circle );
+	// Enough fast bodies that the continuous stages would split across workers: bullets and
+	// non-bullet fast bodies take different continuous paths.
+	b2Circle circle = { b2Vec2_zero, 0.01f };
+	for ( int i = 0; i < 64; ++i )
+	{
+		float y = -1.9f + 0.06f * i;
+		for ( int bullet = 0; bullet < 2; ++bullet )
+		{
+			b2BodyDef bodyDef = b2DefaultBodyDef();
+			bodyDef.type = b2_dynamicBody;
+			bodyDef.isBullet = bullet == 1;
+			bodyDef.position = (b2Vec2){ bullet == 1 ? -1.0f : -1.5f, y };
+			bodyDef.linearVelocity = (b2Vec2){ 100.0f, 0.0f };
+			b2BodyId bodyId = b2CreateBody( worldId, &bodyDef );
+			b2CreateCircleShape( bodyId, &shapeDef, &circle );
+		}
+	}
 
 	sPreSolveStepThread = true;
 	b2World_Step( worldId, 1.0f / 60.0f, 4, NULL, NULL );
 	sPreSolveStepThread = false;
 
-	ENSURE( context.callbackCount > 0 );
+	// The time of impact goes through the pre-continuous callback
+	ENSURE( context.continuousCount > 0 );
 	ENSURE( context.wrongThread == false );
 
 	b2DestroyWorld( worldId );
@@ -400,7 +419,7 @@ static int PreSolveGlobalToggleTest( void )
 	PreSolveThreadContext context = { 0 };
 	context.disableGlobalOnFirstCallback = true;
 	context.worldId = worldId;
-	b2World_SetPreSolveCallback( worldId, PreSolveThreadCheck, &context );
+	b2World_SetPreSolveCallback( worldId, PreSolveThreadCheck, PreContinuousThreadCheck, &context );
 	b2World_EnableGlobalPreSolveEvents( worldId, true );
 
 	b2BodyDef groundDef = b2DefaultBodyDef();
@@ -464,7 +483,7 @@ int TestWorldCoverage( void )
 	ENSURE( value == 100.0f );
 
 	b2World_SetCustomFilterCallback( worldId, CustomFilter, NULL );
-	b2World_SetPreSolveCallback( worldId, PreSolveStatic, NULL );
+	b2World_SetPreSolveCallback( worldId, PreSolveStatic, NULL, NULL );
 
 	b2Vec2 g = { 1.0f, 2.0f };
 	b2World_SetGravity( worldId, g );

@@ -721,7 +721,7 @@ destroyed when the parent body is destroyed. However, you may wish to store the 
 to change properties on it later.
 
 You can create multiple shapes on a single body. They all can contribute
-to the mass of the body. These shapes never collide with each other and may overlap.
+to the mass properties of the body. These shapes never collide with each other and may overlap.
 
 You can destroy a shape on the parent body. You may do this to model a
 breakable object. Otherwise you can just leave the shape alone and let
@@ -1328,21 +1328,30 @@ that calls `b2World_Step` after the parallel narrow-phase worker barrier. The wo
 locked, so the callback must not structurally modify the Box2D world. The world-wide pre-solve
 event flag is the one exception and may be changed from this callback.
 
+The callback receives the manifold. Setting its point count to zero disables the contact for this step.
+The manifold anchors are relative to the body origins at this point, so `b2Body_GetPosition(bodyA) + anchorA`
+is the world point. Continuous collision uses a separate pre-continuous callback, which also runs on the calling
+thread and returns false to skip the time of impact event.
+
 ```c
-bool MyPreSolve(b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Pos point, b2Vec2 normal, float separation, void* context)
+void MyPreSolve(b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Manifold* manifold, void* context)
 {
     MyGame* myGame = context;
 
-    if (myGame->IsHittingBelowPlatform(shapeIdA, shapeIdB, point, normal))
+    if (myGame->IsHittingBelowPlatform(shapeIdA, shapeIdB, manifold))
     {
-        return false;
+        manifold->pointCount = 0;
     }
+}
 
-    return true;
+bool MyPreContinuous(b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Pos point, b2Vec2 normal, void* context)
+{
+    MyGame* myGame = context;
+    return myGame->IsHittingBelowPlatform(shapeIdA, shapeIdB, point, normal) == false;
 }
 
 // Elsewhere
-b2World_SetPreSolveCallback(myWorldId, MyPreSolve, myGame);
+b2World_SetPreSolveCallback(myWorldId, MyPreSolve, MyPreContinuous, myGame);
 ```
 
 Note this currently does not work with high speed collisions, so you may see a
@@ -2028,7 +2037,7 @@ This stage does several tasks:
 - performs continuous collision between dynamic and static bodies
 This stage is parallel-for.
 
-Note that continuous collision does not generate events. Instead they are generated the next time step. However, continuous collision will issue a `b2PreSolveFcn` callback.
+Note that continuous collision does not generate events. Instead they are generated the next time step. However, continuous collision will issue a `b2PreContinuousFcn` callback.
 
 ### hit events
 
