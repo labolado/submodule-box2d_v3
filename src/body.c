@@ -1924,6 +1924,35 @@ bool b2Body_IsContactRecyclingEnabled( b2BodyId bodyId )
 	return ( body->flags & b2_bodyEnableContactRecycling ) != 0;
 }
 
+void b2Body_EnableSeamContactFilter( b2BodyId bodyId, bool flag )
+{
+	b2World* world = b2GetWorldLocked( bodyId.world0 );
+	if ( world == NULL )
+	{
+		return;
+	}
+
+	uint32_t newFlag = flag ? b2_bodyEnableSeamContactFilter : 0;
+
+	b2Body* body = b2GetBodyFullId( world, bodyId );
+	if ( ( body->flags & b2_bodyEnableSeamContactFilter ) == newFlag )
+	{
+		return;
+	}
+
+	body->flags &= ~b2_bodyEnableSeamContactFilter;
+	body->flags |= newFlag;
+
+	b2SyncBodyFlags( world, body );
+}
+
+bool b2Body_IsSeamContactFilterEnabled( b2BodyId bodyId )
+{
+	b2World* world = b2GetWorld( bodyId.world0 );
+	b2Body* body = b2GetBodyFullId( world, bodyId );
+	return ( body->flags & b2_bodyEnableSeamContactFilter ) != 0;
+}
+
 void b2Body_EnableContactEvents( b2BodyId bodyId, bool flag )
 {
 	b2World* world = b2GetWorld( bodyId.world0 );

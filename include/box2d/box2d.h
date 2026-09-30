@@ -185,6 +185,19 @@ B2_API void b2World_EnableWarmStarting( b2WorldId worldId, bool flag );
 /// Is constraint warm starting enabled?
 B2_API bool b2World_IsWarmStartingEnabled( b2WorldId worldId );
 
+/// Enable/disable the seam contact filter. Disabled by default.
+/// When enabled, a two point contact manifold is discarded for the current step if its
+/// points are closer than 4 * B2_LINEAR_SLOP and the bodies approach along the normal.
+/// Such a manifold is usually the overlap slop at a flush seam between adjacent shapes
+/// (a ghost collision), not a wall. One point manifolds (circles, corners) are not changed.
+/// Contact recycling is skipped for filtered contacts so every manifold is re-evaluated.
+/// The filter can also be enabled per body with b2Body_EnableSeamContactFilter.
+/// Based on https://briansemrau.github.io/dealing-with-ghost-collisions/
+B2_API void b2World_EnableSeamContactFilter( b2WorldId worldId, bool flag );
+
+/// Is the seam contact filter enabled?
+B2_API bool b2World_IsSeamContactFilterEnabled( b2WorldId worldId );
+
 /// Get the number of awake bodies.
 B2_API int b2World_GetAwakeBodyCount( b2WorldId worldId );
 
@@ -495,6 +508,14 @@ B2_API void b2Body_EnableContactRecycling( b2BodyId bodyId, bool flag );
 
 /// Is contact recycling enabled on this body?
 B2_API bool b2Body_IsContactRecyclingEnabled( b2BodyId bodyId );
+
+/// Enable/disable the seam contact filter for contacts of this body. Disabled by default.
+/// A contact is filtered if the world-wide filter is enabled or either body enables it.
+/// @see b2World_EnableSeamContactFilter
+B2_API void b2Body_EnableSeamContactFilter( b2BodyId bodyId, bool flag );
+
+/// Is the seam contact filter enabled for this body?
+B2_API bool b2Body_IsSeamContactFilterEnabled( b2BodyId bodyId );
 
 /// Enable/disable contact events on all shapes.
 /// @see b2ShapeDef::enableContactEvents

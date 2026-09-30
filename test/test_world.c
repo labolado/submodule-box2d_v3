@@ -826,6 +826,130 @@ static int SetBulletDriftTest( void )
 	return 0;
 }
 
+// Slide a rotation-locked box (or circle) across 10 flush tiles towards a wall on two lanes (floor at y = 0 and
+// y = 3). bodyFilter enables the per body seam filter for the slider on each lane. Writes the final positions.
+static int SlideAcrossTiles( bool worldFilter, const bool bodyFilter[2], bool useCircle, float speed, b2Vec2 positions[2] )
+{
+	b2WorldDef worldDef = b2DefaultWorldDef();
+	worldDef.workerCount = 1;
+	b2WorldId worldId = b2CreateWorld( &worldDef );
+	b2World_EnableSeamContactFilter( worldId, worldFilter );
+
+	b2BodyDef groundDef = b2DefaultBodyDef();
+	b2BodyId groundId = b2CreateBody( worldId, &groundDef );
+	b2ShapeDef shapeDef = b2DefaultShapeDef();
+	shapeDef.material.friction = 0.0f;
+
+	b2BodyId bodyIds[2];
+	for ( int lane = 0; lane < 2; ++lane )
+	{
+		float floorY = 3.0f * lane;
+		for ( int i = 0; i < 10; ++i )
+		{
+			b2Polygon tile = b2MakeOffsetBox( 1.0f, 0.25f, (b2Vec2){ -9.0f + 2.0f * i, floorY - 0.25f }, b2Rot_identity );
+			b2CreatePolygonShape( groundId, &shapeDef, &tile );
+		}
+		b2Polygon wall = b2MakeOffsetBox( 0.25f, 1.25f, (b2Vec2){ 10.25f, floorY + 1.25f }, b2Rot_identity );
+		b2CreatePolygonShape( groundId, &shapeDef, &wall );
+
+		b2BodyDef bodyDef = b2DefaultBodyDef();
+		bodyDef.type = b2_dynamicBody;
+		bodyDef.position = (b2Vec2){ -9.0f, floorY + 0.5f };
+		bodyDef.linearVelocity = (b2Vec2){ speed, 0.0f };
+		bodyDef.motionLocks.angularZ = true;
+		bodyIds[lane] = b2CreateBody( worldId, &bodyDef );
+		ENSURE( b2Body_IsSeamContactFilterEnabled( bodyIds[lane] ) == false );
+		b2Body_EnableSeamContactFilter( bodyIds[lane], bodyFilter[lane] );
+		ENSURE( b2Body_IsSeamContactFilterEnabled( bodyIds[lane] ) == bodyFilter[lane] );
+
+		b2ShapeDef bodyShapeDef = shapeDef;
+		bodyShapeDef.density = 1.0f;
+		if ( useCircle )
+		{
+			b2Circle circle = { { 0.0f, 0.0f }, 0.5f };
+			b2CreateCircleShape( bodyIds[lane], &bodyShapeDef, &circle );
+		}
+		else
+		{
+			b2Polygon box = b2MakeBox( 0.5f, 0.5f );
+			b2CreatePolygonShape( bodyIds[lane], &bodyShapeDef, &box );
+		}
+	}
+
+	for ( int i = 0; i < 180; ++i )
+	{
+		b2World_Step( worldId, 1.0f / 60.0f, 4, NULL, NULL );
+	}
+
+	for ( int lane = 0; lane < 2; ++lane )
+	{
+		positions[lane] = b2Body_GetPosition( bodyIds[lane] );
+		positions[lane].y -= 3.0f * lane;
+	}
+	b2DestroyWorld( worldId );
+	return 0;
+}
+
+static bool CrossedAllSeams( b2Vec2 p )
+{
+	// Reached the wall (box center stops at x = 9.5), still resting on the floor.
+	return p.x > 8.0f && p.x < 9.5f + 0.01f && b2AbsFloat( p.y - 0.5f ) < 0.01f;
+}
+
+static int SeamContactFilterTest( void )
+{
+	{
+		b2WorldDef worldDef = b2DefaultWorldDef();
+		b2WorldId worldId = b2CreateWorld( &worldDef );
+
+		// Default is disabled
+		ENSURE( b2World_IsSeamContactFilterEnabled( worldId ) == false );
+		b2World_EnableSeamContactFilter( worldId, true );
+		ENSURE( b2World_IsSeamContactFilterEnabled( worldId ) == true );
+		b2World_EnableSeamContactFilter( worldId, false );
+		ENSURE( b2World_IsSeamContactFilterEnabled( worldId ) == false );
+
+		b2DestroyWorld( worldId );
+	}
+
+	const bool noBodies[2] = { false, false };
+	const bool firstBody[2] = { true, false };
+	b2Vec2 p[2];
+
+	// Without the filter the boxes catch the first tile seam (ghost collision).
+	ENSURE( SlideAcrossTiles( false, noBodies, false, 10.0f, p ) == 0 );
+	ENSURE( p[0].x < -6.0f && p[1].x < -6.0f );
+
+	// World-wide filter: every box crosses every seam and is still stopped by the wall.
+	b2Vec2 worldOnly[2];
+	ENSURE( SlideAcrossTiles( true, noBodies, false, 10.0f, worldOnly ) == 0 );
+	ENSURE( CrossedAllSeams( worldOnly[0] ) && CrossedAllSeams( worldOnly[1] ) );
+
+	// Per body filter with the world filter disabled: only the enabled body is filtered.
+	ENSURE( SlideAcrossTiles( false, firstBody, false, 10.0f, p ) == 0 );
+	ENSURE( CrossedAllSeams( p[0] ) );
+	ENSURE( p[1].x < -6.0f );
+
+	// World or body: the body flag adds nothing when the world filter is already enabled.
+	b2Vec2 q[2];
+	ENSURE( SlideAcrossTiles( true, firstBody, false, 10.0f, q ) == 0 );
+	for ( int lane = 0; lane < 2; ++lane )
+	{
+		ENSURE( q[lane].x == worldOnly[lane].x && q[lane].y == worldOnly[lane].y );
+	}
+
+	// One point manifolds (circles) are not changed by the filter.
+	b2Vec2 circleOff[2], circleOn[2];
+	ENSURE( SlideAcrossTiles( false, noBodies, true, 10.0f, circleOff ) == 0 );
+	ENSURE( SlideAcrossTiles( true, firstBody, true, 10.0f, circleOn ) == 0 );
+	for ( int lane = 0; lane < 2; ++lane )
+	{
+		ENSURE( circleOff[lane].x == circleOn[lane].x && circleOff[lane].y == circleOn[lane].y );
+	}
+
+	return 0;
+}
+
 int WorldTest( void )
 {
 	RUN_SUBTEST( HelloWorld );
@@ -844,6 +968,7 @@ int WorldTest( void )
 	RUN_SUBTEST( DeferredMassFlagSyncTest );
 	RUN_SUBTEST( EnableSleepFlagSyncTest );
 	RUN_SUBTEST( EnableContactRecyclingTest );
+	RUN_SUBTEST( SeamContactFilterTest );
 
 	return 0;
 }

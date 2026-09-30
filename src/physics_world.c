@@ -495,7 +495,11 @@ static void b2CollideTask( int startIndex, int endIndex, int workerIndex, void* 
 			// Contact recycling optimization. Please cite this code if you use this optimization.
 			// This is inspired by persistent contact manifolds used in some physics engines, such as PhysX.
 			// However, this allows larger relative motion and has fewer tuning parameters (just one).
-			if ( invokesPreSolve == false && recycleDistance > 0.0f &&
+			// The seam filter depends on the current velocities, so a recycled manifold could be stale.
+			// Must match the filter check in b2UpdateContact.
+			bool useSeamFilter = world->enableSeamContactFilter ||
+								 ( ( bodyA->flags | bodyB->flags ) & b2_bodyEnableSeamContactFilter ) != 0;
+			if ( invokesPreSolve == false && useSeamFilter == false && recycleDistance > 0.0f &&
 				 ( contactSim->simFlags & b2_simRelativeTransformValid ) &&
 				 ( contactSim->simFlags & b2_contactRecycleFlag ) )
 			{
@@ -1728,6 +1732,24 @@ bool b2World_IsWarmStartingEnabled( b2WorldId worldId )
 {
 	b2World* world = b2GetWorldFromId( worldId );
 	return world->enableWarmStarting;
+}
+
+void b2World_EnableSeamContactFilter( b2WorldId worldId, bool flag )
+{
+	b2World* world = b2GetWorldFromId( worldId );
+	B2_ASSERT( world->locked == false );
+	if ( world->locked )
+	{
+		return;
+	}
+
+	world->enableSeamContactFilter = flag;
+}
+
+bool b2World_IsSeamContactFilterEnabled( b2WorldId worldId )
+{
+	b2World* world = b2GetWorldFromId( worldId );
+	return world->enableSeamContactFilter;
 }
 
 int b2World_GetAwakeBodyCount( b2WorldId worldId )

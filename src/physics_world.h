@@ -184,6 +184,9 @@ typedef struct b2World
 	int preSolveShapeCount;
 	bool enableGlobalPreSolveEvents;
 
+	// Opt-in filter for short face contacts at flush seams (ghost collisions). Disabled by default.
+	bool enableSeamContactFilter;
+
 	b2CustomFilterFcn* customFilterFcn;
 	void* customFilterContext;
 

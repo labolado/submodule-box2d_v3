@@ -54,6 +54,9 @@ enum b2BodyFlags
 
 	b2_bodyEnableContactRecycling = 0x00001000,
 
+	// Contacts of this body use the seam contact filter even if the world-wide filter is disabled
+	b2_bodyEnableSeamContactFilter = 0x00002000,
+
 	// All lock flags
 	b2_allLocks = b2_lockAngularZ | b2_lockLinearX | b2_lockLinearY,
 

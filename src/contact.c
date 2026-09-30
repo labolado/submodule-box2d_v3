@@ -524,6 +524,44 @@ b2ContactSim* b2GetContactSim( b2World* world, b2Contact* contact )
 	return b2Array_Get( set->contactSims,contact->localIndex );
 }
 
+// A two point face manifold that is shorter than the overlap slop is usually a flush seam
+// between adjacent shapes (a ghost collision), not a wall. It is only discarded while the
+// bodies approach along the normal, so resting contacts are kept. If the overlap grows,
+// the manifold gets longer and is solved normally.
+// https://briansemrau.github.io/dealing-with-ghost-collisions/
+// Note: manifold anchors are still relative to the body origins here.
+static bool b2IsSeamContact( b2World* world, const b2Manifold* manifold, b2Shape* shapeA, b2Vec2 centerOffsetA, b2Shape* shapeB,
+							 b2Vec2 centerOffsetB )
+{
+	if ( manifold->pointCount != 2 )
+	{
+		return false;
+	}
+
+	const b2ManifoldPoint* mp1 = manifold->points + 0;
+	const b2ManifoldPoint* mp2 = manifold->points + 1;
+	float maxLength = 4.0f * B2_LINEAR_SLOP;
+	if ( b2DistanceSquared( mp1->anchorA, mp2->anchorA ) >= maxLength * maxLength )
+	{
+		return false;
+	}
+
+	// Read-only access to the velocities of the previous step. Static and sleeping bodies have no state.
+	b2BodyState* stateA = b2GetBodyState( world, b2Array_Get( world->bodies, shapeA->bodyId ) );
+	b2BodyState* stateB = b2GetBodyState( world, b2Array_Get( world->bodies, shapeB->bodyId ) );
+	b2BodyState zeroState = b2_identityBodyState;
+	stateA = stateA != NULL ? stateA : &zeroState;
+	stateB = stateB != NULL ? stateB : &zeroState;
+
+	b2Vec2 rA = b2Sub( b2Lerp( mp1->anchorA, mp2->anchorA, 0.5f ), centerOffsetA );
+	b2Vec2 rB = b2Sub( b2Lerp( mp1->anchorB, mp2->anchorB, 0.5f ), centerOffsetB );
+	b2Vec2 vA = b2Add( stateA->linearVelocity, b2CrossSV( stateA->angularVelocity, rA ) );
+	b2Vec2 vB = b2Add( stateB->linearVelocity, b2CrossSV( stateB->angularVelocity, rB ) );
+
+	// The normal points from A to B, so a negative relative normal velocity means approaching.
+	return b2Dot( b2Sub( vB, vA ), manifold->normal ) < 0.0f;
+}
+
 // Update the contact manifold and touching status.
 // Note: do not assume the shape AABBs are overlapping or are valid.
 bool b2UpdateContact( b2World* world, b2ContactSim* contactSim, b2Shape* shapeA, b2Transform transformA, b2Vec2 centerOffsetA,
@@ -559,6 +597,19 @@ bool b2UpdateContact( b2World* world, b2ContactSim* contactSim, b2Shape* shapeA,
 
 	int pointCount = contactSim->manifold.pointCount;
 	bool touching = pointCount > 0;
+
+	// Enabled for the whole world or by either body. Must match the recycling check in b2CollideTask.
+	bool useSeamFilter = world->enableSeamContactFilter ||
+						 ( ( b2Array_Get( world->bodies, shapeA->bodyId )->flags | b2Array_Get( world->bodies, shapeB->bodyId )->flags ) &
+						   b2_bodyEnableSeamContactFilter ) != 0;
+	if ( touching && useSeamFilter &&
+		 b2IsSeamContact( world, &contactSim->manifold, shapeA, centerOffsetA, shapeB, centerOffsetB ) )
+	{
+		// disable contact for this step
+		pointCount = 0;
+		contactSim->manifold.pointCount = 0;
+		touching = false;
+	}
 
 	if ( touching && world->preSolveFcn != NULL &&
 		 ( world->enableGlobalPreSolveEvents || shapeA->enablePreSolveEvents || shapeB->enablePreSolveEvents ) )
