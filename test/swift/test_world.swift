@@ -27,7 +27,7 @@ final class Box2DTests: XCTestCase {
         _ = b2CreatePolygonShape(bodyId, &shapeDef, &bodyBox)
 
         for _ in 0..<120 {
-            b2World_Step(worldId, 1.0 / 60.0, 4)
+            b2World_Step(worldId, 1.0 / 60.0, 4, nil, nil)
         }
 
         let y = b2Body_GetPosition(bodyId).y

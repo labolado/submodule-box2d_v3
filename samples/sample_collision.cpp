@@ -585,17 +585,20 @@ public:
 
 	int DrawManifold( b2BodyId lowerBodyId, b2HexColor color )
 	{
-		b2Transform lowerTransform = b2Body_GetTransform( lowerBodyId );
-		b2Transform fallingTransform = b2Body_GetTransform( m_fallingBodyId );
-		b2Manifold manifold = b2CollidePolygons( &m_square, lowerTransform, &m_square, fallingTransform );
+		b2WorldTransform lowerTransform = b2Body_GetTransform( lowerBodyId );
+		b2WorldTransform fallingTransform = b2Body_GetTransform( m_fallingBodyId );
+		// The manifold is in the frame of the lower body
+		b2LocalManifold manifold =
+			b2CollidePolygons( &m_square, &m_square, b2InvMulWorldTransforms( lowerTransform, fallingTransform ) );
 
 		if ( m_showManifolds )
 		{
+			b2Vec2 normal = b2RotateVector( lowerTransform.q, manifold.normal );
 			for ( int i = 0; i < manifold.pointCount; ++i )
 			{
-				b2Vec2 point = manifold.points[i].clipPoint;
+				b2Pos point = b2TransformWorldPoint( lowerTransform, manifold.points[i].point );
 				DrawPoint( m_draw, point, 8.0f, color );
-				DrawLine( m_draw, point, point + 0.6f * manifold.normal, color );
+				DrawLine( m_draw, point, b2OffsetPos( point, 0.6f * normal ), color );
 			}
 		}
 
@@ -613,9 +616,9 @@ public:
 		b2Vec2 velocity = b2Body_GetLinearVelocity( m_fallingBodyId );
 		float gapWidth = 2.0f + m_gapDelta;
 
-		DrawWorldString( m_draw, m_camera, { -2.0f, -1.25f }, b2_colorWhite, "static" );
-		DrawWorldString( m_draw, m_camera, { 1.4f, -1.25f }, b2_colorWhite, "static" );
-		DrawWorldString( m_draw, m_camera, position + b2Vec2{ -0.45f, 1.25f }, b2_colorWhite, "dynamic" );
+		DrawString( m_draw, m_camera, { -2.0f, -1.25f }, b2_colorWhite, "static" );
+		DrawString( m_draw, m_camera, { 1.4f, -1.25f }, b2_colorWhite, "static" );
+		DrawString( m_draw, m_camera, position + b2Vec2{ -0.45f, 1.25f }, b2_colorWhite, "dynamic" );
 
 		DrawScreenTextLine( "corner pass-through = %s", m_enabled ? "ON" : "OFF (original)" );
 		DrawScreenTextLine( "square width = 2.0000, gap width = %.4f", gapWidth );

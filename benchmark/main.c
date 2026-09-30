@@ -365,7 +365,7 @@ int main( int argc, char** argv )
 
 				assert( stepCount <= maxSteps );
 
-				b2World_Step( worldId, timeStep, subStepCount );
+				b2World_Step( worldId, timeStep, subStepCount, NULL, NULL );
 
 				b2Profile profile = b2World_GetProfile( worldId );
 				MinProfile( profiles + 0, &profile );
@@ -379,7 +379,7 @@ int main( int argc, char** argv )
 						stepResults[stepIndex] = benchmark->stepFcn( worldId, stepIndex );
 					}
 
-					b2World_Step( worldId, timeStep, subStepCount );
+					b2World_Step( worldId, timeStep, subStepCount, NULL, NULL );
 					profile = b2World_GetProfile( worldId );
 					MinProfile( profiles + stepIndex, &profile );
 				}
