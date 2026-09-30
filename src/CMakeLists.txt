@@ -43,6 +43,11 @@ set(BOX2D_SOURCE_FILES
 	physics_world.c
 	physics_world.h
 	prismatic_joint.c
+	recording.c
+	recording.h
+	recording_ops.inl
+	recording_replay.c
+	recording_replay.h
 	revolute_joint.c
 	scheduler.c
 	scheduler.h
@@ -60,6 +65,8 @@ set(BOX2D_SOURCE_FILES
 	types.c
 	weld_joint.c
 	wheel_joint.c
+	world_snapshot.c
+	world_snapshot.h
 )
 
 set(BOX2D_API_FILES
@@ -127,8 +134,14 @@ if (BOX2D_VALIDATE)
 endif()
 
 if (BOX2D_DISABLE_SIMD)
-	message(STATUS "Box2D SIMD disabled")	
+	message(STATUS "Box2D SIMD disabled")
 	target_compile_definitions(box2d PRIVATE BOX2D_DISABLE_SIMD)
+endif()
+
+if (BOX2D_DOUBLE_PRECISION)
+	message(STATUS "Box2D double precision ON")
+	# PUBLIC: consumers must see the same precision mode in the headers or they cannot match the ABI
+	target_compile_definitions(box2d PUBLIC BOX2D_DOUBLE_PRECISION)
 endif()
 
 if (MSVC)

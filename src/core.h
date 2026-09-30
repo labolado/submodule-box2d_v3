@@ -105,10 +105,10 @@
 // clang-format on
 
 // Returns the number of elements of an array
-#define B2_ARRAY_COUNT( A ) ((int)( sizeof( A ) / sizeof( *A ) ))
+#define B2_ARRAY_COUNT( A ) ( (int)( sizeof( A ) / sizeof( *A ) ) )
 
 // Used to prevent the compiler from warning about unused variables
-#define B2_UNUSED( ... ) (void)sizeof( ( __VA_ARGS__, 0 ) )
+#define B2_UNUSED( ... ) (void)sizeof(( __VA_ARGS__, 0 ))
 
 // Use to validate definitions. Do not take my cookie.
 #define B2_SECRET_COOKIE 1152023
@@ -151,19 +151,25 @@ typedef struct b2AtomicU32
 	uint32_t value;
 } b2AtomicU32;
 
+typedef struct b2AtomicI64
+{
+	// 64-bit atomic wants 8-byte alignment
+	_Alignas( 8 ) int64_t value;
+} b2AtomicI64;
+
 extern bool b2_speculativeCornerPassThrough;
 
-void* b2Alloc( int size );
-void* b2AllocZeroInit( int size );
-#define B2_ALLOC_STRUCT( type ) b2Alloc(sizeof(type))
-#define B2_ALLOC_ARRAY( count, type ) b2Alloc(count * sizeof(type))
+void* b2Alloc( size_t size );
+void* b2AllocZeroInit( size_t size );
+#define B2_ALLOC_STRUCT( type ) b2Alloc( sizeof( type ) )
+#define B2_ALLOC_ARRAY( count, type ) b2Alloc( count * sizeof( type ) )
 
-void b2Free( void* mem, int size );
-#define B2_FREE_STRUCT( mem, type ) b2Free( mem, sizeof(type));
-#define B2_FREE_ARRAY( mem, count, type ) b2Free(mem, count * sizeof(type))
+void b2Free( void* mem, size_t size );
+#define B2_FREE_STRUCT( mem, type ) b2Free( mem, sizeof( type ) );
+#define B2_FREE_ARRAY( mem, count, type ) b2Free( mem, count * sizeof( type ) )
 
-void* b2GrowAlloc( void* oldMem, int oldSize, int newSize );
-void* b2GrowAllocZeroInit( void* oldMem, int oldSize, int newSize );
+void* b2GrowAlloc( void* oldMem, size_t oldSize, size_t newSize );
+void* b2GrowAllocZeroInit( void* oldMem, size_t oldSize, size_t newSize );
 
 void b2Log( const char* format, ... );
 

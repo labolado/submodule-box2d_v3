@@ -83,6 +83,18 @@ add_library(implot STATIC
 target_link_libraries(implot PUBLIC imgui)
 target_include_directories(implot PUBLIC ${implot_SOURCE_DIR})
 
+# nativefiledialog-extended for the Replay open dialog. Native OS file picker, target nfd.
+set(NFD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(NFD_INSTALL OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    nfd
+    GIT_REPOSITORY https://github.com/btzy/nativefiledialog-extended.git
+    GIT_TAG v1.3.0
+    GIT_SHALLOW TRUE
+    GIT_PROGRESS TRUE
+)
+FetchContent_MakeAvailable(nfd)
+
 # Embed shaders as null-terminated byte arrays into a generated header so the
 # samples binary has no runtime dependency on samples/data/*.vs and *.fs.
 set(SHADER_FILES
@@ -110,21 +122,32 @@ foreach(SHADER_FILE ${SHADER_FILES})
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${SHADER_PATH})
 endforeach()
 
-set(BOX2D_SAMPLE_FILES
-    car.cpp
-    car.h
+# The shared host plus the double precision aware samples. Compiled in every precision mode.
+# The Replay Viewer is part of the host: it is the required way to view a double precision recording.
+set(BOX2D_SAMPLE_FRAMEWORK_FILES
     container.c
     container.h
-    donut.cpp
-    donut.h
-    doohickey.cpp
-    doohickey.h
     draw.c
     draw.h
     draw_text.cpp
     main.cpp
     sample.cpp
     sample.h
+    sample_replay.cpp
+    shader.c
+    shader.h
+    stb_image_write.h
+)
+
+# Samples beyond the host. These compile in both precision modes: a world coordinate flowing
+# through the b2World API keeps its natural type and is demoted only at the ad-hoc draw boundary.
+set(BOX2D_SAMPLE_COMMON_FILES
+    car.cpp
+    car.h
+    donut.cpp
+    donut.h
+    doohickey.cpp
+    doohickey.h
     sample_benchmark.cpp
     sample_bodies.cpp
     sample_character.cpp
@@ -139,10 +162,9 @@ set(BOX2D_SAMPLE_FILES
     sample_shapes.cpp
     sample_stacking.cpp
     sample_world.cpp
-    shader.c
-    shader.h
-    stb_image_write.h
 )
+
+set(BOX2D_SAMPLE_FILES ${BOX2D_SAMPLE_FRAMEWORK_FILES} ${BOX2D_SAMPLE_COMMON_FILES})
 
 add_executable(samples ${BOX2D_SAMPLE_FILES})
 
@@ -157,7 +179,7 @@ if(BOX2D_COMPILE_WARNING_AS_ERROR)
 endif()
 
 target_include_directories(samples PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR} ${JSMN_DIR})
-target_link_libraries(samples PUBLIC box2d shared imgui implot glfw glad)
+target_link_libraries(samples PUBLIC box2d shared imgui implot glfw glad nfd)
 
 # target_compile_definitions(samples PRIVATE "$<$<CONFIG:DEBUG>:SAMPLES_DEBUG>")
 # message(STATUS "runtime = ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")

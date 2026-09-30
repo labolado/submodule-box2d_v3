@@ -3,6 +3,8 @@
 
 #pragma once
 
+typedef struct b2Recording b2Recording;
+
 #include "arena_allocator.h"
 #include "bitset.h"
 #include "broad_phase.h"
@@ -200,6 +202,8 @@ typedef struct b2World
 
 	void* userData;
 
+	b2Recording* recording; // NULL unless b2World_StartRecording is active, owned by the host
+
 	// Remember type step used for reporting forces and torques
 	// inverse sub-step
 	float inv_h;
@@ -224,6 +228,10 @@ typedef struct b2World
 b2World* b2GetWorldFromId( b2WorldId id );
 b2World* b2GetWorld( int index );
 b2World* b2GetWorldLocked( int index );
+
+// Union of the broad-phase root bounds across all body types. Returns false when no tree holds a
+// proxy, so callers don't fold an empty world's origin into a running bounds.
+bool b2ComputeWorldBounds( b2World* world, b2AABB* bounds );
 
 void b2ValidateConnectivity( b2World* world );
 void b2ValidateSolverSets( b2World* world );

@@ -28,8 +28,6 @@
 #include "imgui_impl_opengl3.h"
 #include "implot.h"
 
-#include "box2d/constants.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -56,7 +54,7 @@ static int MyAllocHook( int allocType, void* userData, size_t size, int blockTyp
 
 static SampleContext s_context;
 static bool s_rightMouseDown = false;
-static b2Vec2 s_clickPointWS = b2Vec2_zero;
+static b2Pos s_clickPointWS = b2Pos_zero;
 static float s_framebufferScale = 1.0f;
 
 inline bool IsPowerOfTwo( int x )
@@ -64,7 +62,7 @@ inline bool IsPowerOfTwo( int x )
 	return ( x != 0 ) && ( ( x & ( x - 1 ) ) == 0 );
 }
 
-void* AllocFcn( unsigned int size, int alignment )
+void* AllocFcn( size_t size, int alignment )
 {
 	// Allocation must be a multiple of alignment or risk a seg fault
 	// https://en.cppreference.com/w/c/memory/aligned_alloc
@@ -81,7 +79,7 @@ void* AllocFcn( unsigned int size, int alignment )
 	return ptr;
 }
 
-void FreeFcn( void* mem, unsigned int size )
+void FreeFcn( void* mem, size_t size )
 {
 	(void)size;
 
@@ -119,7 +117,20 @@ static int CompareSamples( const void* a, const void* b )
 
 static void SortSamples()
 {
+	SampleCreateFcn* replayFcn = ( g_replayIndex >= 0 ) ? g_sampleEntries[g_replayIndex].createFcn : nullptr;
 	qsort( g_sampleEntries, g_sampleCount, sizeof( SampleEntry ), CompareSamples );
+	if ( replayFcn != nullptr )
+	{
+		g_replayIndex = -1;
+		for ( int i = 0; i < g_sampleCount; ++i )
+		{
+			if ( g_sampleEntries[i].createFcn == replayFcn )
+			{
+				g_replayIndex = i;
+				break;
+			}
+		}
+	}
 }
 
 static void ApplyUIStyle( void )
@@ -314,7 +325,7 @@ static void KeyCallback( GLFWwindow* window, int key, int scancode, int action, 
 				}
 				break;
 
-			case GLFW_KEY_P:
+			case GLFW_KEY_SPACE:
 				s_context.pause = !s_context.pause;
 				break;
 
@@ -380,7 +391,7 @@ static void MouseButtonCallback( GLFWwindow* window, int button, int action, int
 	// Use the mouse to move things around.
 	if ( button == GLFW_MOUSE_BUTTON_1 )
 	{
-		b2Vec2 pw = ConvertScreenToWorld( &s_context.camera, ps );
+		b2Pos pw = ConvertScreenToWorld( &s_context.camera, ps );
 		if ( action == GLFW_PRESS )
 		{
 			s_context.sample->MouseDown( pw, button, modifiers );
@@ -412,12 +423,12 @@ static void MouseMotionCallback( GLFWwindow* window, double xd, double yd )
 
 	ImGui_ImplGlfw_CursorPosCallback( window, ps.x, ps.y );
 
-	b2Vec2 pw = ConvertScreenToWorld( &s_context.camera, ps );
+	b2Pos pw = ConvertScreenToWorld( &s_context.camera, ps );
 	s_context.sample->MouseMove( pw );
 
 	if ( s_rightMouseDown )
 	{
-		b2Vec2 diff = b2Sub( pw, s_clickPointWS );
+		b2Vec2 diff = pw - s_clickPointWS;
 		s_context.camera.center.x -= diff.x;
 		s_context.camera.center.y -= diff.y;
 		s_clickPointWS = ConvertScreenToWorld( &s_context.camera, ps );
@@ -435,7 +446,7 @@ static void ScrollCallback( GLFWwindow* window, double dx, double dy )
 	double xd, yd;
 	glfwGetCursorPos( window, &xd, &yd );
 	b2Vec2 ps = { (float)xd, (float)yd };
-	b2Vec2 pw1 = ConvertScreenToWorld( &s_context.camera, ps );
+	b2Pos pw1 = ConvertScreenToWorld( &s_context.camera, ps );
 
 	if ( dy > 0 )
 	{
@@ -446,15 +457,19 @@ static void ScrollCallback( GLFWwindow* window, double dx, double dy )
 		s_context.camera.zoom *= 1.1f;
 	}
 
-	b2Vec2 pw2 = ConvertScreenToWorld( &s_context.camera, ps );
-	s_context.camera.center -= pw2 - pw1;
+	b2Pos pw2 = ConvertScreenToWorld( &s_context.camera, ps );
+
+	// Keep the world point under the cursor fixed across the zoom.
+	b2Vec2 pan = pw2 - pw1;
+	s_context.camera.center.x -= pan.x;
+	s_context.camera.center.y -= pan.y;
 }
 
-int main( int, char** )
+int main( int argc, char** argv )
 {
 #if defined( _MSC_VER )
 	// Enable memory-leak reports
-	//_CrtSetBreakAlloc( 217 );
+	//_CrtSetBreakAlloc( 1418 );
 	_CrtSetReportMode( _CRT_WARN, _CRTDBG_MODE_DEBUG | _CRTDBG_MODE_FILE );
 	_CrtSetReportFile( _CRT_WARN, _CRTDBG_FILE_STDOUT );
 	//_CrtSetAllocHook(MyAllocHook);
@@ -472,6 +487,14 @@ int main( int, char** )
 
 	s_context.Load();
 	s_context.workerCount = b2MinInt( 8, GetNumberOfCores() / 2 );
+
+	// A recording path on the command line opens straight into the replay viewer.
+	// Dragging a file onto the exe arrives here as argv[1] too.
+	if ( argc > 1 && g_replayIndex >= 0 )
+	{
+		snprintf( s_context.replayFile, sizeof( s_context.replayFile ), "%s", argv[1] );
+		s_context.sampleIndex = g_replayIndex;
+	}
 
 	SortSamples();
 
@@ -498,7 +521,8 @@ int main( int, char** )
 	glfwWindowHint( GLFW_SAMPLES, 4 );
 
 	b2Version version = b2GetVersion();
-	snprintf( buffer, 128, "Box2D Version %d.%d.%d", version.major, version.minor, version.revision );
+	const char* precision = b2IsDoublePrecision() ? "double" : "single";
+	snprintf( buffer, 128, "Box2D Version %d.%d.%d - %s precision", version.major, version.minor, version.revision, precision );
 
 	if ( GLFWmonitor* primaryMonitor = glfwGetPrimaryMonitor() )
 	{
@@ -625,13 +649,28 @@ int main( int, char** )
 		}
 
 		s_context.sample->ResetText();
+
+		if ( s_context.showUI == false )
+		{
+			// Minimal hud
+			s_context.sample->DrawHud( frameTime );
+		}
+
+		// Draw relative to the camera so world draws get float coordinates near the origin, and stay exact
+		// far from it in large world mode. This must hold even for samples that drive their own Step without
+		// calling Sample::Step, otherwise their world draws ignore camera panning.
+		SetDrawOrigin( s_context.draw, s_context.camera.center );
+
 		s_context.sample->Step();
 
 		FlushDraw( s_context.draw, &s_context.camera );
 
-		DrawUI( &s_context, frameTime );
+		if ( s_context.showUI == true )
+		{
+			DrawUI( &s_context, frameTime );
+		}
 
-		//ImGui::ShowDemoWindow();
+		// ImGui::ShowDemoWindow();
 
 		ImGui::Render();
 		ImGui_ImplOpenGL3_RenderDrawData( ImGui::GetDrawData() );

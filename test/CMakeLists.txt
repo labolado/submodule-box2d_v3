@@ -10,9 +10,12 @@ set(BOX2D_TEST_FILES
     test_dynamic_tree.c
     test_id.c
     test_joint.c
+    test_large_world.c
     test_macros.h
     test_math.c
+    test_recording.c
     test_shape.c
+    test_snapshot.c
     test_table.c
     test_thread.c
     test_world.c

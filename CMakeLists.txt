@@ -46,10 +46,15 @@ endif()
 # https://box2d.org/posts/2024/08/determinism/
 if (MINGW OR UNIX)
 	add_compile_options(-ffp-contract=off)
+elseif (MSVC AND CMAKE_C_COMPILER_ID STREQUAL "Clang")
+	# clang-cl contracts multiply add into FMA under AVX2, diverging from non FMA builds.
+	# The plain driver flag is dropped, so force it through to the frontend.
+	add_compile_options(/clang:-ffp-contract=off)
 endif()
 
 option(BOX2D_DISABLE_SIMD "Disable SIMD math (slower)" OFF)
 option(BOX2D_COMPILE_WARNING_AS_ERROR "Compile warnings as errors" OFF)
+option(BOX2D_DOUBLE_PRECISION "Enable double precision for large worlds" OFF)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 	cmake_dependent_option(BOX2D_AVX2 "Enable AVX2" OFF "NOT BOX2D_DISABLE_SIMD" OFF)

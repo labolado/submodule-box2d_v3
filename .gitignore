@@ -13,3 +13,6 @@ CMakeUserPresets.json
 .tmp/
 AGENTS.md
 GEMINI.md
+*.b2rec
+build-dp/
+build_float/

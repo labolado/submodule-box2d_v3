@@ -13,48 +13,6 @@
 
 #define B2_TREE_STACK_SIZE 1024
 
-enum b2TreeNodeFlags
-{
-	b2_allocatedNode = 0x0001,
-	b2_enlargedNode = 0x0002,
-	b2_leafNode = 0x0004,
-};
-
-// A node in the dynamic tree.
-// todo externalize this to visualize internal nodes and speed up FindPairs
-typedef struct b2TreeNode
-{
-	// The node bounding box
-	b2AABB aabb; // 16
-
-	// Category bits for collision filtering
-	uint64_t categoryBits; // 8
-
-	union
-	{
-		// Children (internal node)
-		struct
-		{
-			int32_t child1, child2;
-		} children;
-
-		/// User data (leaf node)
-		uint64_t userData;
-	}; // 8
-
-	union
-	{
-		/// The node parent index (allocated node)
-		int32_t parent;
-
-		/// The node freelist next index (free node)
-		int32_t next;
-	}; // 4
-
-	uint16_t height; // 2
-	uint16_t flags;	 // 2
-} b2TreeNode;
-
 static b2TreeNode b2_defaultTreeNode = {
 	.aabb = { { 0.0f, 0.0f }, { 0.0f, 0.0f } },
 	.categoryBits = B2_DEFAULT_CATEGORY_BITS,
@@ -785,10 +743,7 @@ static void b2RemoveLeaf( b2DynamicTree* tree, int leaf )
 // the node pool.
 int b2DynamicTree_CreateProxy( b2DynamicTree* tree, b2AABB aabb, uint64_t categoryBits, uint64_t userData )
 {
-	B2_ASSERT( -B2_HUGE < aabb.lowerBound.x && aabb.lowerBound.x < B2_HUGE );
-	B2_ASSERT( -B2_HUGE < aabb.lowerBound.y && aabb.lowerBound.y < B2_HUGE );
-	B2_ASSERT( -B2_HUGE < aabb.upperBound.x && aabb.upperBound.x < B2_HUGE );
-	B2_ASSERT( -B2_HUGE < aabb.upperBound.y && aabb.upperBound.y < B2_HUGE );
+	B2_VALIDATE( b2IsValidAABB( aabb ) );
 
 	int proxyId = b2AllocateNode( tree );
 	b2TreeNode* node = tree->nodes + proxyId;
@@ -1350,27 +1305,18 @@ b2TreeStats b2DynamicTree_RayCast( const b2DynamicTree* tree, const b2RayCastInp
 	return result;
 }
 
-b2TreeStats b2DynamicTree_ShapeCast( const b2DynamicTree* tree, const b2ShapeCastInput* input, uint64_t maskBits,
-									 b2TreeShapeCastCallbackFcn* callback, void* context )
+b2TreeStats b2DynamicTree_BoxCast( const b2DynamicTree* tree, const b2BoxCastInput* input, uint64_t maskBits,
+									b2TreeBoxCastCallbackFcn* callback, void* context )
 {
 	b2TreeStats stats = { 0 };
 
-	if ( tree->nodeCount == 0 || input->proxy.count == 0 )
+	if ( tree->nodeCount == 0 )
 	{
 		return stats;
 	}
 
-	b2AABB originAABB = { input->proxy.points[0], input->proxy.points[0] };
-	for ( int i = 1; i < input->proxy.count; ++i )
-	{
-		originAABB.lowerBound = b2Min( originAABB.lowerBound, input->proxy.points[i] );
-		originAABB.upperBound = b2Max( originAABB.upperBound, input->proxy.points[i] );
-	}
-
-	b2Vec2 radius = { input->proxy.radius, input->proxy.radius };
-
-	originAABB.lowerBound = b2Sub( originAABB.lowerBound, radius );
-	originAABB.upperBound = b2Add( originAABB.upperBound, radius );
+	// The caller folds the shape radius into the box
+	b2AABB originAABB = input->box;
 
 	b2Vec2 p1 = b2AABB_Center( originAABB );
 	b2Vec2 extension = b2AABB_Extents( originAABB );
@@ -1385,14 +1331,14 @@ b2TreeStats b2DynamicTree_ShapeCast( const b2DynamicTree* tree, const b2ShapeCas
 
 	float maxFraction = input->maxFraction;
 
-	// Build total box for the shape cast
+	// Build total box for the cast
 	b2Vec2 t = b2MulSV( maxFraction, input->translation );
 	b2AABB totalAABB = {
 		b2Min( originAABB.lowerBound, b2Add( originAABB.lowerBound, t ) ),
 		b2Max( originAABB.upperBound, b2Add( originAABB.upperBound, t ) ),
 	};
 
-	b2ShapeCastInput subInput = *input;
+	b2BoxCastInput subInput = *input;
 	const b2TreeNode* nodes = tree->nodes;
 
 	int stack[B2_TREE_STACK_SIZE];

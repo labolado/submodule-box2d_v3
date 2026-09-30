@@ -27,7 +27,7 @@ int HelloWorld( void )
 
 	// Define the ground body.
 	b2BodyDef groundBodyDef = b2DefaultBodyDef();
-	groundBodyDef.position = (b2Vec2){ 0.0f, -10.0f };
+	groundBodyDef.position = (b2Pos){ 0.0f, -10.0f };
 
 	// Call the body factory which allocates memory for the ground body
 	// from a pool and creates the ground box shape (also from a pool).
@@ -45,7 +45,7 @@ int HelloWorld( void )
 	// Define the dynamic body. We set its position and call the body factory.
 	b2BodyDef bodyDef = b2DefaultBodyDef();
 	bodyDef.type = b2_dynamicBody;
-	bodyDef.position = (b2Vec2){ 0.0f, 4.0f };
+	bodyDef.position = (b2Pos){ 0.0f, 4.0f };
 
 	b2BodyId bodyId = b2CreateBody( worldId, &bodyDef );
 
@@ -70,7 +70,7 @@ int HelloWorld( void )
 	float timeStep = 1.0f / 60.0f;
 	int subStepCount = 4;
 
-	b2Vec2 position = b2Body_GetPosition( bodyId );
+	b2Pos position = b2Body_GetPosition( bodyId );
 	b2Rot rotation = b2Body_GetRotation( bodyId );
 
 	// This is our little game loop.
@@ -252,7 +252,7 @@ static bool CustomFilter( b2ShapeId shapeIdA, b2ShapeId shapeIdB, void* context 
 	return true;
 }
 
-static bool PreSolveStatic( b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Vec2 point, b2Vec2 normal, float separation,
+static bool PreSolveStatic( b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Pos point, b2Vec2 normal, float separation,
 							void* context )
 {
 	(void)shapeIdA;
@@ -520,7 +520,7 @@ static int TestSensor( void )
 	bodyDef.type = b2_dynamicBody;
 	bodyDef.isBullet = true;
 	bodyDef.gravityScale = 0.0f;
-	bodyDef.position = (b2Vec2){ 7.39814f, 4.0f };
+	bodyDef.position = (b2Pos){ 7.39814f, 4.0f };
 	bodyDef.linearVelocity = (b2Vec2){ -20.0f, 0.0f };
 	b2BodyId bulletId = b2CreateBody( worldId, &bodyDef );
 	shapeDef = b2DefaultShapeDef();
@@ -538,7 +538,7 @@ static int TestSensor( void )
 		int subStepCount = 4;
 		b2World_Step( worldId, timeStep, subStepCount, NULL, NULL );
 
-		b2Vec2 bulletPos = b2Body_GetPosition( bulletId );
+		b2Pos bulletPos = b2Body_GetPosition( bulletId );
 		// printf( "Bullet pos: %g %g\n", bulletPos.x, bulletPos.y );
 
 		b2SensorEvents events = b2World_GetSensorEvents( worldId );
@@ -646,7 +646,7 @@ static int ChainSegmentShapeTest( void )
 
 	b2BodyDef dynamicDef = b2DefaultBodyDef();
 	dynamicDef.type = b2_dynamicBody;
-	dynamicDef.position = (b2Vec2){ 0.0f, 2.0f };
+	dynamicDef.position = (b2Pos){ 0.0f, 2.0f };
 	b2BodyId circleBodyId = b2CreateBody( worldId, &dynamicDef );
 	b2Circle circle = { { 0.0f, 0.0f }, 0.5f };
 	b2ShapeDef circleShapeDef = b2DefaultShapeDef();
@@ -657,7 +657,7 @@ static int ChainSegmentShapeTest( void )
 		b2World_Step( worldId, 1.0f / 60.0f, 4, NULL, NULL );
 	}
 
-	b2Vec2 circlePos = b2Body_GetPosition( circleBodyId );
+	b2Pos circlePos = b2Body_GetPosition( circleBodyId );
 	ENSURE( circlePos.y > 0.0f );
 
 	b2ChainSegment cs2 = { 0 };
@@ -950,6 +950,100 @@ static int SeamContactFilterTest( void )
 	return 0;
 }
 
+// b2Shape_ComputeDistance (used by LiquidFun) must return the world distance and a world normal
+// pointing from the shape to the target, also for a rotated body with an offset shape.
+static int ShapeComputeDistanceTest( void )
+{
+	b2WorldDef worldDef = b2DefaultWorldDef();
+	b2WorldId worldId = b2CreateWorld( &worldDef );
+
+	// Rotated 90 degrees: the local x axis maps to world y. The box covers x in [2.75, 3.25] and
+	// y in [1.5, 3.5] in world space.
+	b2BodyDef bodyDef = b2DefaultBodyDef();
+	bodyDef.position = (b2Vec2){ 3.0f, 2.0f };
+	bodyDef.rotation = b2MakeRot( 0.5f * B2_PI );
+	b2BodyId bodyId = b2CreateBody( worldId, &bodyDef );
+
+	b2ShapeDef shapeDef = b2DefaultShapeDef();
+	b2Polygon box = b2MakeOffsetBox( 1.0f, 0.25f, (b2Vec2){ 0.5f, 0.0f }, b2Rot_identity );
+	b2ShapeId shapeId = b2CreatePolygonShape( bodyId, &shapeDef, &box );
+
+	struct
+	{
+		b2Vec2 target;
+		float distance;
+		b2Vec2 normal;
+	} cases[] = {
+		{ { 5.0f, 2.5f }, 1.75f, { 1.0f, 0.0f } },
+		{ { 3.0f, 5.0f }, 1.5f, { 0.0f, 1.0f } },
+		{ { 1.0f, 2.0f }, 1.75f, { -1.0f, 0.0f } },
+		{ { 3.0f, 0.5f }, 1.0f, { 0.0f, -1.0f } },
+	};
+
+	for ( int i = 0; i < (int)( sizeof( cases ) / sizeof( cases[0] ) ); ++i )
+	{
+		float distance = -1.0f;
+		b2Vec2 normal = b2Vec2_zero;
+		b2Shape_ComputeDistance( shapeId, cases[i].target, &distance, &normal );
+		ENSURE_SMALL( distance - cases[i].distance, 1e-5f );
+		ENSURE_SMALL( normal.x - cases[i].normal.x, 1e-5f );
+		ENSURE_SMALL( normal.y - cases[i].normal.y, 1e-5f );
+
+		// Consistent with the closest point query
+		b2Vec2 closest = b2Shape_GetClosestPoint( shapeId, cases[i].target );
+		ENSURE_SMALL( b2Distance( closest, cases[i].target ) - distance, 1e-5f );
+	}
+
+	b2DestroyWorld( worldId );
+	return 0;
+}
+
+// b2Body_GetPreviousTransform (used by LiquidFun) returns the transform from before the last step,
+// and equals the current transform after creation and after b2Body_SetTransform.
+static int BodyPreviousTransformTest( void )
+{
+	b2WorldDef worldDef = b2DefaultWorldDef();
+	b2WorldId worldId = b2CreateWorld( &worldDef );
+
+	b2BodyDef bodyDef = b2DefaultBodyDef();
+	bodyDef.type = b2_dynamicBody;
+	bodyDef.position = (b2Vec2){ 1.0f, 5.0f };
+	bodyDef.rotation = b2MakeRot( 0.3f );
+	bodyDef.linearVelocity = (b2Vec2){ 2.0f, 0.0f };
+	bodyDef.angularVelocity = 1.0f;
+	b2BodyId bodyId = b2CreateBody( worldId, &bodyDef );
+
+	b2ShapeDef shapeDef = b2DefaultShapeDef();
+	b2Polygon box = b2MakeBox( 0.5f, 0.5f );
+	b2CreatePolygonShape( bodyId, &shapeDef, &box );
+
+	b2Transform created = b2Body_GetTransform( bodyId );
+	b2Transform previous = b2Body_GetPreviousTransform( bodyId );
+	ENSURE( previous.p.x == created.p.x && previous.p.y == created.p.y );
+	ENSURE( previous.q.c == created.q.c && previous.q.s == created.q.s );
+
+	b2Transform before = created;
+	for ( int i = 0; i < 3; ++i )
+	{
+		b2World_Step( worldId, 1.0f / 60.0f, 4, NULL, NULL );
+		b2Transform current = b2Body_GetTransform( bodyId );
+		previous = b2Body_GetPreviousTransform( bodyId );
+		ENSURE( previous.p.x == before.p.x && previous.p.y == before.p.y );
+		ENSURE( previous.q.c == before.q.c && previous.q.s == before.q.s );
+		ENSURE( current.p.x != before.p.x );
+		before = current;
+	}
+
+	b2Body_SetTransform( bodyId, (b2Vec2){ -2.0f, 3.0f }, b2MakeRot( -0.7f ) );
+	b2Transform moved = b2Body_GetTransform( bodyId );
+	previous = b2Body_GetPreviousTransform( bodyId );
+	ENSURE( previous.p.x == moved.p.x && previous.p.y == moved.p.y );
+	ENSURE( previous.q.c == moved.q.c && previous.q.s == moved.q.s );
+
+	b2DestroyWorld( worldId );
+	return 0;
+}
+
 int WorldTest( void )
 {
 	RUN_SUBTEST( HelloWorld );
@@ -969,6 +1063,8 @@ int WorldTest( void )
 	RUN_SUBTEST( EnableSleepFlagSyncTest );
 	RUN_SUBTEST( EnableContactRecyclingTest );
 	RUN_SUBTEST( SeamContactFilterTest );
+	RUN_SUBTEST( ShapeComputeDistanceTest );
+	RUN_SUBTEST( BodyPreviousTransformTest );
 
 	return 0;
 }

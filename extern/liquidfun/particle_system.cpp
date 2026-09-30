@@ -116,7 +116,7 @@ namespace // anonymous namespace.
 					// if (fixture->GetShape()->GetType() == b2Shape::e_circle)
 					if (b2Shape_GetType(shapeId) == b2_circleShape)
 					{
-						b2Vec2 bodyLocalCenter = b2Body_GetWorldCenterOfMass(bodyId);
+						b2Vec2 bodyLocalCenter = b2Body_GetWorldCenter(bodyId);
 						// Make relative to the center of the circle
 						p1 -= bodyLocalCenter;
 						// Re-apply rotation about the center of the
@@ -135,8 +135,7 @@ namespace // anonymous namespace.
 					p1 = ap;
 				}
 				b2Vec2 p2 = ap + queryContext->step.dt * av;
-				b2RayCastInput input = {p1, p2 - p1, 1.0f};
-				b2CastOutput output = b2Shape_RayCast(shapeId, &input);
+				b2WorldCastOutput output = b2Shape_RayCast(shapeId, p1, p2 - p1);
 				// if (fixture->RayCast(&output, input, childIndex))
 				if (output.hit)
 				{
@@ -182,10 +181,10 @@ namespace // anonymous namespace.
 			if (d < system->m_particleDiameter && liquid_should_collide(system, shapeId, a))
 			{
 				// b2Body* b = fixture->GetBody();
-				b2Vec2 bp = b2Body_GetWorldCenterOfMass(bodyId);
+				b2Vec2 bp = b2Body_GetWorldCenter(bodyId);
 				float32 bm = b2Body_GetMass(bodyId);
 				float32 bI =
-					b2Body_GetRotationalInertia(bodyId) - bm * b2LengthSquared(b2Body_GetLocalCenterOfMass(bodyId));
+					b2Body_GetRotationalInertia(bodyId) - bm * b2LengthSquared(b2Body_GetLocalCenter(bodyId));
 				float32 invBm = bm > 0 ? 1 / bm : 0;
 				float32 invBI = bI > 0 ? 1 / bI : 0;
 				float32 invAm =
@@ -3451,7 +3450,7 @@ void b2ParticleSystem::SolveDamping(const b2TimeStep& step)
 		float32 m = contact.mass;
 		b2Vec2 n = contact.normal;
 		b2Vec2 p = m_positionBuffer.data[a];
-		b2Vec2 velocity = b2Body_GetLinearVelocity(b) + b2CrossSV(b2Body_GetAngularVelocity(b), p - b2Body_GetWorldCenterOfMass(b));
+		b2Vec2 velocity = b2Body_GetLinearVelocity(b) + b2CrossSV(b2Body_GetAngularVelocity(b), p - b2Body_GetWorldCenter(b));
 		b2Vec2 v = velocity - m_velocityBuffer.data[a];
 		float32 vn = b2Dot(v, n);
 		if (vn < 0)
@@ -3578,7 +3577,7 @@ void b2ParticleSystem::SolveRigidDamping()
 			b2Vec2 n = contact.normal;
 			float32 w = contact.weight;
 			b2Vec2 p = m_positionBuffer.data[a];
-			b2Vec2 velocity = b2Body_GetLinearVelocity(b) + b2CrossSV(b2Body_GetAngularVelocity(b), p - b2Body_GetWorldCenterOfMass(b));
+			b2Vec2 velocity = b2Body_GetLinearVelocity(b) + b2CrossSV(b2Body_GetAngularVelocity(b), p - b2Body_GetWorldCenter(b));
 			b2Vec2 v = velocity - aGroup->GetLinearVelocityFromWorldPoint(p);
 			float32 vn = b2Dot(v, n);
 			if (vn < 0)
@@ -3595,8 +3594,8 @@ void b2ParticleSystem::SolveRigidDamping()
 					b2Body_GetMass(b),
 					// Calculate b->m_I from public functions of b2Body.
 					b2Body_GetRotationalInertia(b) -
-							b2Body_GetMass(b) * b2LengthSquared(b2Body_GetLocalCenterOfMass(b)),
-					b2Body_GetWorldCenterOfMass(b),
+							b2Body_GetMass(b) * b2LengthSquared(b2Body_GetLocalCenter(b)),
+					b2Body_GetWorldCenter(b),
 					p, n);
 				float32 f = damping * b2MinFloat(w, 1.0f) * ComputeDampingImpulse(
 					invMassA, invInertiaA, tangentDistanceA,
@@ -3671,7 +3670,7 @@ void b2ParticleSystem::SolveExtraDamping()
 			float32 m = contact.mass;
 			b2Vec2 n = contact.normal;
 			b2Vec2 p = m_positionBuffer.data[a];
-			b2Vec2 velocity = b2Body_GetLinearVelocity(b) + b2CrossSV(b2Body_GetAngularVelocity(b), p - b2Body_GetWorldCenterOfMass(b));
+			b2Vec2 velocity = b2Body_GetLinearVelocity(b) + b2CrossSV(b2Body_GetAngularVelocity(b), p - b2Body_GetWorldCenter(b));
 			b2Vec2 v = velocity -
 				m_velocityBuffer.data[a];
 			float32 vn = b2Dot(v, n);
@@ -3853,7 +3852,7 @@ void b2ParticleSystem::SolveViscous()
 			float32 w = contact.weight;
 			float32 m = contact.mass;
 			b2Vec2 p = m_positionBuffer.data[a];
-			b2Vec2 velocity = b2Body_GetLinearVelocity(b) + b2CrossSV(b2Body_GetAngularVelocity(b), p - b2Body_GetWorldCenterOfMass(b));
+			b2Vec2 velocity = b2Body_GetLinearVelocity(b) + b2CrossSV(b2Body_GetAngularVelocity(b), p - b2Body_GetWorldCenter(b));
 			b2Vec2 v = velocity - m_velocityBuffer.data[a];
 			b2Vec2 f = viscousStrength * m * w * v;
 			m_velocityBuffer.data[a] += GetParticleInvMass() * f;

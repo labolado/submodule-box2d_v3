@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 Erin Catto
+// SPDX-FileCopyrightText: 2026 Erin Catto
 // SPDX-License-Identifier: MIT
 
 #if defined( _MSC_VER ) && !defined( _CRT_SECURE_NO_WARNINGS )
@@ -20,9 +20,13 @@
 #include "box2d/math_functions.h"
 
 #include <GLFW/glfw3.h>
+#include <nfd.h>
+
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+#define INFO_PANEL_WIDTH 16.0f
 
 static const char* fileName = "settings.ini";
 
@@ -58,9 +62,12 @@ void SampleContext::Save()
 	FILE* file = fopen( fileName, "w" );
 	fprintf( file, "{\n" );
 	fprintf( file, "  \"sampleIndex\": %d,\n", sampleIndex );
+	fprintf( file, "  \"newUser\": %d,\n", false );
 	fprintf( file, "  \"drawShapes\": %s,\n", debugDraw.drawShapes ? "true" : "false" );
 	fprintf( file, "  \"drawJoints\": %s,\n", debugDraw.drawJoints ? "true" : "false" );
-	fprintf( file, "  \"showDiagnostics\": %s\n", showMetrics ? "true" : "false" );
+	fprintf( file, "  \"showDiagnostics\": %s,\n", showMetrics ? "true" : "false" );
+	fprintf( file, "  \"replayKeyframeBudgetMB\": %d,\n", replayKeyframeBudgetMB );
+	fprintf( file, "  \"replayKeyframeMinInterval\": %d\n", replayKeyframeMinInterval );
 	fprintf( file, "}\n" );
 	fclose( file );
 }
@@ -75,59 +82,65 @@ static int jsoneq( const char* json, jsmntok_t* tok, const char* s )
 	return -1;
 }
 
-void DrawPolygonFcn( const b2Vec2* vertices, int vertexCount, b2HexColor color, void* context )
+void DrawPolygonFcn(b2WorldTransform transform, const b2Vec2* vertices, int vertexCount, b2HexColor color, void* context )
 {
 	SampleContext* sampleContext = static_cast<SampleContext*>( context );
-	DrawPolygon( sampleContext->draw, vertices, vertexCount, color );
+	DrawPolygon( sampleContext->draw, transform, vertices, vertexCount, color );
 }
 
-void DrawSolidPolygonFcn( b2Transform transform, const b2Vec2* vertices, int vertexCount, float radius, b2HexColor color,
+void DrawSolidPolygonFcn( b2WorldTransform transform, const b2Vec2* vertices, int vertexCount, float radius, b2HexColor color,
 						  void* context )
 {
 	SampleContext* sampleContext = static_cast<SampleContext*>( context );
 	DrawSolidPolygon( sampleContext->draw, transform, vertices, vertexCount, radius, color );
 }
 
-void DrawCircleFcn( b2Vec2 center, float radius, b2HexColor color, void* context )
+void DrawCircleFcn( b2Pos center, float radius, b2HexColor color, void* context )
 {
 	SampleContext* sampleContext = static_cast<SampleContext*>( context );
 	DrawCircle( sampleContext->draw, center, radius, color );
 }
 
-void DrawSolidCircleFcn( b2Transform transform, float radius, b2HexColor color, void* context )
+void DrawSolidCircleFcn( b2WorldTransform transform, b2Vec2 center, float radius, b2HexColor color, void* context )
 {
 	SampleContext* sampleContext = static_cast<SampleContext*>( context );
-	DrawSolidCircle( sampleContext->draw, transform, radius, color );
+	DrawSolidCircle( sampleContext->draw, transform, center, radius, color );
 }
 
-void DrawSolidCapsuleFcn( b2Vec2 p1, b2Vec2 p2, float radius, b2HexColor color, void* context )
+void DrawSolidCapsuleFcn( b2Pos p1, b2Pos p2, float radius, b2HexColor color, void* context )
 {
 	SampleContext* sampleContext = static_cast<SampleContext*>( context );
-	DrawSolidCapsule( sampleContext->draw, p1, p2, radius, color );
+	DrawCapsule( sampleContext->draw, p1, p2, radius, color );
 }
 
-void DrawLineFcn( b2Vec2 p1, b2Vec2 p2, b2HexColor color, void* context )
+void DrawLineFcn( b2Pos p1, b2Pos p2, b2HexColor color, void* context )
 {
 	SampleContext* sampleContext = static_cast<SampleContext*>( context );
 	DrawLine( sampleContext->draw, p1, p2, color );
 }
 
-void DrawTransformFcn( b2Transform transform, void* context )
+void DrawTransformFcn( b2WorldTransform transform, void* context )
 {
 	SampleContext* sampleContext = static_cast<SampleContext*>( context );
 	DrawTransform( sampleContext->draw, transform, 1.0f );
 }
 
-void DrawPointFcn( b2Vec2 p, float size, b2HexColor color, void* context )
+void DrawPointFcn( b2Pos p, float size, b2HexColor color, void* context )
 {
 	SampleContext* sampleContext = static_cast<SampleContext*>( context );
 	DrawPoint( sampleContext->draw, p, size, color );
 }
 
-void DrawStringFcn( b2Vec2 p, const char* s, b2HexColor color, void* context )
+void DrawStringFcn( b2Pos p, const char* s, b2HexColor color, void* context )
 {
 	SampleContext* sampleContext = static_cast<SampleContext*>( context );
-	DrawWorldString( sampleContext->draw, &sampleContext->camera, p, color, s );
+	DrawString( sampleContext->draw, &sampleContext->camera, p, color, "%s", s );
+}
+
+void DrawBoundsFcn( b2AABB aabb, b2HexColor color, void* context )
+{
+	SampleContext* sampleContext = static_cast<SampleContext*>( context );
+	DrawBounds( sampleContext->draw, aabb, color );
 }
 
 #define MAX_TOKENS 32
@@ -145,9 +158,16 @@ void SampleContext::Load()
 	debugDraw.DrawTransformFcn = DrawTransformFcn;
 	debugDraw.DrawPointFcn = DrawPointFcn;
 	debugDraw.DrawStringFcn = DrawStringFcn;
+	debugDraw.DrawBoundsFcn = DrawBoundsFcn;
+
 	debugDraw.context = this;
 
 	recycleDistance = B2_CONTACT_RECYCLE_DISTANCE;
+
+	if (g_replayIndex >= 0)
+	{
+		sampleIndex = g_replayIndex;
+	}
 
 	char* data = nullptr;
 	int size = 0;
@@ -156,6 +176,8 @@ void SampleContext::Load()
 	{
 		return;
 	}
+
+	newUser = false;
 
 	jsmn_parser parser;
 	jsmntok_t tokens[MAX_TOKENS];
@@ -216,6 +238,26 @@ void SampleContext::Load()
 				showMetrics = false;
 			}
 		}
+		else if ( jsoneq( data, &tokens[i], "replayKeyframeBudgetMB" ) == 0 )
+		{
+			int count = tokens[i + 1].end - tokens[i + 1].start;
+			assert( count < 32 );
+			const char* s = data + tokens[i + 1].start;
+			strncpy( buffer, s, count );
+			buffer[count] = 0;
+			char* dummy;
+			replayKeyframeBudgetMB = (int)strtol( buffer, &dummy, 10 );
+		}
+		else if ( jsoneq( data, &tokens[i], "replayKeyframeMinInterval" ) == 0 )
+		{
+			int count = tokens[i + 1].end - tokens[i + 1].start;
+			assert( count < 32 );
+			const char* s = data + tokens[i + 1].start;
+			strncpy( buffer, s, count );
+			buffer[count] = 0;
+			char* dummy;
+			replayKeyframeMinInterval = (int)strtol( buffer, &dummy, 10 );
+		}
 	}
 
 	free( data );
@@ -249,7 +291,7 @@ static void TestMathCpp()
 	c += c;
 }
 
-Sample::Sample( SampleContext* context )
+Sample::Sample( SampleContext* context, bool createWorld )
 {
 	m_context = context;
 	m_camera = &context->camera;
@@ -274,20 +316,61 @@ Sample::Sample( SampleContext* context )
 
 	g_randomSeed = RAND_SEED;
 
-	CreateWorld();
+	m_recording = nullptr;
+	m_recordStartStep = 0;
+
+	if ( createWorld )
+	{
+		CreateWorld();
+	}
 	TestMathCpp();
 }
 
 Sample::~Sample()
 {
-	// By deleting the world, we delete the bomb, mouse joint, etc.
-	b2DestroyWorld( m_worldId );
+	if ( B2_IS_NON_NULL( m_worldId ) )
+	{
+		FinishRecording();
+		b2DestroyWorld( m_worldId );
+	}
+}
+
+void Sample::StartRecording()
+{
+	if ( m_recording != nullptr )
+	{
+		return;
+	}
+
+	uint64_t ticks = b2GetTicks();
+
+	// Snapshots the live world as the seed, so recording can begin at any step boundary
+	m_recording = b2CreateRecording( 0 );
+	b2World_StartRecording( m_worldId, m_recording );
+	m_recordStartStep = m_stepCount;
+
+	float ms = b2GetMilliseconds( ticks );
+	printf( "b2World_StartRecording took : %g ms", ms );
+}
+
+void Sample::FinishRecording()
+{
+	if ( m_recording == nullptr )
+	{
+		return;
+	}
+
+	b2World_StopRecording( m_worldId );
+	b2SaveRecordingToFile( m_recording, m_context->recordingFile );
+	b2DestroyRecording( m_recording );
+	m_recording = nullptr;
 }
 
 void Sample::CreateWorld()
 {
 	if ( B2_IS_NON_NULL( m_worldId ) )
 	{
+		FinishRecording();
 		b2DestroyWorld( m_worldId );
 		m_worldId = b2_nullWorldId;
 	}
@@ -317,7 +400,7 @@ void Sample::ResetText()
 
 struct QueryContext
 {
-	b2Vec2 point;
+	b2Pos point;
 	b2BodyId bodyId = b2_nullBodyId;
 };
 
@@ -344,7 +427,7 @@ bool QueryCallback( b2ShapeId shapeId, void* context )
 	return true;
 }
 
-void Sample::MouseDown( b2Vec2 p, int button, int mod )
+void Sample::MouseDown( b2Pos p, int button, int mod )
 {
 	if ( B2_IS_NON_NULL( m_mouseJointId ) )
 	{
@@ -353,17 +436,15 @@ void Sample::MouseDown( b2Vec2 p, int button, int mod )
 
 	if ( button == GLFW_MOUSE_BUTTON_1 )
 	{
-		// Make a small box.
-		b2AABB box;
+		// A tiny box around the click point, exact at any distance with the click as the origin
 		b2Vec2 d = { 0.001f, 0.001f };
-		box.lowerBound = b2Sub( p, d );
-		box.upperBound = b2Add( p, d );
+		b2AABB box = { b2Neg( d ), d };
 
 		m_mousePoint = p;
 
 		// Query the world for overlapping shapes.
 		QueryContext queryContext = { p, b2_nullBodyId };
-		b2World_OverlapAABB( m_worldId, box, b2DefaultQueryFilter(), QueryCallback, &queryContext );
+		b2World_OverlapAABB( m_worldId, p, box, b2DefaultQueryFilter(), QueryCallback, &queryContext );
 
 		if ( B2_IS_NON_NULL( queryContext.bodyId ) )
 		{
@@ -398,7 +479,7 @@ void Sample::MouseDown( b2Vec2 p, int button, int mod )
 	}
 }
 
-void Sample::MouseUp( b2Vec2 p, int button )
+void Sample::MouseUp( b2Pos p, int button )
 {
 	if ( B2_IS_NON_NULL( m_mouseJointId ) && button == GLFW_MOUSE_BUTTON_1 )
 	{
@@ -410,7 +491,7 @@ void Sample::MouseUp( b2Vec2 p, int button )
 	}
 }
 
-void Sample::MouseMove( b2Vec2 p )
+void Sample::MouseMove( b2Pos p )
 {
 	if ( b2Joint_IsValid( m_mouseJointId ) == false )
 	{
@@ -436,6 +517,10 @@ void Sample::DrawScreenTextLine( const char* text, ... )
 void Sample::ResetProfile()
 {
 	m_stepCount = 0;
+	memset( m_profiles, 0, sizeof( m_profiles ) );
+	m_currentProfileIndex = 0;
+	m_profileReadIndex = 0;
+	m_profileWriteIndex = 0;
 }
 
 void Sample::Step()
@@ -453,12 +538,6 @@ void Sample::Step()
 		else
 		{
 			timeStep = 0.0f;
-		}
-
-		if ( m_context->showUI )
-		{
-			DrawScreenTextLine( "****PAUSED****" );
-			DrawScreenTextLine( "" );
 		}
 	}
 
@@ -481,6 +560,7 @@ void Sample::Step()
 	}
 
 	m_context->debugDraw.drawingBounds = GetViewBounds( &m_context->camera );
+
 	b2World_EnableSleeping( m_worldId, m_context->enableSleep );
 	b2World_EnableWarmStarting( m_worldId, m_context->enableWarmStarting );
 	b2World_EnableContinuous( m_worldId, m_context->enableContinuous );
@@ -536,7 +616,7 @@ void Sample::DrawMetrics()
 	}
 
 	float fontSize = ImGui::GetFontSize();
-	float menuWidth = 14.0f * fontSize;
+	float menuWidth = INFO_PANEL_WIDTH * fontSize;
 	float drawerHeight = 16.0f * fontSize;
 	float drawerWidth = m_camera->width - menuWidth - 1.5f * fontSize;
 
@@ -865,7 +945,7 @@ void Sample::DrawMetrics()
 				ImGui::Text( "joints   %d", s.jointCount );
 				ImGui::Text( "islands/tasks %d / %d", s.islandCount, s.taskCount );
 				ImGui::Text( "tree height static/movable %d / %d", s.staticTreeHeight, s.treeHeight );
-				ImGui::Text( "alloc %d K   stack %d K", s.byteCount / 1024, s.stackUsed / 1024 );
+				ImGui::Text( "alloc %lld K   stack %d K", (long long)( s.byteCount / 1024 ), s.stackUsed / 1024 );
 
 				{
 					float frac = s.awakeContactCount > 0
@@ -934,10 +1014,31 @@ void Sample::DrawMetrics()
 			ImGui::EndTabItem();
 		}
 
+		DrawMetricsTab();
+
 		ImGui::EndTabBar();
 	}
 
 	ImGui::End();
+}
+
+void Sample::DrawHud( float frameTime )
+{
+	const SampleEntry& entry = g_sampleEntries[m_context->sampleIndex];
+	float fontSize = ImGui::GetFontSize();
+
+	DrawScreenString( m_context->draw, 5.0f, 1.5f * fontSize, b2_colorYellow, "%s : %s", entry.category, entry.name );
+	DrawScreenString( m_context->draw, 5.0f, 3.0f * fontSize, b2_colorForestGreen, "Press TAB to show UI" );
+	m_screenTextY += 1.5f * fontSize;
+
+	if ( m_context->pause )
+	{
+		DrawScreenString( m_context->draw, 5.0f, 4.5f * fontSize, b2_colorRed, "****PAUSED****" );
+		m_screenTextY += 1.5f * fontSize;
+	}
+
+	DrawScreenString( m_context->draw, 5.0f, m_camera->height - 0.5f * fontSize, b2_colorSeaGreen, "%.1f ms  step %d",
+					  1000.0f * frameTime, m_stepCount );
 }
 
 // Parse an SVG path element with only straight lines. Example:
@@ -1126,6 +1227,7 @@ static int FuzzyScore( const char* needle, const char* haystack )
 
 SampleEntry g_sampleEntries[MAX_SAMPLES] = {};
 int g_sampleCount = 0;
+int g_replayIndex = -1;
 
 int RegisterSample( const char* category, const char* name, SampleCreateFcn* fcn )
 {
@@ -1146,6 +1248,20 @@ int RegisterSampleWithCapacity( const char* category, const char* name, SampleCr
 	if ( index < MAX_SAMPLES )
 	{
 		g_sampleEntries[index] = { category, name, fcn, capacityFcn };
+		++g_sampleCount;
+		return index;
+	}
+
+	return -1;
+}
+
+int RegisterReplay( const char* category, const char* name, SampleCreateFcn* fcn )
+{
+	int index = g_sampleCount;
+	if ( index < MAX_SAMPLES )
+	{
+		g_sampleEntries[index] = { category, name, fcn, nullptr };
+		g_replayIndex = index;
 		++g_sampleCount;
 		return index;
 	}
@@ -1322,7 +1438,27 @@ static void DrawMenuBar( SampleContext* context )
 			ImGui::EndMenu();
 		}
 
-		static bool showHelp = false;
+		// Only present once the replay viewer is registered. Open pops a native picker, then
+		// hands the chosen file to the viewer through replayFile.
+		if ( g_replayIndex >= 0 && ImGui::BeginMenu( "Replay" ) )
+		{
+			if ( ImGui::MenuItem( "Open..." ) )
+			{
+				NFD_Init();
+				nfdu8char_t* outPath = nullptr;
+				nfdu8filteritem_t filter[1] = { { "Box2D recording", "b2rec" } };
+				if ( NFD_OpenDialogU8( &outPath, filter, 1, nullptr ) == NFD_OKAY )
+				{
+					snprintf( context->replayFile, sizeof( context->replayFile ), "%s", outPath );
+					NFD_FreePathU8( outPath );
+					SelectSample( context, g_replayIndex, false );
+				}
+				NFD_Quit();
+			}
+			ImGui::EndMenu();
+		}
+
+		static bool showHelp = context->newUser;
 		static bool showAbout = false;
 		if ( ImGui::BeginMenu( "Help" ) )
 		{
@@ -1355,7 +1491,7 @@ static void DrawMenuBar( SampleContext* context )
 				{
 					DrawRow( "Tab", "Show / hide UI" );
 					DrawRow( "M", "Show / hide diagnostics" );
-					DrawRow( "P", "Pause / resume" );
+					DrawRow( "Space", "Pause / resume" );
 					DrawRow( "O", "Single step" );
 					DrawRow( "R", "Restart sample" );
 					DrawRow( "[  ]", "Previous / next sample" );
@@ -1550,28 +1686,11 @@ void DrawSamplePicker( SampleContext* context )
 	}
 }
 
-// When UI is hidden draw a minimal in world hud
-static void DrawHud( SampleContext* context, float frameTime )
+static void DrawInfoPanel( SampleContext* context, float frameTime )
 {
 	const SampleEntry& entry = g_sampleEntries[context->sampleIndex];
 	float fontSize = ImGui::GetFontSize();
-
-	DrawScreenString( context->draw, 5.0f, 1.5f * fontSize, b2_colorYellow, "%s : %s", entry.category, entry.name );
-	DrawScreenString( context->draw, 5.0f, context->camera.height - 0.5f * fontSize, b2_colorSeaGreen, "%.1f ms  step %d",
-					  1000.0f * frameTime, context->sample->m_stepCount );
-}
-
-static inline ImVec4 MakeColor( b2HexColor hexColor )
-{
-	ImU32 color = IM_COL32( ( hexColor >> 16 ) & 0xFF, ( hexColor >> 8 ) & 0xFF, hexColor & 0xFF, 255 );
-	return ImGui::ColorConvertU32ToFloat4( color );
-}
-
-static void DrawRightPanel( SampleContext* context, float frameTime )
-{
-	const SampleEntry& entry = g_sampleEntries[context->sampleIndex];
-	float fontSize = ImGui::GetFontSize();
-	float menuWidth = 14.0f * fontSize;
+	float menuWidth = INFO_PANEL_WIDTH * fontSize;
 	float menuBarHeight = ImGui::GetFrameHeight();
 
 	ImGui::SetNextWindowPos( { context->camera.width - menuWidth - 0.5f * fontSize, menuBarHeight + 0.5f * fontSize } );
@@ -1584,6 +1703,15 @@ static void DrawRightPanel( SampleContext* context, float frameTime )
 	ImGui::TextColored( MakeColor( b2_colorGoldenRod ), "%s", entry.name );
 	ImGui::TextColored( MakeColor( b2_colorLightGray ), "%s", entry.category );
 	ImGui::Separator();
+
+	if ( context->pause )
+	{
+		ImGui::TextColored( MakeColor( b2_colorRed ), "PAUSED" );
+		ImGui::SameLine();
+		ImGui::TextDisabled( "(space)" );
+		ImGui::Separator();
+	}
+
 	ImGui::TextColored( MakeColor( b2_colorSeaGreen ), "%.1f ms", 1000.0f * frameTime );
 	ImGui::TextColored( MakeColor( b2_colorSeaGreen ), "step %d", context->sample->m_stepCount );
 	ImGui::Separator();
@@ -1592,34 +1720,67 @@ static void DrawRightPanel( SampleContext* context, float frameTime )
 
 	ImGui::Separator();
 
+	ImGui::PushItemWidth( 6.0f * fontSize );
 	if ( context->sample->DrawControls() )
 	{
 		ImGui::Separator();
 	}
+	ImGui::PopItemWidth();
 
-	if ( ImGui::CollapsingHeader( "Solver", ImGuiTreeNodeFlags_DefaultOpen ) )
+	if ( context->sample->HasSolverControls() && ImGui::CollapsingHeader( "Solver", ImGuiTreeNodeFlags_DefaultOpen ) )
 	{
 		ImGui::PushItemWidth( 6.0f * fontSize );
-		ImGui::SliderInt( "Sub-steps", &context->subStepCount, 1, 32 );
-		ImGui::SliderFloat( "Hertz", &context->hertz, 5.0f, 240.0f, "%.0f hz" );
+		ImGui::SliderInt( "Sub-steps##Solver", &context->subStepCount, 1, 32 );
+		ImGui::SliderFloat( "Hertz##Solver", &context->hertz, 5.0f, 240.0f, "%.0f hz" );
 
-		if ( ImGui::SliderInt( "Workers", &context->workerCount, 1, B2_MAX_WORKERS ) )
+		if ( ImGui::SliderInt( "Workers##Solver", &context->workerCount, 1, B2_MAX_WORKERS ) )
 		{
 			context->workerCount = b2ClampInt( context->workerCount, 1, B2_MAX_WORKERS );
 			SelectSample( context, context->sampleIndex, true );
 		}
 
 		float recyclingCentimeters = 100.0f * context->recycleDistance;
-		if ( ImGui::SliderFloat( "Recycle", &recyclingCentimeters, 0.0f, 10.0f, "%.1f cm" ) )
+		if ( ImGui::SliderFloat( "Recycle##Solver", &recyclingCentimeters, 0.0f, 10.0f, "%.1f cm" ) )
 		{
 			context->recycleDistance = 0.01f * recyclingCentimeters;
 			b2World_SetContactRecycleDistance( context->sample->m_worldId, context->recycleDistance );
 		}
 		ImGui::PopItemWidth();
 
-		ImGui::Checkbox( "Sleep", &context->enableSleep );
-		ImGui::Checkbox( "Warm Starting", &context->enableWarmStarting );
-		ImGui::Checkbox( "Continuous", &context->enableContinuous );
+		ImGui::Checkbox( "Sleep##Solver", &context->enableSleep );
+		ImGui::Checkbox( "Warm Starting##Solver", &context->enableWarmStarting );
+		ImGui::Checkbox( "Continuous##Solver", &context->enableContinuous );
+	}
+
+	if ( context->sample->HasSolverControls() && ImGui::CollapsingHeader( "Recording", ImGuiTreeNodeFlags_DefaultOpen ) )
+	{
+		ImGui::PushItemWidth( 9.0f * fontSize );
+		ImGui::InputText( "File##Recording", context->recordingFile, sizeof( context->recordingFile ) );
+		ImGui::PopItemWidth();
+
+		if ( context->sample->m_recording == nullptr )
+		{
+			// Restart to a clean world then snapshot it at step 0, a whole session capture
+			if ( ImGui::Button( "Record (restart)##Recording" ) )
+			{
+				SelectSample( context, context->sampleIndex, true );
+				context->sample->StartRecording();
+			}
+
+			// Snapshot the running world and log from here, the mid simulation case
+			if ( ImGui::Button( "Record Now##Recording" ) )
+			{
+				context->sample->StartRecording();
+			}
+		}
+		else
+		{
+			if ( ImGui::Button( "Stop##Recording" ) )
+			{
+				context->sample->FinishRecording();
+			}
+			ImGui::TextColored( MakeColor( b2_colorSeaGreen ), "recording (from step %d)", context->sample->m_recordStartStep );
+		}
 	}
 
 	ImGui::End();
@@ -1629,15 +1790,8 @@ static void DrawRightPanel( SampleContext* context, float frameTime )
 // this can delete the current sample.
 void DrawUI( SampleContext* context, float frameTime )
 {
-	if ( context->showUI == false )
-	{
-		// Minimal hud
-		DrawHud( context, frameTime );
-		return;
-	}
-
 	DrawMenuBar( context );
 	DrawSamplePicker( context );
-	DrawRightPanel( context, frameTime );
+	DrawInfoPanel( context, frameTime );
 	context->sample->DrawMetrics();
 }

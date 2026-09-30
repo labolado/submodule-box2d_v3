@@ -5,6 +5,7 @@
 #include "core.h"
 #include "joint.h"
 #include "physics_world.h"
+#include "recording.h"
 #include "solver.h"
 #include "solver_set.h"
 
@@ -74,6 +75,8 @@ static bool b2SolveWeld33( const b2WeldMat33* m, b2WeldVec3 b, b2WeldVec3* resul
 
 void b2WeldJoint_SetLinearHertz( b2JointId jointId, float hertz )
 {
+	b2World* world = b2GetWorld( jointId.world0 );
+	B2_REC( world, WeldJointSetLinearHertz, jointId, hertz );
 	B2_ASSERT( b2IsValidFloat( hertz ) && hertz >= 0.0f );
 	b2JointSim* joint = b2GetJointSimCheckType( jointId, b2_weldJoint );
 	joint->weldJoint.linearHertz = hertz;
@@ -87,6 +90,8 @@ float b2WeldJoint_GetLinearHertz( b2JointId jointId )
 
 void b2WeldJoint_SetLinearDampingRatio( b2JointId jointId, float dampingRatio )
 {
+	b2World* world = b2GetWorld( jointId.world0 );
+	B2_REC( world, WeldJointSetLinearDampingRatio, jointId, dampingRatio );
 	B2_ASSERT( b2IsValidFloat( dampingRatio ) && dampingRatio >= 0.0f );
 	b2JointSim* joint = b2GetJointSimCheckType( jointId, b2_weldJoint );
 	joint->weldJoint.linearDampingRatio = dampingRatio;
@@ -100,6 +105,8 @@ float b2WeldJoint_GetLinearDampingRatio( b2JointId jointId )
 
 void b2WeldJoint_SetAngularHertz( b2JointId jointId, float hertz )
 {
+	b2World* world = b2GetWorld( jointId.world0 );
+	B2_REC( world, WeldJointSetAngularHertz, jointId, hertz );
 	B2_ASSERT( b2IsValidFloat( hertz ) && hertz >= 0.0f );
 	b2JointSim* joint = b2GetJointSimCheckType( jointId, b2_weldJoint );
 	joint->weldJoint.angularHertz = hertz;
@@ -113,6 +120,8 @@ float b2WeldJoint_GetAngularHertz( b2JointId jointId )
 
 void b2WeldJoint_SetAngularDampingRatio( b2JointId jointId, float dampingRatio )
 {
+	b2World* world = b2GetWorld( jointId.world0 );
+	B2_REC( world, WeldJointSetAngularDampingRatio, jointId, dampingRatio );
 	B2_ASSERT( b2IsValidFloat( dampingRatio ) && dampingRatio >= 0.0f );
 	b2JointSim* joint = b2GetJointSimCheckType( jointId, b2_weldJoint );
 	joint->weldJoint.angularDampingRatio = dampingRatio;
@@ -213,7 +222,7 @@ void b2PrepareWeldJoint( b2JointSim* base, b2StepContext* context )
 	joint->frameB.p = b2RotateVector( bodySimB->transform.q, b2Sub( base->localFrameB.p, bodySimB->localCenter ) );
 
 	// Compute the initial center delta. Incremental position updates are relative to this.
-	joint->deltaCenter = b2Sub( bodySimB->center, bodySimA->center );
+	joint->deltaCenter = b2SubPos( bodySimB->center, bodySimA->center );
 
 	float ka = iA + iB;
 	joint->axialMass = ka > 0.0f ? 1.0f / ka : 0.0f;
@@ -454,46 +463,15 @@ void b2SolveWeldJoint( b2JointSim* base, b2StepContext* context, bool useBias )
 	}
 }
 
-#if 0
-void b2DumpWeldJoint()
-{
-	int32 indexA = bodyA->islandIndex;
-	int32 indexB = bodyB->islandIndex;
-
-	b2Dump("  b2WeldJointDef jd;\n");
-	b2Dump("  jd.bodyA = sims[%d];\n", indexA);
-	b2Dump("  jd.bodyB = sims[%d];\n", indexB);
-	b2Dump("  jd.collideConnected = bool(%d);\n", collideConnected);
-	b2Dump("  jd.localAnchorA.Set(%.9g, %.9g);\n", localAnchorA.x, localAnchorA.y);
-	b2Dump("  jd.localAnchorB.Set(%.9g, %.9g);\n", localAnchorB.x, localAnchorB.y);
-	b2Dump("  jd.referenceAngle = %.9g;\n", referenceAngle);
-	b2Dump("  jd.stiffness = %.9g;\n", stiffness);
-	b2Dump("  jd.damping = %.9g;\n", damping);
-	b2Dump("  joints[%d] = world->CreateJoint(&jd);\n", index);
-}
-#endif
-
-void b2DrawWeldJoint( b2DebugDraw* draw, b2JointSim* base, b2Transform transformA, b2Transform transformB, float drawScale )
+void b2DrawWeldJoint( b2DebugDraw* draw, b2JointSim* base, b2WorldTransform transformA, b2WorldTransform transformB,
+					  float drawScale )
 {
 	B2_ASSERT( base->type == b2_weldJoint );
 
-	b2Transform frameA = b2MulTransforms( transformA, base->localFrameA );
-	b2Transform frameB = b2MulTransforms( transformB, base->localFrameB );
+	b2WorldTransform frameA = b2OffsetWorldTransform( transformA, base->localFrameA );
+	b2WorldTransform frameB = b2OffsetWorldTransform( transformB, base->localFrameB );
 
 	b2Polygon box = b2MakeBox( 0.25f * drawScale, 0.125f * drawScale );
-
-	b2Vec2 points[4];
-
-	for ( int i = 0; i < 4; ++i )
-	{
-		points[i] = b2TransformPoint( frameA, box.vertices[i] );
-	}
-	draw->DrawPolygonFcn( points, 4, b2_colorDarkOrange, draw->context );
-
-	for ( int i = 0; i < 4; ++i )
-	{
-		points[i] = b2TransformPoint( frameB, box.vertices[i] );
-	}
-
-	draw->DrawPolygonFcn( points, 4, b2_colorDarkCyan, draw->context );
+	draw->DrawPolygonFcn( frameA, box.vertices, 4, b2_colorDarkOrange, draw->context );
+	draw->DrawPolygonFcn( frameB, box.vertices, 4, b2_colorDarkCyan, draw->context );
 }
