@@ -156,7 +156,16 @@ static inline uint32_t b2AtomicFetchOrU32( uint32_t* a, uint32_t mask )
 
 static inline int64_t b2AtomicFetchAddI64( b2AtomicI64* a, int64_t increment )
 {
-#if defined( _MSC_VER )
+#if defined( _MSC_VER ) && defined( _M_IX86 )
+	// 32-bit x86 MSVC has no _InterlockedExchangeAdd64: compare-exchange loop instead
+	__int64 old;
+	do
+	{
+		old = a->value;
+	}
+	while ( _InterlockedCompareExchange64( (__int64*)&a->value, old + (__int64)increment, old ) != old );
+	return (int64_t)old;
+#elif defined( _MSC_VER )
 	return (int64_t)_InterlockedExchangeAdd64( (__int64*)&a->value, (__int64)increment );
 #elif defined( __GNUC__ ) || defined( __clang__ )
 	return __atomic_fetch_add( &a->value, increment, __ATOMIC_SEQ_CST );
@@ -167,7 +176,10 @@ static inline int64_t b2AtomicFetchAddI64( b2AtomicI64* a, int64_t increment )
 
 static inline int64_t b2AtomicLoadI64( b2AtomicI64* a )
 {
-#if defined( _MSC_VER ) && !defined( __clang__ ) && !defined( _M_ARM )
+#if defined( _MSC_VER ) && defined( _M_IX86 )
+	// 32-bit x86: an atomic 64-bit read through compare-exchange, which x86 MSVC supports
+	return (int64_t)_InterlockedCompareExchange64( (__int64*)&a->value, 0, 0 );
+#elif defined( _MSC_VER ) && !defined( __clang__ ) && !defined( _M_ARM )
 	int64_t value = __iso_volatile_load64( (volatile __int64*)&a->value );
 #if defined( _M_ARM64 ) || defined( _M_ARM64EC )
 	__dmb( 0xB );
