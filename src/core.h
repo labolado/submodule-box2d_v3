@@ -185,7 +185,8 @@ typedef struct b2AtomicU32
 typedef struct b2AtomicI64
 {
 	// 64-bit atomic wants 8-byte alignment
-	_Alignas( 8 ) int64_t value;
+	// B2_ALIGN_AS: core.h is also included from C++ (LiquidFun), where MSVC rejects _Alignas
+	B2_ALIGN_AS( 8 ) int64_t value;
 } b2AtomicI64;
 
 // Use 64 byte alignment for everything. Needed for tree nodes.

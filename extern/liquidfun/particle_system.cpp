@@ -22,7 +22,6 @@
 #include "particle_assembly.h"
 #include "block_allocator.h"
 extern "C" {
-#include "src/core.h"
 #include "box2d/constants.h"
 }
 #include "liquid_world.h"
