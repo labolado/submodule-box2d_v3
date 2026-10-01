@@ -136,6 +136,19 @@
 #define B2_TYPE_OF( A ) __typeof__( A )
 #endif
 
+#if !defined( __cplusplus ) && defined( _MSC_VER ) && !defined( __clang__ )
+// Older MSVC (e.g. the v142 toolset) has no __typeof__ in C, so swap the bytes instead
+#include <string.h>
+#define B2_SWAP( x, y )                                                                                                          \
+	do                                                                                                                           \
+	{                                                                                                                            \
+		unsigned char B2_SWAP_TEMP[sizeof( x )];                                                                                 \
+		memcpy( B2_SWAP_TEMP, &( x ), sizeof( x ) );                                                                             \
+		memcpy( &( x ), &( y ), sizeof( x ) );                                                                                   \
+		memcpy( &( y ), B2_SWAP_TEMP, sizeof( x ) );                                                                             \
+	}                                                                                                                            \
+	while ( 0 )
+#else
 #define B2_SWAP( x, y )                                                                                                          \
 	do                                                                                                                           \
 	{                                                                                                                            \
@@ -144,6 +157,7 @@
 		y = B2_SWAP_TEMP;                                                                                                        \
 	}                                                                                                                            \
 	while ( 0 )
+#endif
 
 #define B2_CHECK_DEF( DEF ) B2_ASSERT( DEF->internalValue == B2_SECRET_COOKIE )
 
