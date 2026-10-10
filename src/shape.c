@@ -6,6 +6,7 @@
 #include "body.h"
 #include "broad_phase.h"
 #include "contact.h"
+#include "liquidfun_query.h"
 #include "physics_world.h"
 #include "recording.h"
 #include "sensor.h"
@@ -1993,32 +1994,32 @@ b2Pos b2Shape_GetClosestPoint( b2ShapeId shapeId, b2Pos target )
 	return b2TransformWorldPoint( transform, output.pointA );
 }
 
-void b2Shape_ComputeDistance( b2ShapeId shapeId, b2Vec2 target, float* distance, b2Vec2* normal ) {
+bool b2PrepareLiquidShapeQuery( b2ShapeId shapeId, b2LiquidShapeQuery* query )
+{
 	b2World* world = b2GetWorld( shapeId.world0 );
 	if ( world == NULL )
 	{
-		return;
+		return false;
 	}
 
 	b2Shape* shape = b2GetShape( world, shapeId );
 	b2Body* body = b2Array_Get( world->bodies, shape->bodyId );
-	b2WorldTransform transform = b2GetBodyTransformQuick( world, body );
+	query->transform = b2GetBodyTransformQuick( world, body );
 
 	// Same as b2Shape_GetClosestPoint: the target is the frame of proxy B and the result is in frame A
 	b2Vec2 zero = b2Vec2_zero;
-	b2WorldTransform targetTransform = { b2ToPos( target ), b2Rot_identity };
+	query->input.proxyA = b2MakeShapeDistanceProxy( shape );
+	query->input.proxyB = b2MakeProxy( &zero, 1, 0.0f );
+	query->input.useRadii = true;
+	return true;
+}
 
-	b2DistanceInput input;
-	input.proxyA = b2MakeShapeDistanceProxy( shape );
-	input.proxyB = b2MakeProxy( &zero, 1, 0.0f );
-	input.transform = b2InvMulWorldTransforms( transform, targetTransform );
-	input.useRadii = true;
-
-	b2SimplexCache cache = { 0 };
-	b2DistanceOutput output = b2ShapeDistance( &input, &cache, NULL, 0 );
-
-	*distance = output.distance;
-	*normal = b2RotateVector( transform.q, b2Normalize( b2Sub( output.pointB, output.pointA ) ) );
+void b2Shape_ComputeDistance( b2ShapeId shapeId, b2Vec2 target, float* distance, b2Vec2* normal ) {
+	b2LiquidShapeQuery query;
+	if ( b2PrepareLiquidShapeQuery( shapeId, &query ) )
+	{
+		b2ComputeLiquidShapeDistance( &query, target, distance, normal );
+	}
 }
 
 // https://en.wikipedia.org/wiki/Density_of_air
