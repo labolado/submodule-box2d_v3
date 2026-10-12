@@ -21,12 +21,13 @@ b2LiquidWorld::b2LiquidWorld( b2WorldId worldId )
 
 b2LiquidWorld::~b2LiquidWorld()
 {
-	m_worldId = b2_nullWorldId;
-
+	// DestroyParticleSystem checks the underlying world lock. Its ID must
+	// remain valid until all particle systems have been released.
 	while (m_particleSystemList)
 	{
 		DestroyParticleSystem(m_particleSystemList);
 	}
+	m_worldId = b2_nullWorldId;
 
 	// Even though the block allocator frees them for us, for safety,
 	// we should ensure that all buffers have been freed.
