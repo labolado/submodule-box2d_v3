@@ -115,7 +115,9 @@ namespace // anonymous namespace.
 					// if (fixture->GetShape()->GetType() == b2Shape::e_circle)
 					if (b2Shape_GetType(shapeId) == b2_circleShape)
 					{
-						b2Vec2 bodyLocalCenter = b2Body_GetWorldCenter(bodyId);
+						// p1 is in body-local space; a world-space centre makes
+						// the collision response depend on the scene translation.
+						b2Vec2 bodyLocalCenter = b2Body_GetLocalCenter(bodyId);
 						// Make relative to the center of the circle
 						p1 -= bodyLocalCenter;
 						// Re-apply rotation about the center of the
