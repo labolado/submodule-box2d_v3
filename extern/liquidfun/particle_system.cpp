@@ -138,7 +138,10 @@ namespace // anonymous namespace.
 				b2Vec2 p2 = ap + queryContext->step.dt * av;
 				b2WorldCastOutput output = b2Shape_RayCast(shapeId, p1, p2 - p1);
 				// if (fixture->RayCast(&output, input, childIndex))
-				if (output.hit)
+				// v3 reports initial overlap as a zero-normal hit at fraction zero.
+				// Legacy casts ignored it: pressure must be allowed to push the
+				// particle out instead of replacing that velocity with body motion.
+				if (output.hit && b2LengthSquared(output.normal) > 0.0f)
 				{
 					b2Vec2 n = output.normal;
 					b2Vec2 p =
