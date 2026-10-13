@@ -1993,7 +1993,36 @@ b2Pos b2Shape_GetClosestPoint( b2ShapeId shapeId, b2Pos target )
 	return b2TransformWorldPoint( transform, output.pointA );
 }
 
-void b2Shape_ComputeDistance( b2ShapeId shapeId, b2Vec2 target, float* distance, b2Vec2* normal ) {
+// LiquidFun needs signed separation and an outward normal, including when a
+// particle has crossed the surface. GJK with radii collapses overlapping witness
+// points and cannot provide this contract. Keep the general distance API unchanged.
+static b2Vec2 b2LiquidClosestSegmentPoint( b2Vec2 a, b2Vec2 b, b2Vec2 p )
+{
+	b2Vec2 edge = b2Sub( b, a );
+	float lengthSquared = b2LengthSquared( edge );
+	float fraction = lengthSquared > 0.0f ? b2ClampFloat( b2Dot( b2Sub( p, a ), edge ) / lengthSquared, 0.0f, 1.0f ) : 0.0f;
+	return b2MulAdd( a, fraction, edge );
+}
+
+static void b2LiquidSegmentDistance( b2Vec2 a, b2Vec2 b, float radius, b2Vec2 p, float* distance, b2Vec2* normal )
+{
+	b2Vec2 delta = b2Sub( p, b2LiquidClosestSegmentPoint( a, b, p ) );
+	float length = b2Length( delta );
+	*distance = length - radius;
+	if ( length > 0.0f )
+	{
+		*normal = b2MulSV( 1.0f / length, delta );
+	}
+	else
+	{
+		// The normal is not unique on the centre line. Choose a finite unit normal.
+		b2Vec2 edge = b2Sub( b, a );
+		*normal = b2LengthSquared( edge ) > 0.0f ? b2Normalize( b2RightPerp( edge ) ) : (b2Vec2){ 1.0f, 0.0f };
+	}
+}
+
+void b2Shape_ComputeDistance( b2ShapeId shapeId, b2Vec2 target, float* distance, b2Vec2* normal )
+{
 	b2World* world = b2GetWorld( shapeId.world0 );
 	if ( world == NULL )
 	{
@@ -2003,22 +2032,72 @@ void b2Shape_ComputeDistance( b2ShapeId shapeId, b2Vec2 target, float* distance,
 	b2Shape* shape = b2GetShape( world, shapeId );
 	b2Body* body = b2Array_Get( world->bodies, shape->bodyId );
 	b2WorldTransform transform = b2GetBodyTransformQuick( world, body );
+	b2Vec2 p = b2InvTransformWorldPoint( transform, b2ToPos( target ) );
+	b2Vec2 localNormal;
 
-	// Same as b2Shape_GetClosestPoint: the target is the frame of proxy B and the result is in frame A
-	b2Vec2 zero = b2Vec2_zero;
-	b2WorldTransform targetTransform = { b2ToPos( target ), b2Rot_identity };
-
-	b2DistanceInput input;
-	input.proxyA = b2MakeShapeDistanceProxy( shape );
-	input.proxyB = b2MakeProxy( &zero, 1, 0.0f );
-	input.transform = b2InvMulWorldTransforms( transform, targetTransform );
-	input.useRadii = true;
-
-	b2SimplexCache cache = { 0 };
-	b2DistanceOutput output = b2ShapeDistance( &input, &cache, NULL, 0 );
-
-	*distance = output.distance;
-	*normal = b2RotateVector( transform.q, b2Normalize( b2Sub( output.pointB, output.pointA ) ) );
+	switch ( shape->type )
+	{
+		case b2_circleShape:
+			b2LiquidSegmentDistance( shape->circle.center, shape->circle.center, shape->circle.radius, p, distance, &localNormal );
+			break;
+		case b2_capsuleShape:
+			b2LiquidSegmentDistance( shape->capsule.center1, shape->capsule.center2, shape->capsule.radius, p, distance, &localNormal );
+			break;
+		case b2_segmentShape:
+			b2LiquidSegmentDistance( shape->segment.point1, shape->segment.point2, 0.0f, p, distance, &localNormal );
+			break;
+		case b2_chainSegmentShape:
+			// As in legacy ComputeDistance, an edge has no solid interior. This
+			// distance query does not change the chain's rigid-body one-sided policy.
+			b2LiquidSegmentDistance( shape->chainSegment.segment.point1, shape->chainSegment.segment.point2, 0.0f, p, distance, &localNormal );
+			break;
+		case b2_polygonShape:
+		{
+			const b2Polygon* polygon = &shape->polygon;
+			float separation = -FLT_MAX;
+			int face = 0;
+			for ( int i = 0; i < polygon->count; ++i )
+			{
+				float d = b2Dot( polygon->normals[i], b2Sub( p, polygon->vertices[i] ) );
+				if ( d > separation )
+				{
+					separation = d;
+					face = i;
+				}
+			}
+			localNormal = polygon->normals[face];
+			*distance = separation - polygon->radius;
+			if ( separation > 0.0f )
+			{
+				float nearestSquared = FLT_MAX;
+				b2Vec2 nearestDelta = b2Vec2_zero;
+				for ( int i = 0; i < polygon->count; ++i )
+				{
+					b2Vec2 closest = b2LiquidClosestSegmentPoint( polygon->vertices[i], polygon->vertices[( i + 1 ) % polygon->count], p );
+					b2Vec2 delta = b2Sub( p, closest );
+					float lengthSquared = b2LengthSquared( delta );
+					if ( lengthSquared < nearestSquared )
+					{
+						nearestSquared = lengthSquared;
+						nearestDelta = delta;
+					}
+				}
+				float length = sqrtf( nearestSquared );
+				*distance = length - polygon->radius;
+				if ( length > FLT_EPSILON )
+				{
+					localNormal = b2MulSV( 1.0f / length, nearestDelta );
+				}
+			}
+			break;
+		}
+		default:
+			B2_ASSERT( false );
+			*distance = FLT_MAX;
+			localNormal = b2Vec2_zero;
+			break;
+	}
+	*normal = b2RotateVector( transform.q, localNormal );
 }
 
 // https://en.wikipedia.org/wiki/Density_of_air
