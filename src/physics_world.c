@@ -18,6 +18,7 @@
 #include "dynamic_tree.h"
 #include "island.h"
 #include "joint.h"
+#include "liquidfun_query.h"
 #include "parallel_for.h"
 #include "platform.h"
 #include "recording.h"
@@ -2146,6 +2147,33 @@ void b2World_SetWorkerCount( b2WorldId worldId, int count )
 	b2DestroyWorkerContexts( world );
 	world->workerCount = b2ClampInt( count, 1, B2_MAX_WORKERS );
 	b2CreateWorkerContexts( world );
+}
+
+int b2GetLiquidWorkerCount( b2WorldId worldId )
+{
+	return b2GetWorldFromId( worldId )->workerCount;
+}
+
+typedef struct b2LiquidTaskContext
+{
+	b2TaskCallback* callback;
+	void** contexts;
+} b2LiquidTaskContext;
+
+static void b2RunLiquidTaskRange( int startIndex, int endIndex, int workerIndex, void* context )
+{
+	B2_UNUSED( workerIndex );
+	b2LiquidTaskContext* tasks = context;
+	for ( int i = startIndex; i < endIndex; ++i )
+	{
+		tasks->callback( tasks->contexts[i] );
+	}
+}
+
+void b2RunLiquidTasks( b2WorldId worldId, b2TaskCallback* callback, void** contexts, int count )
+{
+	b2LiquidTaskContext tasks = { callback, contexts };
+	b2ParallelFor( b2GetWorldFromId( worldId ), b2RunLiquidTaskRange, count, 1, &tasks );
 }
 
 int b2World_GetWorkerCount( b2WorldId worldId )

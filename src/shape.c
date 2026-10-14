@@ -6,6 +6,7 @@
 #include "body.h"
 #include "broad_phase.h"
 #include "contact.h"
+#include "liquidfun_query.h"
 #include "physics_world.h"
 #include "recording.h"
 #include "sensor.h"
@@ -2021,39 +2022,55 @@ static void b2LiquidSegmentDistance( b2Vec2 a, b2Vec2 b, float radius, b2Vec2 p,
 	}
 }
 
-void b2Shape_ComputeDistance( b2ShapeId shapeId, b2Vec2 target, float* distance, b2Vec2* normal )
+bool b2PrepareLiquidShapeQuery( b2ShapeId shapeId, b2LiquidShapeQuery* query )
 {
 	b2World* world = b2GetWorld( shapeId.world0 );
 	if ( world == NULL )
 	{
-		return;
+		return false;
 	}
-
 	b2Shape* shape = b2GetShape( world, shapeId );
 	b2Body* body = b2Array_Get( world->bodies, shape->bodyId );
-	b2WorldTransform transform = b2GetBodyTransformQuick( world, body );
+	query->transform = b2GetBodyTransformQuick( world, body );
+	query->type = shape->type;
+	switch ( shape->type )
+	{
+		case b2_circleShape: query->circle = shape->circle; break;
+		case b2_capsuleShape: query->capsule = shape->capsule; break;
+		case b2_polygonShape: query->polygon = shape->polygon; break;
+		case b2_segmentShape: query->segment = shape->segment; break;
+		case b2_chainSegmentShape: query->segment = shape->chainSegment.segment; break;
+		default: return false;
+	}
+	return true;
+}
+
+// Cached and uncached LiquidFun queries share the same signed-distance contract.
+void b2ComputeLiquidShapeDistance( const b2LiquidShapeQuery* query, b2Vec2 target, float* distance, b2Vec2* normal )
+{
+	b2WorldTransform transform = query->transform;
 	b2Vec2 p = b2InvTransformWorldPoint( transform, b2ToPos( target ) );
 	b2Vec2 localNormal;
 
-	switch ( shape->type )
+	switch ( query->type )
 	{
 		case b2_circleShape:
-			b2LiquidSegmentDistance( shape->circle.center, shape->circle.center, shape->circle.radius, p, distance, &localNormal );
+			b2LiquidSegmentDistance( query->circle.center, query->circle.center, query->circle.radius, p, distance, &localNormal );
 			break;
 		case b2_capsuleShape:
-			b2LiquidSegmentDistance( shape->capsule.center1, shape->capsule.center2, shape->capsule.radius, p, distance, &localNormal );
+			b2LiquidSegmentDistance( query->capsule.center1, query->capsule.center2, query->capsule.radius, p, distance, &localNormal );
 			break;
 		case b2_segmentShape:
-			b2LiquidSegmentDistance( shape->segment.point1, shape->segment.point2, 0.0f, p, distance, &localNormal );
+			b2LiquidSegmentDistance( query->segment.point1, query->segment.point2, 0.0f, p, distance, &localNormal );
 			break;
 		case b2_chainSegmentShape:
 			// As in legacy ComputeDistance, an edge has no solid interior. This
 			// distance query does not change the chain's rigid-body one-sided policy.
-			b2LiquidSegmentDistance( shape->chainSegment.segment.point1, shape->chainSegment.segment.point2, 0.0f, p, distance, &localNormal );
+			b2LiquidSegmentDistance( query->segment.point1, query->segment.point2, 0.0f, p, distance, &localNormal );
 			break;
 		case b2_polygonShape:
 		{
-			const b2Polygon* polygon = &shape->polygon;
+			const b2Polygon* polygon = &query->polygon;
 			float separation = -FLT_MAX;
 			int face = 0;
 			for ( int i = 0; i < polygon->count; ++i )
@@ -2098,6 +2115,15 @@ void b2Shape_ComputeDistance( b2ShapeId shapeId, b2Vec2 target, float* distance,
 			break;
 	}
 	*normal = b2RotateVector( transform.q, localNormal );
+}
+
+void b2Shape_ComputeDistance( b2ShapeId shapeId, b2Vec2 target, float* distance, b2Vec2* normal )
+{
+	b2LiquidShapeQuery query;
+	if ( b2PrepareLiquidShapeQuery( shapeId, &query ) )
+	{
+		b2ComputeLiquidShapeDistance( &query, target, distance, normal );
+	}
 }
 
 // https://en.wikipedia.org/wiki/Density_of_air

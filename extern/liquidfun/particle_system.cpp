@@ -21,6 +21,7 @@
 #include "voronoi_diagram.h"
 #include "particle_assembly.h"
 #include "block_allocator.h"
+#include "../../src/liquidfun_query.h"
 extern "C" {
 #include "box2d/constants.h"
 }
@@ -33,6 +34,15 @@ extern "C" {
 // #include <Box2D/Collision/Shapes/b2EdgeShape.h>
 // #include <Box2D/Collision/Shapes/b2ChainShape.h>
 #include <algorithm>
+#include <climits>
+
+// Diagnostic builds compare every contact with the scalar reference, even
+// under NDEBUG. This must stay disabled for performance measurements.
+// #define LIQUIDFUN_VALIDATE_CONTACTS
+#if defined(LIQUIDFUN_VALIDATE_CONTACTS)
+#include <cstdio>
+#include <cstdlib>
+#endif
 
 // Define LIQUIDFUN_SIMD_TEST_VS_REFERENCE to run both SIMD and reference
 // versions, and assert that the results are identical. This is useful when
@@ -64,6 +74,43 @@ static const uint32 relativeTagBottomRight = (1u << yShift) + (1u << xShift);
 
 namespace // anonymous namespace.
 {
+	// Body contacts are grouped by shape. Static and kinematic body velocities
+	// cannot change under particle impulses, so reuse their reads within one
+	// solver pass. Dynamic bodies must be read after every preceding impulse.
+	class ParticleBodyVelocity
+	{
+	public:
+		ParticleBodyVelocity() : m_bodyId(b2_nullBodyId), m_dynamic(true) {}
+
+		b2Vec2 Get(b2BodyId bodyId, const b2Vec2& point)
+		{
+			if (!B2_ID_EQUALS(bodyId, m_bodyId))
+			{
+				m_bodyId = bodyId;
+				m_dynamic = b2Body_GetType(bodyId) == b2_dynamicBody;
+				if (!m_dynamic)
+				{
+					m_linearVelocity = b2Body_GetLinearVelocity(bodyId);
+					m_angularVelocity = b2Body_GetAngularVelocity(bodyId);
+					m_center = b2Body_GetWorldCenter(bodyId);
+				}
+			}
+			if (m_dynamic)
+			{
+				return b2Body_GetLinearVelocity(bodyId) +
+					b2CrossSV(b2Body_GetAngularVelocity(bodyId), point - b2Body_GetWorldCenter(bodyId));
+			}
+			return m_linearVelocity + b2CrossSV(m_angularVelocity, point - m_center);
+		}
+
+	private:
+		b2BodyId m_bodyId;
+		bool m_dynamic;
+		b2Vec2 m_linearVelocity;
+		float32 m_angularVelocity;
+		b2Vec2 m_center;
+	};
+
 	struct LiquidQueryContext
 	{
 		b2ParticleSystem* system;
@@ -217,24 +264,48 @@ namespace // anonymous namespace.
 
 		b2AABB aabb = b2Shape_GetAABB(shapeId);
 		b2ParticleSystem::InsideBoundsEnumerator enumerator = system->GetInsideBoundsEnumerator(aabb);
+		// Without a fixture filter there is no user code inside this query. The
+		// shape transform and mass properties can be reused for all candidates.
+		// With a filter retain the original reads around each callback.
+		const bool canCache = system->GetFixtureContactFilter() == NULL;
+		bool queryValid = false;
+		bool massValid = false;
+		b2LiquidShapeQuery query;
+		b2Vec2 bp = b2Vec2_zero;
+		float32 invBm = 0;
+		float32 invBI = 0;
 		int32 a = -9;
 		while ((a = enumerator.GetNext()) >= 0)
 		{
 			b2Vec2 ap = system->m_positionBuffer.data[a];
 			float32 d;
 			b2Vec2 n;
-			// fixture->ComputeDistance(ap, &d, &n, childIndex);
-			b2Shape_ComputeDistance(shapeId, ap, &d, &n);
+			if (canCache)
+			{
+				if (!queryValid)
+				{
+					queryValid = b2PrepareLiquidShapeQuery(shapeId, &query);
+					if (!queryValid) return true;
+				}
+				b2ComputeLiquidShapeDistance(&query, ap, &d, &n);
+			}
+			else
+			{
+				b2Shape_ComputeDistance(shapeId, ap, &d, &n);
+			}
 			// if (d < system->m_particleDiameter && ShouldCollide(fixture, a))
 			if (d < system->m_particleDiameter && liquid_should_collide(system, shapeId, a))
 			{
-				// b2Body* b = fixture->GetBody();
-				b2Vec2 bp = b2Body_GetWorldCenter(bodyId);
-				float32 bm = b2Body_GetMass(bodyId);
-				float32 bI =
-					b2Body_GetRotationalInertia(bodyId) - bm * b2LengthSquared(b2Body_GetLocalCenter(bodyId));
-				float32 invBm = bm > 0 ? 1 / bm : 0;
-				float32 invBI = bI > 0 ? 1 / bI : 0;
+				if (!massValid || !canCache)
+				{
+					bp = b2Body_GetWorldCenter(bodyId);
+					float32 bm = b2Body_GetMass(bodyId);
+					float32 bI =
+						b2Body_GetRotationalInertia(bodyId) - bm * b2LengthSquared(b2Body_GetLocalCenter(bodyId));
+					invBm = bm > 0 ? 1 / bm : 0;
+					invBI = bI > 0 ? 1 / bI : 0;
+					massValid = true;
+				}
 				float32 invAm =
 					system->m_flagsBuffer.data[a] &
 					b2_wallParticle ? 0 : system->GetParticleInvMass();
@@ -1894,14 +1965,36 @@ void b2ParticleSystem::ComputeWeight()
 		float32 w = contact.weight;
 		m_weightBuffer[a] += w;
 	}
-	for (int32 k = 0; k < m_contactBuffer.GetCount(); k++)
+	if (m_count < 2048)
 	{
-		const b2ParticleContact& contact = m_contactBuffer[k];
-		int32 a = contact.GetIndexA();
-		int32 b = contact.GetIndexB();
-		float32 w = contact.GetWeight();
-		m_weightBuffer[a] += w;
-		m_weightBuffer[b] += w;
+		for (int32 k = 0; k < m_contactBuffer.GetCount(); k++)
+		{
+			const b2ParticleContact& contact = m_contactBuffer[k];
+			int32 a = contact.GetIndexA();
+			int32 b = contact.GetIndexB();
+			float32 w = contact.GetWeight();
+			m_weightBuffer[a] += w;
+			m_weightBuffer[b] += w;
+		}
+		return;
+	}
+	const int32 count = m_contactBuffer.GetCount();
+	for (int32 k = 0; k < count;)
+	{
+		const int32 a = m_contactBuffer[k].GetIndexA();
+		float32 weightA = m_weightBuffer[a];
+		do
+		{
+			const b2ParticleContact& contact = m_contactBuffer[k];
+			int32 b = contact.GetIndexB();
+			float32 w = contact.GetWeight();
+			weightA += w;
+			if (b == a) weightA += w;
+			else m_weightBuffer[b] += w;
+			++k;
+		}
+		while (k < count && m_contactBuffer[k].GetIndexA() == a);
+		m_weightBuffer[a] = weightA;
 	}
 }
 
@@ -2025,21 +2118,269 @@ b2ParticleSystem::GetInsideBoundsEnumerator(const b2AABB& aabb) const
 	return InsideBoundsEnumerator(lowerTag, upperTag, firstProxy, lastProxy);
 }
 
-inline void b2ParticleSystem::AddContact(int32 a, int32 b,
-	b2GrowableBuffer<b2ParticleContact>& contacts) const
+namespace
 {
-	b2Vec2 d = m_positionBuffer.data[b] - m_positionBuffer.data[a];
+
+inline void AddParticleContact(int32 a, int32 b, const b2Vec2& positionA,
+	const b2Vec2* positions, const uint32* flags, float32 squaredDiameter,
+	float32 inverseDiameter, b2GrowableBuffer<b2ParticleContact>& contacts)
+{
+	b2Vec2 d = positions[b] - positionA;
 	float32 distBtParticlesSq = b2Dot(d, d);
-	if (distBtParticlesSq < m_squaredDiameter)
+	if (distBtParticlesSq < squaredDiameter)
 	{
 		float32 invD = b2InvSqrt(distBtParticlesSq);
 		b2ParticleContact& contact = contacts.Append();
 		contact.SetIndices(a, b);
-		contact.SetFlags(m_flagsBuffer.data[a] | m_flagsBuffer.data[b]);
+		contact.SetFlags(flags[a] | flags[b]);
 		// 1 - distBtParticles / diameter
-		contact.SetWeight(1 - distBtParticlesSq * invD * m_inverseDiameter);
+		contact.SetWeight(1 - distBtParticlesSq * invD * inverseDiameter);
 		contact.SetNormal(invD * d);
 	}
+}
+
+struct ContactParticle
+{
+	b2Vec2 position;
+	uint32 tag;
+	int32 index;
+};
+
+inline void AddParticleContact(const ContactParticle& a, const ContactParticle& b,
+	const uint32* flags, uint32 flagsA, float32 squaredDiameter, float32 inverseDiameter,
+	b2GrowableBuffer<b2ParticleContact>& contacts)
+{
+	b2Vec2 d = b.position - a.position;
+	float32 distanceSquared = b2Dot(d, d);
+	if (distanceSquared < squaredDiameter)
+	{
+		float32 invD = b2InvSqrt(distanceSquared);
+		b2ParticleContact& contact = contacts.Append();
+		contact.SetIndices(a.index, b.index);
+		contact.SetFlags(flagsA | flags[b.index]);
+		contact.SetWeight(1 - distanceSquared * invD * inverseDiameter);
+		contact.SetNormal(invD * d);
+	}
+}
+
+struct ParticleContactJob
+{
+	const ContactParticle* particles;
+	const uint32* flags;
+	b2ParticleContact* output;
+	int32 particleCount, begin, end, bottom, capacity;
+	int64 contactCount;
+	float32 squaredDiameter, inverseDiameter;
+};
+
+template <bool bounded>
+inline void ProcessContactCandidate(ParticleContactJob& job, const ContactParticle& a,
+	const ContactParticle& b, uint32 flagsA)
+{
+	b2Vec2 d = b.position - a.position;
+	float32 distanceSquared = b2Dot(d, d);
+	if (distanceSquared < job.squaredDiameter)
+	{
+		if (!bounded || job.contactCount < job.capacity)
+		{
+			float32 invD = b2InvSqrt(distanceSquared);
+			b2ParticleContact& contact = job.output[(int32)job.contactCount];
+			contact.SetIndices(a.index, b.index);
+			contact.SetFlags(flagsA | job.flags[b.index]);
+			contact.SetWeight(1 - distanceSquared * invD * job.inverseDiameter);
+			contact.SetNormal(invD * d);
+		}
+		++job.contactCount;
+	}
+}
+
+template <bool bounded>
+void RunParticleContactJob(void* context)
+{
+	ParticleContactJob& job = *(ParticleContactJob*)context;
+	const ContactParticle* particles = job.particles;
+	int32 c = job.bottom;
+	job.contactCount = 0;
+	for (int32 i = job.begin; i < job.end; ++i)
+	{
+		const ContactParticle& a = particles[i];
+		uint32 flagsA = job.flags[a.index];
+		uint32 rightTag = computeRelativeTag(a.tag, 1, 0);
+		for (int32 j = i + 1; j < job.particleCount; ++j)
+		{
+			if (rightTag < particles[j].tag) break;
+			ProcessContactCandidate<bounded>(job, a, particles[j], flagsA);
+		}
+		uint32 bottomLeftTag = computeRelativeTag(a.tag, -1, 1);
+		for (; c < job.particleCount; ++c)
+		{
+			if (bottomLeftTag <= particles[c].tag) break;
+		}
+		uint32 bottomRightTag = computeRelativeTag(a.tag, 1, 1);
+		for (int32 j = c; j < job.particleCount; ++j)
+		{
+			if (bottomRightTag < particles[j].tag) break;
+			ProcessContactCandidate<bounded>(job, a, particles[j], flagsA);
+		}
+	}
+}
+
+bool FindContactsParallel(b2WorldId worldId, const ContactParticle* particles, int32 count,
+	const uint32* flags, float32 squaredDiameter, float32 inverseDiameter,
+	b2GrowableBuffer<b2ParticleContact>& contacts)
+{
+	if (count < 8192 || b2GetLiquidWorkerCount(worldId) < 2) return false;
+	// Speculative disjoint spans in the reusable output buffer. Each worker
+	// counts all contacts but only writes within its span. Overflow retains the
+	// exact counts for the original two-pass path; workers never allocate.
+	const int32 jobCount = b2MinInt(8, count / 1024);
+	const int32 maxCapacity = INT_MAX / (int32)sizeof(b2ParticleContact);
+	if ((int64)count * 8 > maxCapacity) return false;
+	// Do not reserve speculative storage for a system without prior contacts.
+	if (contacts.GetCount() > 0 && contacts.GetCapacity() < count * 8) contacts.Reserve(count * 8);
+	const int32 span = contacts.GetCapacity() / jobCount;
+	ParticleContactJob jobs[8];
+	void* contexts[8];
+	int32 bottom = 0;
+	for (int32 j = 0; j < jobCount; ++j)
+	{
+		ParticleContactJob& job = jobs[j];
+		job.particles = particles;
+		job.flags = flags;
+		job.output = span > 0 ? contacts.Data() + j * span : NULL;
+		job.capacity = span;
+		job.particleCount = count;
+		job.begin = (int32)((int64)count * j / jobCount);
+		job.end = (int32)((int64)count * (j + 1) / jobCount);
+		job.squaredDiameter = squaredDiameter;
+		job.inverseDiameter = inverseDiameter;
+		job.bottom = bottom;
+		contexts[j] = &job;
+		// Preserve the reference's monotonic cursor, even if a relative tag
+		// wraps. Starting each job with a lower_bound alone would not do this.
+		for (int32 i = job.begin; i < job.end; ++i)
+		{
+			uint32 tag = computeRelativeTag(particles[i].tag, -1, 1);
+			while (bottom < count && particles[bottom].tag < tag) ++bottom;
+		}
+	}
+	b2RunLiquidTasks(worldId, RunParticleContactJob<true>, contexts, jobCount);
+	int64 total = 0;
+	bool overflow = false;
+	for (int32 j = 0; j < jobCount; ++j)
+	{
+		total += jobs[j].contactCount;
+		overflow |= jobs[j].contactCount > jobs[j].capacity;
+	}
+	if (total > maxCapacity) return false;
+	contacts.SetCount(0);
+	if (overflow)
+	{
+		if (total > contacts.GetCapacity())
+		{
+			int32 capacity = contacts.GetCapacity();
+			int32 grown = capacity <= maxCapacity / 2 ? 2 * capacity : maxCapacity;
+			contacts.Reserve(b2MaxInt((int32)total, grown));
+		}
+		int32 offset = 0;
+		for (int32 j = 0; j < jobCount; ++j)
+		{
+			jobs[j].output = contacts.Data() + offset;
+			offset += (int32)jobs[j].contactCount;
+		}
+		b2RunLiquidTasks(worldId, RunParticleContactJob<false>, contexts, jobCount);
+#if defined(LIQUIDFUN_VALIDATE_CONTACTS)
+		static bool overflowReported = false;
+		if (!overflowReported)
+		{
+			std::fprintf(stderr, "LIQUIDFUN_CONTACT_VALIDATION: bounded overflow fallback reached\n");
+			overflowReported = true;
+		}
+#endif
+	}
+	else
+	{
+		int32 offset = 0;
+		for (int32 j = 0; j < jobCount; ++j)
+		{
+			int32 n = (int32)jobs[j].contactCount;
+			// Prefix counts cannot pass the next unread span. Overlap within
+			// the current span is allowed, so use memmove rather than memcpy.
+			if (n > 0 && contacts.Data() + offset != jobs[j].output)
+			{
+				memmove(contacts.Data() + offset, jobs[j].output, n * sizeof(b2ParticleContact));
+			}
+			offset += n;
+		}
+	}
+	contacts.SetCount((int32)total);
+#if defined(LIQUIDFUN_VALIDATE_CONTACTS)
+	static bool reported = false;
+	if (!reported)
+	{
+		std::fprintf(stderr, "LIQUIDFUN_CONTACT_VALIDATION: parallel path reached jobs=%d\n", jobCount);
+		reported = true;
+	}
+#endif
+	return true;
+}
+
+// This scratch array changes only memory access order, not particle indices,
+// proxy ordering, candidate traversal or contact arithmetic.
+template <typename Proxy>
+void FindContactsInProxyOrder(b2WorldId worldId, const Proxy* proxies, int32 count,
+	const b2Vec2* positions, const uint32* flags, float32 squaredDiameter,
+	float32 inverseDiameter, b2LiquidStackAllocator& allocator,
+	b2GrowableBuffer<b2ParticleContact>& contacts)
+{
+	ContactParticle* particles = (ContactParticle*)allocator.Allocate(
+		count * sizeof(ContactParticle));
+	for (int32 i = 0; i < count; ++i)
+	{
+		int32 index = proxies[i].index;
+		particles[i].position = positions[index];
+		particles[i].tag = proxies[i].tag;
+		particles[i].index = index;
+	}
+	if (FindContactsParallel(worldId, particles, count, flags, squaredDiameter, inverseDiameter, contacts))
+	{
+		allocator.Free(particles);
+		return;
+	}
+
+	contacts.SetCount(0);
+	const ContactParticle* end = particles + count;
+	for (const ContactParticle *a = particles, *c = particles; a < end; ++a)
+	{
+		const uint32 flagsA = flags[a->index];
+		uint32 rightTag = computeRelativeTag(a->tag, 1, 0);
+		for (const ContactParticle* b = a + 1; b < end; ++b)
+		{
+			if (rightTag < b->tag) break;
+			AddParticleContact(*a, *b, flags, flagsA, squaredDiameter, inverseDiameter, contacts);
+		}
+		uint32 bottomLeftTag = computeRelativeTag(a->tag, -1, 1);
+		for (; c < end; ++c)
+		{
+			if (bottomLeftTag <= c->tag) break;
+		}
+		uint32 bottomRightTag = computeRelativeTag(a->tag, 1, 1);
+		for (const ContactParticle* b = c; b < end; ++b)
+		{
+			if (bottomRightTag < b->tag) break;
+			AddParticleContact(*a, *b, flags, flagsA, squaredDiameter, inverseDiameter, contacts);
+		}
+	}
+	allocator.Free(particles);
+}
+
+} // anonymous namespace.
+
+inline void b2ParticleSystem::AddContact(int32 a, int32 b,
+	b2GrowableBuffer<b2ParticleContact>& contacts) const
+{
+	AddParticleContact(a, b, m_positionBuffer.data[a], m_positionBuffer.data,
+		m_flagsBuffer.data, m_squaredDiameter, m_inverseDiameter, contacts);
 }
 
 void b2ParticleSystem::FindContacts_Reference(
@@ -2047,15 +2388,25 @@ void b2ParticleSystem::FindContacts_Reference(
 {
 	const Proxy* beginProxy = m_proxyBuffer.Begin();
 	const Proxy* endProxy = m_proxyBuffer.End();
+	// Appending may grow the contact buffer, but cannot move particle storage.
+	// Keep these reads outside the candidate loops and load the common position
+	// once per particle without changing candidate or contact ordering.
+	const b2Vec2* positions = m_positionBuffer.data;
+	const uint32* flags = m_flagsBuffer.data;
+	const float32 squaredDiameter = m_squaredDiameter;
+	const float32 inverseDiameter = m_inverseDiameter;
 
 	contacts.SetCount(0);
 	for (const Proxy *a = beginProxy, *c = beginProxy; a < endProxy; a++)
 	{
+		const int32 indexA = a->index;
+		const b2Vec2 positionA = positions[indexA];
 		uint32 rightTag = computeRelativeTag(a->tag, 1, 0);
 		for (const Proxy* b = a + 1; b < endProxy; b++)
 		{
 			if (rightTag < b->tag) break;
-			AddContact(a->index, b->index, contacts);
+			AddParticleContact(indexA, b->index, positionA, positions, flags,
+				squaredDiameter, inverseDiameter, contacts);
 		}
 		uint32 bottomLeftTag = computeRelativeTag(a->tag, -1, 1);
 		for (; c < endProxy; c++)
@@ -2066,7 +2417,8 @@ void b2ParticleSystem::FindContacts_Reference(
 		for (const Proxy* b = c; b < endProxy; b++)
 		{
 			if (bottomRightTag < b->tag) break;
-			AddContact(a->index, b->index, contacts);
+			AddParticleContact(indexA, b->index, positionA, positions, flags,
+				squaredDiameter, inverseDiameter, contacts);
 		}
 	}
 }
@@ -2206,7 +2558,52 @@ void b2ParticleSystem::FindContacts(
 	#if defined(LIQUIDFUN_SIMD_NEON)
 		FindContacts_Simd(contacts);
 	#else
-		FindContacts_Reference(contacts);
+		const int32 count = m_proxyBuffer.GetCount();
+		// Reordering pays off only for larger, dense systems. The previous
+		// contact count selects an access strategy, never a different result.
+		const int32 maxReorderedCount =
+			(INT_MAX - b2_stackSize - b2LiquidStackAllocator::ALIGN_MASK) / (int32)sizeof(ContactParticle);
+		if (count >= 2048 && contacts.GetCount() >= count && count <= maxReorderedCount)
+		{
+			FindContactsInProxyOrder(m_world->GetWorldId(), m_proxyBuffer.Begin(), count, m_positionBuffer.data,
+				m_flagsBuffer.data, m_squaredDiameter, m_inverseDiameter,
+				m_world->m_stackAllocator, contacts);
+		}
+		else
+		{
+			FindContacts_Reference(contacts);
+		}
+	#endif
+
+	#if defined(LIQUIDFUN_VALIDATE_CONTACTS)
+		static bool reported = false;
+		if (!reported)
+		{
+			std::fprintf(stderr, "LIQUIDFUN_CONTACT_VALIDATION: enabled\n");
+			reported = true;
+		}
+		b2GrowableBuffer<b2ParticleContact> validationReference(m_world->m_blockAllocator);
+		FindContacts_Reference(validationReference);
+		if (contacts.GetCount() != validationReference.GetCount())
+		{
+			std::fprintf(stderr, "LIQUIDFUN_CONTACT_VALIDATION: FIRST_DIFFERENCE count=%d validationReference=%d\n",
+				contacts.GetCount(), validationReference.GetCount());
+			std::abort();
+		}
+		for (int32 i = 0; i < contacts.GetCount(); ++i)
+		{
+			const b2ParticleContact& a = contacts[i];
+			const b2ParticleContact& b = validationReference[i];
+			const float32 actual[] = { a.GetWeight(), a.GetNormal().x, a.GetNormal().y };
+			const float32 expected[] = { b.GetWeight(), b.GetNormal().x, b.GetNormal().y };
+			if (a.GetIndexA() != b.GetIndexA() || a.GetIndexB() != b.GetIndexB() ||
+				a.GetFlags() != b.GetFlags() || memcmp(actual, expected, sizeof(actual)) != 0)
+			{
+				std::fprintf(stderr, "LIQUIDFUN_CONTACT_VALIDATION: FIRST_DIFFERENCE contact=%d particles=%d\n",
+					i, m_count);
+				std::abort();
+			}
+		}
 	#endif
 
 	#if defined(LIQUIDFUN_SIMD_TEST_VS_REFERENCE)
@@ -3510,17 +3907,43 @@ void b2ParticleSystem::SolvePressure(const b2TimeStep& step)
 		// b->ApplyLinearImpulse(f, p, true);
 		b2Body_ApplyLinearImpulse(contact.bodyId, f, p, true);
 	}
-	for (int32 k = 0; k < m_contactBuffer.GetCount(); k++)
+	if (m_count < 2048)
 	{
-		const b2ParticleContact& contact = m_contactBuffer[k];
-		int32 a = contact.GetIndexA();
-		int32 b = contact.GetIndexB();
-		float32 w = contact.GetWeight();
-		b2Vec2 n = contact.GetNormal();
-		float32 h = m_accumulationBuffer[a] + m_accumulationBuffer[b];
-		b2Vec2 f = velocityPerPressure * w * h * n;
-		m_velocityBuffer.data[a] -= f;
-		m_velocityBuffer.data[b] += f;
+		for (int32 k = 0; k < m_contactBuffer.GetCount(); k++)
+		{
+			const b2ParticleContact& contact = m_contactBuffer[k];
+			int32 a = contact.GetIndexA();
+			int32 b = contact.GetIndexB();
+			float32 w = contact.GetWeight();
+			b2Vec2 n = contact.GetNormal();
+			float32 h = m_accumulationBuffer[a] + m_accumulationBuffer[b];
+			b2Vec2 f = velocityPerPressure * w * h * n;
+			m_velocityBuffer.data[a] -= f;
+			m_velocityBuffer.data[b] += f;
+		}
+		return;
+	}
+	// Reuse the first endpoint's pressure and velocity within each contact run.
+	const int32 count = m_contactBuffer.GetCount();
+	for (int32 k = 0; k < count;)
+	{
+		const int32 a = m_contactBuffer[k].GetIndexA();
+		const float32 pressureA = m_accumulationBuffer[a];
+		b2Vec2 velocityA = m_velocityBuffer.data[a];
+		do
+		{
+			const b2ParticleContact& contact = m_contactBuffer[k];
+			int32 b = contact.GetIndexB();
+			float32 w = contact.GetWeight();
+			b2Vec2 n = contact.GetNormal();
+			float32 h = pressureA + m_accumulationBuffer[b];
+			b2Vec2 f = velocityPerPressure * w * h * n;
+			velocityA -= f;
+			m_velocityBuffer.data[b] += f;
+			++k;
+		}
+		while (k < count && m_contactBuffer[k].GetIndexA() == a);
+		m_velocityBuffer.data[a] = velocityA;
 	}
 }
 
@@ -3529,6 +3952,7 @@ void b2ParticleSystem::SolveDamping(const b2TimeStep& step)
 	// reduces normal velocity of each contact
 	float32 linearDamping = m_def.dampingStrength;
 	float32 quadraticDamping = 1 / GetCriticalVelocity(step);
+	ParticleBodyVelocity bodyVelocity;
 	for (int32 k = 0; k < m_bodyContactBuffer.GetCount(); k++)
 	{
 		const b2ParticleBodyContact& contact = m_bodyContactBuffer[k];
@@ -3538,7 +3962,7 @@ void b2ParticleSystem::SolveDamping(const b2TimeStep& step)
 		float32 m = contact.mass;
 		b2Vec2 n = contact.normal;
 		b2Vec2 p = m_positionBuffer.data[a];
-		b2Vec2 velocity = b2Body_GetLinearVelocity(b) + b2CrossSV(b2Body_GetAngularVelocity(b), p - b2Body_GetWorldCenter(b));
+		b2Vec2 velocity = bodyVelocity.Get(b, p);
 		b2Vec2 v = velocity - m_velocityBuffer.data[a];
 		float32 vn = b2Dot(v, n);
 		if (vn < 0)
@@ -3551,23 +3975,56 @@ void b2ParticleSystem::SolveDamping(const b2TimeStep& step)
 			b2Body_ApplyLinearImpulse(b, -f, p, true);
 		}
 	}
-	for (int32 k = 0; k < m_contactBuffer.GetCount(); k++)
+	// Run detection costs more than it saves for small particle systems.
+	if (m_count < 2048)
 	{
-		const b2ParticleContact& contact = m_contactBuffer[k];
-		int32 a = contact.GetIndexA();
-		int32 b = contact.GetIndexB();
-		float32 w = contact.GetWeight();
-		b2Vec2 n = contact.GetNormal();
-		b2Vec2 v = m_velocityBuffer.data[b] - m_velocityBuffer.data[a];
-		float32 vn = b2Dot(v, n);
-		if (vn < 0)
+		for (int32 k = 0; k < m_contactBuffer.GetCount(); k++)
 		{
-			float32 damping =
-				b2MaxFloat(linearDamping * w, b2MinFloat(- quadraticDamping * vn, 0.5f));
-			b2Vec2 f = damping * vn * n;
-			m_velocityBuffer.data[a] += f;
-			m_velocityBuffer.data[b] -= f;
+			const b2ParticleContact& contact = m_contactBuffer[k];
+			int32 a = contact.GetIndexA();
+			int32 b = contact.GetIndexB();
+			float32 w = contact.GetWeight();
+			b2Vec2 n = contact.GetNormal();
+			b2Vec2 v = m_velocityBuffer.data[b] - m_velocityBuffer.data[a];
+			float32 vn = b2Dot(v, n);
+			if (vn < 0)
+			{
+				float32 damping =
+					b2MaxFloat(linearDamping * w, b2MinFloat(- quadraticDamping * vn, 0.5f));
+				b2Vec2 f = damping * vn * n;
+				m_velocityBuffer.data[a] += f;
+				m_velocityBuffer.data[b] -= f;
+			}
 		}
+		return;
+	}
+	// Contacts emitted for the same first endpoint are consecutive. Keep its
+	// velocity local for each run without changing the contact impulse order.
+	const int32 count = m_contactBuffer.GetCount();
+	for (int32 k = 0; k < count;)
+	{
+		const int32 a = m_contactBuffer[k].GetIndexA();
+		b2Vec2 velocityA = m_velocityBuffer.data[a];
+		do
+		{
+			const b2ParticleContact& contact = m_contactBuffer[k];
+			int32 b = contact.GetIndexB();
+			float32 w = contact.GetWeight();
+			b2Vec2 n = contact.GetNormal();
+			b2Vec2 v = m_velocityBuffer.data[b] - velocityA;
+			float32 vn = b2Dot(v, n);
+			if (vn < 0)
+			{
+				float32 damping =
+					b2MaxFloat(linearDamping * w, b2MinFloat(- quadraticDamping * vn, 0.5f));
+				b2Vec2 f = damping * vn * n;
+				velocityA += f;
+				m_velocityBuffer.data[b] -= f;
+			}
+			++k;
+		}
+		while (k < count && m_contactBuffer[k].GetIndexA() == a);
+		m_velocityBuffer.data[a] = velocityA;
 	}
 }
 
@@ -3930,6 +4387,7 @@ void b2ParticleSystem::SolveTensile(const b2TimeStep& step)
 void b2ParticleSystem::SolveViscous()
 {
 	float32 viscousStrength = m_def.viscousStrength;
+	ParticleBodyVelocity bodyVelocity;
 	for (int32 k = 0; k < m_bodyContactBuffer.GetCount(); k++)
 	{
 		const b2ParticleBodyContact& contact = m_bodyContactBuffer[k];
@@ -3940,13 +4398,47 @@ void b2ParticleSystem::SolveViscous()
 			float32 w = contact.weight;
 			float32 m = contact.mass;
 			b2Vec2 p = m_positionBuffer.data[a];
-			b2Vec2 velocity = b2Body_GetLinearVelocity(b) + b2CrossSV(b2Body_GetAngularVelocity(b), p - b2Body_GetWorldCenter(b));
+			b2Vec2 velocity = bodyVelocity.Get(b, p);
 			b2Vec2 v = velocity - m_velocityBuffer.data[a];
 			b2Vec2 f = viscousStrength * m * w * v;
 			m_velocityBuffer.data[a] += GetParticleInvMass() * f;
 			// b->ApplyLinearImpulse(-f, p, true);
 			b2Body_ApplyLinearImpulse(b, -f, p, true);
 		}
+	}
+	// Keep the first endpoint local without changing the sequential impulses.
+	// Small systems retain the original loop to avoid run-detection overhead.
+	if (m_count >= 2048)
+	{
+		const int32 count = m_contactBuffer.GetCount();
+		for (int32 k = 0; k < count;)
+		{
+			if (!(m_contactBuffer[k].GetFlags() & b2_viscousParticle))
+			{
+				++k;
+				continue;
+			}
+			const int32 a = m_contactBuffer[k].GetIndexA();
+			b2Vec2 velocityA = m_velocityBuffer.data[a];
+			do
+			{
+				const b2ParticleContact& contact = m_contactBuffer[k];
+				if (contact.GetFlags() & b2_viscousParticle)
+				{
+					int32 b = contact.GetIndexB();
+					float32 w = contact.GetWeight();
+					b2Vec2 v = (b == a ? velocityA : m_velocityBuffer.data[b]) - velocityA;
+					b2Vec2 f = viscousStrength * w * v;
+					velocityA += f;
+					if (b == a) velocityA -= f;
+					else m_velocityBuffer.data[b] -= f;
+				}
+				++k;
+			}
+			while (k < count && m_contactBuffer[k].GetIndexA() == a);
+			m_velocityBuffer.data[a] = velocityA;
+		}
+		return;
 	}
 	for (int32 k = 0; k < m_contactBuffer.GetCount(); k++)
 	{
