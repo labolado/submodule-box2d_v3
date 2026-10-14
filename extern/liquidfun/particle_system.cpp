@@ -70,6 +70,7 @@ namespace // anonymous namespace.
 		b2TimeStep step;
 		const int32* contactHeads;
 		const int32* contactNext;
+		bool sweptRotation;
 	};
 
 	bool liquid_should_collide(b2ParticleSystem* system, b2ShapeId fixture, int32 particleIndex)
@@ -112,6 +113,17 @@ namespace // anonymous namespace.
 				{
 					b2Transform transform = b2Body_GetTransform(bodyId);
 					b2Transform transform0 = b2Body_GetPreviousTransform(bodyId);
+					// Rotating boundaries were already swept by PostStep. Replaying
+					// their previous motion would push particles through the wall.
+					float rotation = transform0.q.c * transform.q.s - transform0.q.s * transform.q.c;
+					uint32 flags = system->GetFlagsBuffer()[index];
+					b2ParticleGroup* group = system->GetGroupBuffer()[index];
+					if (queryContext->sweptRotation && b2AbsFloat(rotation) >= 1e-6f &&
+						(flags & (b2_zombieParticle | b2_wallParticle | b2_fixtureContactFilterParticle)) == 0 &&
+						!(group && (group->GetGroupFlags() & b2_rigidParticleGroup)))
+					{
+						transform0 = transform;
+					}
 					// Put 'ap' in the local space of the previous frame
 					p1 = b2InvTransformPoint(transform0, ap);
 					// if (fixture->GetShape()->GetType() == b2Shape::e_circle)
@@ -2368,6 +2380,17 @@ void b2ParticleSystem::SortProxies(b2GrowableBuffer<Proxy>& proxies) const
 	std::sort(proxies.Begin(), proxies.End());
 }
 
+void b2ParticleSystem::UpdatePositionProxies()
+{
+	UpdateProxies(m_proxyBuffer);
+	SortProxies(m_proxyBuffer);
+	// Invalidate group statistics without advancing the contact/stuck clock.
+	for (b2ParticleGroup* group = m_groupList; group; group = group->GetNext())
+	{
+		group->m_timestamp = m_timestamp - 1;
+	}
+}
+
 class b2ParticleContactRemovePredicate
 {
 public:
@@ -2960,6 +2983,11 @@ bool b2ParticleSystem::BodyContactCompare(const b2ParticleBodyContact &lhs,
 
 void b2ParticleSystem::SolveCollision(const b2TimeStep& step)
 {
+	SolveCollision(step, false);
+}
+
+void b2ParticleSystem::SolveCollision(const b2TimeStep& step, bool sweptRotation)
+{
 	// This function detects particles which are crossing boundary of bodies
 	// and modifies velocities of them so that they will move just in front of
 	// boundary. This function function also applies the reaction force to
@@ -3073,7 +3101,7 @@ void b2ParticleSystem::SolveCollision(const b2TimeStep& step)
 		next[k] = heads[index];
 		heads[index] = k;
 	}
-	LiquidQueryContext context = { this, step, heads, next };
+	LiquidQueryContext context = { this, step, heads, next, sweptRotation };
 	// b2World_OverlapAABB(m_world->GetWorldId(), aabb, b2DefaultQueryFilter(), liquid_query_callback, &context);
 	m_world->QueryAABB(aabb, b2DefaultQueryFilter(), liquid_query_callback, &context);
 	m_world->m_stackAllocator.Free(next);
@@ -3201,6 +3229,11 @@ void b2ParticleSystem::SolveBarrier(const b2TimeStep& step)
 
 void b2ParticleSystem::Solve(const b2TimeStep& step)
 {
+	Solve(step, NULL);
+}
+
+void b2ParticleSystem::Solve(const b2TimeStep& step, b2Vec2* startPositions)
+{
 	if (m_count == 0)
 	{
 		return;
@@ -3225,6 +3258,10 @@ void b2ParticleSystem::Solve(const b2TimeStep& step)
 	if (m_paused)
 	{
 		return;
+	}
+	if (startPositions)
+	{
+		memcpy(startPositions, m_positionBuffer.data, m_count * sizeof(b2Vec2));
 	}
 	for (m_iterationIndex = 0;
 		m_iterationIndex < step.particleIterations;
@@ -3306,7 +3343,7 @@ void b2ParticleSystem::Solve(const b2TimeStep& step)
 		// SolveCollision, SolveRigid and SolveWall should be called after
 		// other force functions because they may require particles to have
 		// specific velocities.
-		SolveCollision(subStep);
+		SolveCollision(subStep, startPositions != NULL);
 		if (m_allGroupFlags & b2_rigidParticleGroup)
 		{
 			SolveRigid(subStep);

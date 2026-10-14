@@ -984,6 +984,7 @@ private:
 	void UpdateProxies_Simd(b2GrowableBuffer<Proxy>& proxies) const;
 	void UpdateProxies(b2GrowableBuffer<Proxy>& proxies) const;
 	void SortProxies(b2GrowableBuffer<Proxy>& proxies) const;
+	void UpdatePositionProxies();
 	void FilterContacts(b2GrowableBuffer<b2ParticleContact>& contacts);
 	void NotifyContactListenerPreContact(
 		b2ParticlePairSet* particlePairs) const;
@@ -995,7 +996,9 @@ private:
 	void UpdateBodyContacts();
 
 	void Solve(const b2TimeStep& step);
+	void Solve(const b2TimeStep& step, b2Vec2* startPositions);
 	void SolveCollision(const b2TimeStep& step);
+	void SolveCollision(const b2TimeStep& step, bool sweptRotation);
 	void LimitVelocity(const b2TimeStep& step);
 	void SolveGravity(const b2TimeStep& step);
 	void SolveBarrier(const b2TimeStep& step);

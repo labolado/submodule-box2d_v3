@@ -52,6 +52,8 @@ public:
 	/// definition is retained.
 	/// @warning This function is locked during callbacks.
 	b2ParticleSystem* CreateParticleSystem( const b2ParticleSystemDef* def );
+	/// Opt in at creation; the original overload retains legacy collision behavior.
+	b2ParticleSystem* CreateParticleSystem( const b2ParticleSystemDef* def, bool enableRotatingBoundaryCCD );
 
 	/// Destroy a particle system.
 	/// @warning This function is locked during callbacks.
@@ -78,6 +80,10 @@ public:
 	void SetContactListener( b2ContactListener* listener );
 
 	void OnStep( float dt, float invDT );
+	// Internal split-step entry points. Step owns the temporary start buffers;
+	// the rigid world is stepped exactly once, then liquid boundary CCD is finished.
+	void OnStep( float dt, float invDT, b2Vec2** startPositions );
+	void PostStep( b2Vec2* const* startPositions = NULL );
 
 	/// Get API version.
 	const b2Version* GetVersion() const { return m_liquidFunVersion; }
