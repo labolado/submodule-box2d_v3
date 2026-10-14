@@ -68,6 +68,8 @@ namespace // anonymous namespace.
 	{
 		b2ParticleSystem* system;
 		b2TimeStep step;
+		const int32* contactHeads;
+		const int32* contactNext;
 	};
 
 	bool liquid_should_collide(b2ParticleSystem* system, b2ShapeId fixture, int32 particleIndex)
@@ -137,6 +139,22 @@ namespace // anonymous namespace.
 				}
 				b2Vec2 p2 = ap + queryContext->step.dt * av;
 				b2WorldCastOutput output = b2Shape_RayCast(shapeId, p1, p2 - p1);
+
+				// Initial overlaps have no ray normal. Preserve outward motion,
+				// but do not let relative inward motion deepen the overlap.
+				if (output.hit && b2LengthSquared(output.normal) == 0.0f)
+				{
+					float32 distance;
+					b2Vec2 normal;
+					b2Shape_ComputeDistance(shapeId, p1, &distance, &normal);
+					float32 inward = b2Dot(p2 - p1, normal);
+					if (distance < 0.0f && inward < 0.0f)
+					{
+						b2Vec2 v = av - queryContext->step.inv_dt * inward * normal;
+						system->m_velocityBuffer.data[index] = v;
+						system->ParticleApplyForce(index, queryContext->step.inv_dt * system->GetParticleMass() * (av - v));
+					}
+				}
 				// if (fixture->RayCast(&output, input, childIndex))
 				// v3 reports initial overlap as a zero-normal hit at fraction zero.
 				// Legacy casts ignored it: pressure must be allowed to push the
@@ -144,10 +162,24 @@ namespace // anonymous namespace.
 				if (output.hit && b2LengthSquared(output.normal) > 0.0f)
 				{
 					b2Vec2 n = output.normal;
-					b2Vec2 p =
-						(1 - output.fraction) * p1 +
-						output.fraction * p2 +
-						b2_linearSlop * n;
+					b2Vec2 hit = (1 - output.fraction) * p1 + output.fraction * p2;
+					// The safety offset must not cross another contact plane.
+					// This only reduces the offset; it does not project positions
+					// or replace the particle/rigid-body pressure response.
+					float32 slop = b2_linearSlop;
+					for (int32 k = queryContext->contactHeads[index]; k >= 0; k = queryContext->contactNext[k])
+					{
+						const b2ParticleBodyContact& contact = system->GetBodyContacts()[k];
+						b2Vec2 outward = -contact.normal;
+						float32 approach = -b2Dot(outward, n);
+						if (approach > 0.0f)
+						{
+							float32 distance = system->GetRadius() * 2 * (1 - contact.weight);
+							float32 clearance = distance + b2Dot(outward, hit - ap);
+							slop = b2MinFloat(slop, b2MaxFloat(0.0f, clearance / approach));
+						}
+					}
+					b2Vec2 p = hit + slop * n;
 					b2Vec2 v = queryContext->step.inv_dt * (p - ap);
 					system->m_velocityBuffer.data[index] = v;
 					b2Vec2 f = queryContext->step.inv_dt *
@@ -3028,9 +3060,24 @@ void b2ParticleSystem::SolveCollision(const b2TimeStep& step)
 	// } callback(this, step, GetFixtureContactFilter());
 	// m_world->QueryAABB(&callback, aabb);
 	// Rtt_Log("SolveCollision: aabb center(%f, %f)", b2AABB_Center(aabb).x, b2AABB_Center(aabb).y);
-	LiquidQueryContext context = { this, step };
+	// Index existing body contacts without changing their solver order.
+	int32* heads = (int32*)m_world->m_stackAllocator.Allocate(sizeof(int32) * m_count);
+	int32* next = (int32*)m_world->m_stackAllocator.Allocate(sizeof(int32) * m_bodyContactBuffer.GetCount());
+	for (int32 i = 0; i < m_count; ++i)
+	{
+		heads[i] = -1;
+	}
+	for (int32 k = 0; k < m_bodyContactBuffer.GetCount(); ++k)
+	{
+		int32 index = m_bodyContactBuffer[k].index;
+		next[k] = heads[index];
+		heads[index] = k;
+	}
+	LiquidQueryContext context = { this, step, heads, next };
 	// b2World_OverlapAABB(m_world->GetWorldId(), aabb, b2DefaultQueryFilter(), liquid_query_callback, &context);
 	m_world->QueryAABB(aabb, b2DefaultQueryFilter(), liquid_query_callback, &context);
+	m_world->m_stackAllocator.Free(next);
+	m_world->m_stackAllocator.Free(heads);
 }
 
 void b2ParticleSystem::SolveBarrier(const b2TimeStep& step)
