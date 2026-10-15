@@ -1253,89 +1253,36 @@ void b2ParticleSystem::CreateParticlesWithShapesForGroup(
 	const b2LiquidShape* const* shapes, int32 shapeCount,
 	const b2ParticleGroupDef& groupDef, const b2Transform& xf)
 {
-	class CompositeShape : public b2LiquidShape
+	if (shapeCount <= 0)
 	{
-	public:
-		CompositeShape(const b2LiquidShape* const* shapes, int32 shapeCount)
+		return;
+	}
+	float32 stride = groupDef.stride == 0 ? GetParticleStride() : groupDef.stride;
+	b2AABB aabb = shapes[0]->ComputeAABB(xf);
+	for (int32 i = 1; i < shapeCount; ++i)
+	{
+		aabb = b2AABB_Union(aabb, shapes[i]->ComputeAABB(xf));
+	}
+	// Use the same world-space lattice as single-shape filling. Test the union
+	// directly: b2LiquidShape has no virtual dispatch, and shared boundaries
+	// between tessellated pieces must not create duplicate particles.
+	for (float32 y = floorf(aabb.lowerBound.y / stride) * stride;
+		y < aabb.upperBound.y; y += stride)
+	{
+		for (float32 x = floorf(aabb.lowerBound.x / stride) * stride;
+			x < aabb.upperBound.x; x += stride)
 		{
-			m_shapes = shapes;
-			m_shapeCount = shapeCount;
-		}
-		// b2LiquidShape* Clone(b2BlockAllocator* allocator) const
-		// {
-		// 	b2Assert(false);
-		// 	B2_NOT_USED(allocator);
-		// 	return NULL;
-		// }
-		// int32 GetChildCount() const
-		// {
-		// 	return 1;
-		// }
-		bool TestPoint(const b2Transform& xf, const b2Vec2& p) const
-		{
-			for (int32 i = 0; i < m_shapeCount; i++)
+			b2Vec2 p = {x, y};
+			for (int32 i = 0; i < shapeCount; ++i)
 			{
-				if (m_shapes[i]->TestPoint(xf, p))
+				if (shapes[i]->TestPoint(xf, p))
 				{
-					return true;
+					CreateParticleForGroup(groupDef, b2Transform_identity, p);
+					break;
 				}
 			}
-			return false;
 		}
-		void ComputeDistance(const b2Transform& xf, const b2Vec2& p,
-					float32* distance, b2Vec2* normal, int32 childIndex) const
-		{
-			b2Assert(false);
-			B2_NOT_USED(xf);
-			B2_NOT_USED(p);
-			B2_NOT_USED(distance);
-			B2_NOT_USED(normal);
-			B2_NOT_USED(childIndex);
-		}
-		// bool RayCast(b2RayCastOutput* output, const b2RayCastInput& input,
-		// 				const b2Transform& transform, int32 childIndex) const
-		// {
-		// 	b2Assert(false);
-		// 	B2_NOT_USED(output);
-		// 	B2_NOT_USED(input);
-		// 	B2_NOT_USED(transform);
-		// 	B2_NOT_USED(childIndex);
-		// 	return false;
-		// }
-		b2AABB ComputeAABB(
-				const b2Transform& xf, int32 childIndex) const
-		{
-			b2AABB aabb;
-			B2_NOT_USED(childIndex);
-			aabb.lowerBound.x = +FLT_MAX;
-			aabb.lowerBound.y = +FLT_MAX;
-			aabb.upperBound.x = -FLT_MAX;
-			aabb.upperBound.y = -FLT_MAX;
-			b2Assert(childIndex == 0);
-			for (int32 i = 0; i < m_shapeCount; i++)
-			{
-				// int32 childCount = m_shapes[i]->GetChildCount();
-				// for (int32 j = 0; j < childCount; j++)
-				// {
-					// b2AABB subaabb;
-					// m_shapes[i]->ComputeAABB(&subaabb, xf, j);
-					// aabb->Combine(subaabb);
-					aabb = b2AABB_Union(aabb, m_shapes[i]->ComputeAABB(xf));
-				// }
-			}
-			return aabb;
-		}
-		// void ComputeMass(b2MassData* massData, float32 density) const
-		// {
-		// 	b2Assert(false);
-		// 	B2_NOT_USED(massData);
-		// 	B2_NOT_USED(density);
-		// }
-	private:
-		const b2LiquidShape* const* m_shapes;
-		int32 m_shapeCount;
-	} compositeShape(shapes, shapeCount);
-	CreateParticlesFillShapeForGroup(&compositeShape, groupDef, xf);
+	}
 }
 
 b2ParticleGroup* b2ParticleSystem::CreateParticleGroup(
