@@ -1137,6 +1137,11 @@ int32 b2ParticleSystem::DestroyParticlesInShape(
 		int32 m_destroyed;
 	} callback(this, shape, xf, callDestructionListener);
 	b2AABB aabb = shape.ComputeAABB(xf);
+	// QueryAABB uses open bounds; include boundary particles before the exact
+	// TestPoint check, without changing the public query's existing semantics.
+	b2Vec2 margin = {b2_linearSlop, b2_linearSlop};
+	aabb.lowerBound -= margin;
+	aabb.upperBound += margin;
 	// b2Body_ComputeAABB( b2Shape_GetBody(shape))
 	// shape.ComputeAABB(&aabb, xf, 0);
 	// m_world->QueryAABB(&callback, aabb);
