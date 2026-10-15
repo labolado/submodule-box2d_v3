@@ -122,18 +122,22 @@ namespace // anonymous namespace.
 
 	bool liquid_should_collide(b2ParticleSystem* system, b2ShapeId fixture, int32 particleIndex)
 	{
-		b2ContactFilter* contactFilter = system->GetFixtureContactFilter();
-
-		if (contactFilter)
+		const uint32 flags = system->GetFlagsBuffer()[particleIndex];
+		if (flags & b2_fixtureContactFilterParticle)
 		{
-			const uint32* const flags = system->GetFlagsBuffer();
-			if (flags[particleIndex] & b2_fixtureContactFilterParticle)
-			{
-				return contactFilter->ShouldCollide(fixture, system,
-													  particleIndex);
-			}
+			b2ContactFilter* contactFilter = system->GetFixtureContactFilter();
+			return !contactFilter || contactFilter->ShouldCollide(fixture, system, particleIndex);
 		}
-		return true;
+		if ((system->GetAllParticleFlags() & b2_fixtureContactFilterParticle) == 0)
+		{
+			return true; // The existing world query already applied this policy.
+		}
+		// Preserve the default world-query policy for unflagged particles,
+		// including when they share a system with filtered particles.
+		b2Filter filter = b2Shape_GetFilter(fixture);
+		b2QueryFilter query = b2DefaultQueryFilter();
+		return (filter.categoryBits & query.maskBits) != 0 &&
+			(filter.maskBits & query.categoryBits) != 0;
 	}
 
 	bool liquid_query_callback(b2ShapeId shapeId, void* context)
@@ -166,7 +170,9 @@ namespace // anonymous namespace.
 					uint32 flags = system->GetFlagsBuffer()[index];
 					b2ParticleGroup* group = system->GetGroupBuffer()[index];
 					if (queryContext->sweptRotation && b2AbsFloat(rotation) >= 1e-6f &&
-						(flags & (b2_zombieParticle | b2_wallParticle | b2_fixtureContactFilterParticle)) == 0 &&
+						(flags & (b2_zombieParticle | b2_wallParticle)) == 0 &&
+						((flags & b2_fixtureContactFilterParticle) == 0 ||
+						 b2LiquidIsDefaultContactFilter(system->GetFixtureContactFilter())) &&
 						!(group && (group->GetGroupFlags() & b2_rigidParticleGroup)))
 					{
 						transform0 = transform;
@@ -3331,7 +3337,14 @@ void b2ParticleSystem::UpdateBodyContacts()
 	ComputeAABB(&aabb);
 	// m_world->QueryAABB(&callback, aabb);
 	// b2World_OverlapAABB(m_world->GetWorldId(), aabb, b2DefaultQueryFilter(), liquid_query_update_body_contacts_callback, this);
-	m_world->QueryAABB(aabb, b2DefaultQueryFilter(), liquid_query_update_body_contacts_callback, this);
+	if (m_allParticleFlags & b2_fixtureContactFilterParticle)
+	{
+		b2OverlapLiquidCandidates(m_world->GetWorldId(), aabb, liquid_query_update_body_contacts_callback, this);
+	}
+	else
+	{
+		m_world->QueryAABB(aabb, b2DefaultQueryFilter(), liquid_query_update_body_contacts_callback, this);
+	}
 
 	if (m_def.strictContactCheck)
 	{
@@ -3504,7 +3517,14 @@ void b2ParticleSystem::SolveCollision(const b2TimeStep& step, bool sweptRotation
 	}
 	LiquidQueryContext context = { this, step, heads, next, sweptRotation };
 	// b2World_OverlapAABB(m_world->GetWorldId(), aabb, b2DefaultQueryFilter(), liquid_query_callback, &context);
-	m_world->QueryAABB(aabb, b2DefaultQueryFilter(), liquid_query_callback, &context);
+	if (m_allParticleFlags & b2_fixtureContactFilterParticle)
+	{
+		b2OverlapLiquidCandidates(m_world->GetWorldId(), aabb, liquid_query_callback, &context);
+	}
+	else
+	{
+		m_world->QueryAABB(aabb, b2DefaultQueryFilter(), liquid_query_callback, &context);
+	}
 	m_world->m_stackAllocator.Free(next);
 	m_world->m_stackAllocator.Free(heads);
 }

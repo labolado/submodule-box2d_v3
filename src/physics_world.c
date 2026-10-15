@@ -2551,6 +2551,35 @@ b2TreeStats b2World_OverlapAABBForLiquidFun( b2WorldId worldId, b2AABB aabb, b2Q
 	return treeStats;
 }
 
+// LiquidFun must apply particle category/mask/group rules after spatial lookup.
+// A world query filter cannot represent positive collision groups or mixed flags.
+static bool LiquidCandidateCallback( int proxyId, uint64_t userData, void* context )
+{
+	B2_UNUSED( proxyId );
+	WorldQueryContext* query = context;
+	int shapeIndex = (int)userData;
+	b2Shape* shape = b2Array_Get( query->world->shapes, shapeIndex );
+	b2ShapeId id = { shapeIndex + 1, query->world->worldId, shape->generation };
+	return query->fcn( id, query->userContext );
+}
+
+b2TreeStats b2OverlapLiquidCandidates( b2WorldId worldId, b2AABB aabb,
+									 b2OverlapResultFcn* fcn, void* context )
+{
+	b2TreeStats stats = { 0 };
+	b2World* world = b2GetWorldFromId( worldId );
+	B2_ASSERT( b2IsValidAABB( aabb ) );
+	WorldQueryContext query = { world, fcn, { 0 }, context };
+	for ( int i = 0; i < b2_bodyTypeCount; ++i )
+	{
+		b2TreeStats result = b2DynamicTree_QueryAll( world->broadPhase.trees + i, aabb,
+			LiquidCandidateCallback, &query );
+		stats.nodeVisits += result.nodeVisits;
+		stats.leafVisits += result.leafVisits;
+	}
+	return stats;
+}
+
 typedef struct WorldOverlapContext
 {
 	b2World* world;

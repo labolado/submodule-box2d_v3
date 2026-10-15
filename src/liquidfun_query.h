@@ -30,6 +30,11 @@ bool b2PrepareLiquidShapeQuery( b2ShapeId shapeId, b2LiquidShapeQuery* query );
 int b2GetLiquidWorkerCount( b2WorldId worldId );
 void b2RunLiquidTasks( b2WorldId worldId, b2TaskCallback* callback, void** contexts, int count );
 
+// Spatial candidates only: particle-specific contact filters run in LiquidFun.
+// Unlike public world queries, this is allowed during the liquid solver step.
+b2TreeStats b2OverlapLiquidCandidates( b2WorldId worldId, b2AABB aabb,
+									 b2OverlapResultFcn* fcn, void* context );
+
 // Snapshot geometry only; results and particle-specific state are never cached.
 void b2ComputeLiquidShapeDistance( const b2LiquidShapeQuery* query, b2Vec2 target,
 								  float* distance, b2Vec2* normal );

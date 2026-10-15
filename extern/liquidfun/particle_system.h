@@ -160,6 +160,7 @@ struct b2ParticleSystemDef
 {
 	b2ParticleSystemDef()
 	{
+		filter = b2DefaultFilter();
 		strictContactCheck = false;
 		density = 1.0f;
 		gravityScale = 1.0f;

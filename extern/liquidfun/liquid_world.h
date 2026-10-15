@@ -6,6 +6,9 @@
 
 bool operator<( b2ShapeId a, b2ShapeId b );
 
+// Internal CCD policy: the built-in filter cannot invoke user callbacks.
+bool b2LiquidIsDefaultContactFilter( const b2ContactFilter* filter );
+
 /// Callback class for AABB queries.
 /// See b2World::Query
 class b2LiquidQueryCallback

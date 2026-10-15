@@ -18,6 +18,11 @@ static bool UsesRotatingBoundaryCCD( const b2ParticleSystem* system )
 
 static b2ContactFilter b2_liquid_defaultFilter;
 
+bool b2LiquidIsDefaultContactFilter( const b2ContactFilter* filter )
+{
+	return filter == NULL || filter == &b2_liquid_defaultFilter;
+}
+
 bool operator<( b2ShapeId a, b2ShapeId b ) {
 	return a.index1 < b.index1;
 }
@@ -262,6 +267,16 @@ void b2LiquidWorld::PostStep( b2Vec2* const* startPositions )
 	{
 		return;
 	}
+	bool hasFilteredParticles = false;
+	for ( b2ParticleSystem* system = m_particleSystemList; system; system = system->GetNext() )
+	{
+		if ( UsesRotatingBoundaryCCD( system ) && !system->GetPaused() &&
+			( system->GetAllParticleFlags() & b2_fixtureContactFilterParticle ) )
+		{
+			hasFilteredParticles = true;
+			break;
+		}
+	}
 	b2BodyEvents events = b2World_GetBodyEvents( m_worldId );
 	for ( int e = 0; e < events.moveCount; ++e )
 	{
@@ -290,8 +305,9 @@ void b2LiquidWorld::PostStep( b2Vec2* const* startPositions )
 		{
 			b2ShapeId shape = shapes[j];
 			b2Filter filter = b2Shape_GetFilter( shape );
-			if ( b2Shape_IsSensor( shape ) || ( filter.categoryBits & queryFilter.maskBits ) == 0 ||
-				( filter.maskBits & queryFilter.categoryBits ) == 0 )
+			if ( b2Shape_IsSensor( shape ) || ( !hasFilteredParticles &&
+				( ( filter.categoryBits & queryFilter.maskBits ) == 0 ||
+				  ( filter.maskBits & queryFilter.categoryBits ) == 0 ) ) )
 			{
 				continue;
 			}
@@ -330,8 +346,9 @@ void b2LiquidWorld::PostStep( b2Vec2* const* startPositions )
 			bool changed = false;
 			for ( int i = 0; i < system->GetParticleCount(); ++i )
 			{
-				// Keep fixed/rigid particles and user callback timing on their existing path.
-				if ( flags[i] & ( b2_zombieParticle | b2_wallParticle | b2_fixtureContactFilterParticle ) ||
+				// Keep fixed/rigid particles and custom callback timing on their existing path.
+				if ( flags[i] & ( b2_zombieParticle | b2_wallParticle ) ||
+					( ( flags[i] & b2_fixtureContactFilterParticle ) && !b2LiquidIsDefaultContactFilter( m_contactFilter ) ) ||
 					( groups[i] && ( groups[i]->GetGroupFlags() & b2_rigidParticleGroup ) ) )
 				{
 					continue;
@@ -365,6 +382,21 @@ void b2LiquidWorld::PostStep( b2Vec2* const* startPositions )
 							if ( !b2AABB_Overlaps( path, bounds[j] ) )
 							{
 								continue;
+							}
+							// Honor category/mask/group filtering without adding user callbacks in PostStep.
+							if ( ( flags[i] & b2_fixtureContactFilterParticle ) && m_contactFilter &&
+								!m_contactFilter->ShouldCollide( shapes[j], system, i ) )
+							{
+								continue;
+							}
+							if ( ( flags[i] & b2_fixtureContactFilterParticle ) == 0 )
+							{
+								b2Filter filter = b2Shape_GetFilter( shapes[j] );
+								if ( ( filter.categoryBits & queryFilter.maskBits ) == 0 ||
+									( filter.maskBits & queryFilter.categoryBits ) == 0 )
+								{
+									continue;
+								}
 							}
 							b2WorldCastOutput hit = CastMovingBoundary( shapes[j], start, end );
 							if ( hit.hit && b2LengthSquared( hit.normal ) > 0.0f && hit.fraction <= closest.fraction )
