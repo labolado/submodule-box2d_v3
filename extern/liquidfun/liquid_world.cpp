@@ -268,7 +268,8 @@ void b2LiquidWorld::PostStep( b2Vec2* const* startPositions )
 		b2BodyId body = events.moveEvents[e].bodyId;
 		b2Transform previous = b2Body_GetPreviousTransform( body );
 		b2Transform current = b2Body_GetTransform( body );
-		float angle = std::atan2( previous.q.c * current.q.s - previous.q.s * current.q.c,
+		// Match the rigid solver's cross-platform angle calculation.
+		float angle = b2Atan2( previous.q.c * current.q.s - previous.q.s * current.q.c,
 			previous.q.c * current.q.c + previous.q.s * current.q.s );
 		if ( std::fabs( angle ) < 1e-6f )
 		{

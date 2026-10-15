@@ -2774,7 +2774,11 @@ void b2ParticleSystem::UpdateProxies(
 // explanation of a SIMD mergesort algorithm.
 void b2ParticleSystem::SortProxies(b2GrowableBuffer<Proxy>& proxies) const
 {
-	std::sort(proxies.Begin(), proxies.End());
+	// Equal spatial tags must have the same order across standard libraries.
+	std::sort(proxies.Begin(), proxies.End(), [](const Proxy& a, const Proxy& b)
+	{
+		return a.tag < b.tag || (a.tag == b.tag && a.index < b.index);
+	});
 }
 
 void b2ParticleSystem::UpdatePositionProxies()
