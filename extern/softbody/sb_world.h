@@ -16,6 +16,18 @@ template<class T> struct World
         int a,b;std::array<T,16> wa{},wb{};
         bool active=true;T speed=0,maxTorque=0,gain=0;
     };
+    struct TouchJoint
+    {
+        int body;
+        std::array<T,16> weights{};
+        Vec target{};
+        T frequency=T(3);
+        T dampingRatio=T(1);
+        T maxForce=T(50);
+        T lastForce=0;
+        unsigned long long generation=1;
+        bool active=true;
+    };
     struct Boundary
     {
         // Plane: dot(normal,p)>=offset. Corner: solid x>left && y<top.
@@ -29,6 +41,7 @@ template<class T> struct World
     };
     std::vector<B> bodies;
     std::vector<Pin> pins;
+    std::vector<TouchJoint> touchJoints;
     std::vector<Boundary> boundaries;
     // IDs never reused. Explicit collision exclusions, no hidden car part rules.
     std::vector<std::array<int,2>> exclusions;
@@ -104,6 +117,54 @@ template<class T> struct World
         T jt=std::max(-boundary.friction*j,std::min(boundary.friction*j,-speed/inv));
         double before=kinetic(id);apply(tangent,jt);frictionLoss+=before-kinetic(id);++contacts;++cornerContacts;
     }
+    void solveTouchJoint(TouchJoint& joint)
+    {
+        auto& body=bodies[joint.body];
+        Vec position=anchor(joint.body,joint.weights);
+        Vec velocity{};
+        T inverseMass=0;
+        for(int node=0;node<16;++node)
+        {
+            T weight=joint.weights[node];
+            inverseMass+=weight*weight/body.mass[node];
+            for(int axis=0;axis<2;++axis)
+            {
+                velocity[axis]+=weight*body.v[node][axis];
+            }
+        }
+
+        // Implicit damped spring at a material point. The target is prescribed;
+        // its reaction belongs to the external controller, not another body.
+        T omega=T(2*3.14159265358979323846)*joint.frequency;
+        T damping=T(2)*joint.dampingRatio*omega;
+        T denominator=inverseMass*(T(1)+damping*dt+omega*omega*dt*dt);
+        Vec force{};
+        for(int axis=0;axis<2;++axis)
+        {
+            T error=joint.target[axis]-position[axis];
+            T velocityCoefficient=damping+omega*omega*dt;
+            force[axis]=(omega*omega*error-velocityCoefficient*velocity[axis])/denominator;
+        }
+        T magnitude=std::hypot(force[0],force[1]);
+        if(magnitude>joint.maxForce)
+        {
+            T scale=joint.maxForce/magnitude;
+            for(T& value:force)value*=scale;
+        }
+        joint.lastForce=std::min(magnitude,joint.maxForce);
+
+        double before=kinetic(joint.body);
+        for(int node=0;node<16;++node)
+        {
+            for(int axis=0;axis<2;++axis)
+            {
+                T impulse=dt*joint.weights[node]*force[axis];
+                body.v[node][axis]+=impulse/body.mass[node];
+                external[axis]+=impulse;
+            }
+        }
+        appliedWork+=kinetic(joint.body)-before;
+    }
     void solveSubstep(const std::vector<T>& offsets,const std::vector<T>& velocities)
     {
         auto previous=bodies;
@@ -119,6 +180,10 @@ template<class T> struct World
             { T impulse=dt*b.forceInput[k]/T(16);b.v[i][k]+=impulse/b.mass[i];external[k]+=impulse; }
             if(b.torqueInput!=0)torque(int(id),b.torqueInput);
             appliedWork+=kinetic(int(id))-before;
+        }
+        for(auto& joint:touchJoints)
+        {
+            if(joint.active)solveTouchJoint(joint);
         }
         std::vector<double> torques(bodies.size(),0);double before=0;
         for(const auto& p:pins)if(p.active && p.maxTorque>0)
@@ -234,6 +299,16 @@ template<class T> struct World
         for(auto& b:bodies){b.forceInput={};b.torqueInput=0;}
     }
     void removeBody(int id)
-    { bodies[id].active=false;for(auto& p:pins)if(p.a==id||p.b==id)p.active=false; }
+    {
+        bodies[id].active=false;
+        for(auto& pin:pins)
+        {
+            if(pin.a==id||pin.b==id)pin.active=false;
+        }
+        for(auto& joint:touchJoints)
+        {
+            if(joint.body==id)joint.active=false;
+        }
+    }
 };
 }

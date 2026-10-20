@@ -6,7 +6,7 @@ worker scheduler, SIMD flags or LiquidFun behavior are modified.
 
 - `sb_body.h`: fixed 16-node local-frame and pressure materials, deformation damping.
 - `sb_contact.h`: point/edge contact and sweep diagnostics (not general CCD).
-- `sb_world.h`: body storage, mass-weighted pins, equal/opposite motors, planes,
+- `sb_world.h`: body storage, mass-weighted pins, equal/opposite motors, force-limited touch springs, planes,
   static solid quadrants, contact iterations and per-substep diagnostics.
 
 Units are meters, kilograms and seconds, with no display scaling. The validated
@@ -32,3 +32,9 @@ Metrics aggregate over every substep of the last call; body positions represent 
 current state. Sweep warnings remain diagnostics and do not establish robust general
 soft/soft collision. Future Box2D coupling should live in a separate adapter rather
 than leaking rigid-engine state into the material kernel.
+
+Touch springs act on weighted material points with an implicit damped update at
+substep frequency. Their target is an external controller; appliedWork records
+its kinetic work, and total force is capped. Removal invalidates the handle;
+reused touch slots carry a generation to prevent stale-handle mutation. Touch
+IDs are the exception to the non-reused body/pin/boundary allocation policy.
