@@ -488,15 +488,6 @@ void b2RecW_SHAPEPROXY( b2RecBuffer* buf, b2ShapeProxy v )
 	b2RecW_F32( buf, v.radius );
 }
 
-void b2RecW_WORLDCASTOUTPUT( b2RecBuffer* buf, b2WorldCastOutput v )
-{
-	b2RecW_VEC2( buf, v.normal );
-	b2RecW_POSITION( buf, v.point );
-	b2RecW_F32( buf, v.fraction );
-	b2RecW_I32( buf, v.iterations );
-	b2RecW_BOOL( buf, v.hit );
-}
-
 void b2RecW_RAYRESULT( b2RecBuffer* buf, b2RayResult v )
 {
 	b2RecW_SHAPEID( buf, v.shapeId );
@@ -825,7 +816,7 @@ void b2StopRecordingInternal( b2World* world )
 // Convenience file I/O. The library never opens files while recording. These let a host persist
 // or reload a recording buffer without writing its own I/O. fopen precedent: b2World_DumpMemoryStats.
 
-bool b2SaveRecordingToFile( const b2Recording* recording, const char* path )
+bool b2Recording_SaveToFile( const b2Recording* recording, const char* path )
 {
 	if ( recording == NULL || path == NULL )
 	{
@@ -843,7 +834,7 @@ bool b2SaveRecordingToFile( const b2Recording* recording, const char* path )
 	return (int)written == recording->buffer.size;
 }
 
-b2Recording* b2LoadRecordingFromFile( const char* path )
+b2Recording* b2CreateRecordingFromFile( const char* path )
 {
 	if ( path == NULL )
 	{

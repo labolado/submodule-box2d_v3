@@ -29,32 +29,6 @@
 #define ITERATIONS 1
 #define RELAX_ITERATIONS 1
 
-#if ( defined( __GNUC__ ) || defined( __clang__ ) ) && ( defined( __i386__ ) || defined( __x86_64__ ) )
-static inline void b2Pause( void )
-{
-	__asm__ __volatile__( "pause\n" );
-}
-#elif ( defined( __arm__ ) && defined( __ARM_ARCH ) && __ARM_ARCH >= 7 ) || defined( __aarch64__ )
-static inline void b2Pause( void )
-{
-	__asm__ __volatile__( "yield" ::: "memory" );
-}
-#elif defined( _MSC_VER ) && ( defined( _M_IX86 ) || defined( _M_X64 ) )
-static inline void b2Pause( void )
-{
-	_mm_pause();
-}
-#elif defined( _MSC_VER ) && ( defined( _M_ARM ) || defined( _M_ARM64 ) )
-static inline void b2Pause( void )
-{
-	__yield();
-}
-#else
-static inline void b2Pause( void )
-{
-}
-#endif
-
 typedef struct b2WorkerContext
 {
 	b2StepContext* context;
@@ -179,7 +153,7 @@ struct b2ContinuousContext
 
 #define B2_CORE_FRACTION 0.25f
 
-// This is called from b2DynamicTree_Query for continuous collision
+// This is called from b2DynamicTree_OverlapAABB for continuous collision
 static bool b2ContinuousQueryCallback( int proxyId, uint64_t userData, void* context )
 {
 	B2_UNUSED( proxyId );
@@ -244,7 +218,7 @@ static bool b2ContinuousQueryCallback( int proxyId, uint64_t userData, void* con
 	// Custom user filtering
 	if ( shape->enableCustomFiltering || fastShape->enableCustomFiltering )
 	{
-		b2CustomFilterFcn* customFilterFcn = world->customFilterFcn;
+		b2CustomFilterCallbackFcn* customFilterFcn = world->customFilterFcn;
 		if ( customFilterFcn != NULL )
 		{
 			b2ShapeId idA = { shape->id + 1, world->worldId, shape->generation };
@@ -317,7 +291,7 @@ static bool b2ContinuousQueryCallback( int proxyId, uint64_t userData, void* con
 	input.sweepB = continuousContext->sweep;
 	input.maxFraction = continuousContext->fraction;
 
-	b2TOIOutput output = b2TimeOfImpact( &input );
+	b2TOIOutput output = b2ComputeTimeOfImpact( &input );
 	if ( isSensor )
 	{
 		// Only accept a sensor hit that is sooner than the current solid hit.
@@ -353,7 +327,7 @@ static bool b2ContinuousQueryCallback( int proxyId, uint64_t userData, void* con
 			b2ShapeExtent extent = b2ComputeShapeExtent( fastShape, centroid );
 			float radius = B2_CORE_FRACTION * extent.minExtent;
 			input.proxyB = b2MakeProxy( &centroid, 1, radius );
-			output = b2TimeOfImpact( &input );
+			output = b2ComputeTimeOfImpact( &input );
 			if ( 0.0f < output.fraction && output.fraction < continuousContext->fraction )
 			{
 				hitFraction = output.fraction;
@@ -443,12 +417,12 @@ static void b2SolveContinuous( b2World* world, int bodySimIndex, b2TaskContext* 
 
 		b2AABB sweptBox = b2AABB_Union( box1, box2 );
 
-		b2DynamicTree_Query( staticTree, sweptBox, B2_DEFAULT_MASK_BITS, b2ContinuousQueryCallback, &context );
+		b2DynamicTree_OverlapAABB( staticTree, sweptBox, B2_DEFAULT_MASK_BITS, b2ContinuousQueryCallback, &context );
 
 		if ( isBullet )
 		{
-			b2DynamicTree_Query( kinematicTree, sweptBox, B2_DEFAULT_MASK_BITS, b2ContinuousQueryCallback, &context );
-			b2DynamicTree_Query( dynamicTree, sweptBox, B2_DEFAULT_MASK_BITS, b2ContinuousQueryCallback, &context );
+			b2DynamicTree_OverlapAABB( kinematicTree, sweptBox, B2_DEFAULT_MASK_BITS, b2ContinuousQueryCallback, &context );
+			b2DynamicTree_OverlapAABB( dynamicTree, sweptBox, B2_DEFAULT_MASK_BITS, b2ContinuousQueryCallback, &context );
 		}
 	}
 
@@ -996,7 +970,9 @@ static void b2ExecuteStage( b2SolverStage* stage, b2StepContext* context, int pr
 	int blockIndex = startIndex;
 	for ( int i = 0; i < blockCount; ++i )
 	{
-		if ( b2AtomicCompareExchangeInt( &blocks[blockIndex].syncIndex, previousSyncIndex, syncIndex ) )
+		// Read before attempting the CAS.
+		if ( b2AtomicLoadInt( &blocks[blockIndex].syncIndex ) == previousSyncIndex &&
+			 b2AtomicCompareExchangeInt( &blocks[blockIndex].syncIndex, previousSyncIndex, syncIndex ) )
 		{
 			B2_ASSERT( stage->type != b2_stagePrepareContacts || syncIndex < 2 );
 			B2_ASSERT( completedCount < blockCount );
@@ -1325,6 +1301,8 @@ static void b2BulletBodyTask( int startIndex, int endIndex, int workerIndex, voi
 // Solve with graph coloring
 void b2Solve( b2World* world, b2StepContext* stepContext )
 {
+	int simdShift = world->simdWidth == 8 ? 3 : 2;
+
 	// Only count steps that advance the simulation
 	world->stepIndex += 1;
 
@@ -1402,7 +1380,7 @@ void b2Solve( b2World* world, b2StepContext* stepContext )
 			activeColorIndices[c] = i;
 
 			// Ceiling for wide constraint count
-			int colorContactCountW = colorContactCount > 0 ? ( ( colorContactCount - 1 ) >> B2_SIMD_SHIFT ) + 1 : 0;
+			int colorContactCountW = colorContactCount > 0 ? ( ( colorContactCount - 1 ) >> simdShift ) + 1 : 0;
 			wideContactCount += colorContactCountW;
 			colorContactCounts[c] = colorContactCountW;
 
@@ -1424,8 +1402,8 @@ void b2Solve( b2World* world, b2StepContext* stepContext )
 		b2BlockDim contactPrepareDim = b2ComputeBlockCount( wideContactCount, minContactsPerBlock, maxBlockCount );
 		b2BlockDim jointPrepareDim = b2ComputeBlockCount( jointCount, minJointsPerBlock, maxBlockCount );
 
-		int wideContactConstraintByteCount = b2GetWideContactConstraintByteCount();
-		struct b2ContactConstraintWide* wideContactConstraints =
+		int wideContactConstraintByteCount = b2GetWideContactConstraintByteCount( world->simdWidth );
+		void* wideContactConstraints =
 			b2StackAlloc( &world->stack, wideContactCount * wideContactConstraintByteCount, "contact constraint" );
 
 		b2GraphColor* overflow = colors + B2_OVERFLOW_INDEX;
@@ -1461,15 +1439,14 @@ void b2Solve( b2World* world, b2StepContext* stepContext )
 				}
 				else
 				{
-					color->wideConstraints = (struct b2ContactConstraintWide*)( (uint8_t*)wideContactConstraints +
-																				wideBase * wideContactConstraintByteCount );
+					color->wideConstraints = (uint8_t*)wideContactConstraints + wideBase * wideContactConstraintByteCount;
 
-					int colorContactCountW = ( ( colorContactCount - 1 ) >> B2_SIMD_SHIFT ) + 1;
+					int colorContactCountW = ( ( colorContactCount - 1 ) >> simdShift ) + 1;
 					color->wideConstraintCount = colorContactCountW;
 
 					// Zero remainder lanes in the tail wide slot so prepare workers don't need to
 					// initialize them.
-					if ( ( colorContactCount & ( B2_SIMD_WIDTH - 1 ) ) != 0 )
+					if ( ( colorContactCount & ( world->simdWidth - 1 ) ) != 0 )
 					{
 						memset( (uint8_t*)color->wideConstraints + ( colorContactCountW - 1 ) * wideContactConstraintByteCount, 0,
 								wideContactConstraintByteCount );
@@ -1981,7 +1958,7 @@ void b2Solve( b2World* world, b2StepContext* stepContext )
 				int proxyId = B2_PROXY_ID( proxyKey );
 				B2_VALIDATE( B2_PROXY_TYPE( proxyKey ) == b2_dynamicBody );
 
-				b2AABB treeAABB = b2DynamicTree_GetAABB( dynamicTree, proxyId );
+				b2AABB treeAABB = b2DynamicTree_GetProxyBounds( dynamicTree, proxyId );
 				b2AABB shapeFatAABB = world->fatAABBs.data[shapeId];
 
 				// Double check containment because a bullet can have multiple

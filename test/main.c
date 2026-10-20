@@ -44,10 +44,12 @@ extern int RecordingOutlinerTest( void );
 extern int RecordingKeyframeTest( void );
 extern int RecordingScrubTest( void );
 extern int RecordingQueryScrubTest( void );
+extern int RecordingSIMDWidthTest( void );
 extern int ReStepRaceTest( void );
 extern int RestitutionTest( void );
 extern int ShapeTest( void );
 extern int SnapshotTest( void );
+extern int SortTest( void );
 extern int TableTest( void );
 extern int ThreadTest( void );
 extern int WorldTest( void );
@@ -85,8 +87,8 @@ int main( int argc, char** argv )
 	___tracy_startup_profiler();
 #endif
 
-	b2SetAssertFcn( TestAssertFcn );
-	b2SetLogFcn( TestLogFcn );
+	b2SetAssertCallback( TestAssertFcn );
+	b2SetLogCallback( TestLogFcn );
 
 	const char* filter = NULL;
 	if ( argc > 1 )
@@ -121,11 +123,13 @@ int main( int argc, char** argv )
 	MAYBE_RUN_TEST( RecordingOutlinerTest );
 	MAYBE_RUN_TEST( RecordingQueryScrubTest );
 	MAYBE_RUN_TEST( RecordingScrubTest );
+	MAYBE_RUN_TEST( RecordingSIMDWidthTest );
 	MAYBE_RUN_TEST( RecordingTest );
 	MAYBE_RUN_TEST( ReStepRaceTest );
 	MAYBE_RUN_TEST( RestitutionTest );
 	MAYBE_RUN_TEST( ShapeTest );
 	MAYBE_RUN_TEST( SnapshotTest );
+	MAYBE_RUN_TEST( SortTest );
 	MAYBE_RUN_TEST( ThreadTest );
 	MAYBE_RUN_TEST( WorldTest );
 

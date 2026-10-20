@@ -15,6 +15,7 @@
 #include "config.h"
 
 /// Used to indicate an unset or invalid index value.
+/// @ingroup base
 #define B2_NULL_INDEX ( -1 )
 
 // clang-format off
@@ -87,33 +88,33 @@
 /// Prototype for user allocation function
 /// @param size the allocation size in bytes
 /// @param alignment the required alignment, guaranteed to be a power of 2
-typedef void* b2AllocFcn( size_t size, int alignment );
+typedef void* b2AllocCallbackFcn( size_t size, int alignment );
 
 /// Prototype for user free function
-/// @param mem the memory previously allocated through `b2AllocFcn`
+/// @param mem the memory previously allocated through `b2AllocCallbackFcn`
 /// @param size the allocation size in bytes
-typedef void b2FreeFcn( void* mem, size_t size );
+typedef void b2FreeCallbackFcn( void* mem, size_t size );
 
 /// Prototype for the user assert callback. Return 0 to skip the debugger break.
-typedef int b2AssertFcn( const char* condition, const char* fileName, int lineNumber );
+typedef int b2AssertCallbackFcn( const char* condition, const char* fileName, int lineNumber );
 
 /// Prototype for user log callback. Used to log warnings.
-typedef void b2LogFcn( const char* message );
+typedef void b2LogCallbackFcn( const char* message );
 
-/// This allows the user to override the allocation functions. These should be
-/// set during application startup.
-B2_API void b2SetAllocator( b2AllocFcn* allocFcn, b2FreeFcn* freeFcn );
+/// This allows the user to override the allocation functions. These should be set during
+/// application startup.
+B2_API void b2SetAllocator( b2AllocCallbackFcn* allocFcn, b2FreeCallbackFcn* freeFcn );
 
 /// @return the total bytes allocated by Box2D
-B2_API int64_t b2GetByteCount( void );
+B2_API size_t b2GetByteCount( void );
 
 /// Override the default assert function
 /// @param assertFcn a non-null assert callback
-B2_API void b2SetAssertFcn( b2AssertFcn* assertFcn );
+B2_API void b2SetAssertCallback( b2AssertCallbackFcn* assertFcn );
 
 /// Override the default log function
 /// @param logFcn a non-null log callback
-B2_API void b2SetLogFcn( b2LogFcn* logFcn );
+B2_API void b2SetLogCallback( b2LogCallbackFcn* logFcn );
 
 /// Version numbering scheme.
 /// See https://semver.org/
@@ -144,6 +145,9 @@ B2_API b2Version b2GetVersion( void );
 /// @return true if the library was built with BOX2D_DOUBLE_PRECISION (large world mode)
 B2_API bool b2IsDoublePrecision( void );
 
+/// @return true if the current CPU has the AVX2 instruction set.
+B2_API bool b2IsAVX2Available( void );
+
 /**@}*/
 
 //! @cond
@@ -161,8 +165,9 @@ B2_API bool b2IsDoublePrecision( void );
 
 #if !defined( NDEBUG ) || defined( B2_ENABLE_ASSERT )
 B2_API int b2InternalAssert( const char* condition, const char* fileName, int lineNumber );
-#define B2_ASSERT( condition )                                                                                                   \
-	( (void)( ( !!( condition ) ) || ( b2InternalAssert( #condition, __FILE__, (int)( __LINE__ ) ), 0 ) ) )
+#define B2_ASSERT( condition )                                                                     \
+	( (void)( ( !!( condition ) ) ||                                                               \
+			  ( b2InternalAssert( #condition, __FILE__, (int)( __LINE__ ) ), 0 ) ) )
 #else
 #define B2_ASSERT( ... ) ( (void)0 )
 #endif
@@ -174,21 +179,23 @@ B2_API int b2InternalAssert( const char* condition, const char* fileName, int li
 #define B2_VALIDATE( ... ) ( (void)0 )
 #endif
 
+//! @endcond
+
 /// Get the absolute number of system ticks. The value is platform specific.
 B2_API uint64_t b2GetTicks( void );
 
 /// Get the milliseconds passed from an initial tick value.
 B2_API float b2GetMilliseconds( uint64_t ticks );
 
-/// Get the milliseconds passed from an initial tick value. Resets the passed in
-/// value to the current tick value.
+/// Get the milliseconds passed from an initial tick value. Resets the passed in value to the
+/// current tick value.
 B2_API float b2GetMillisecondsAndReset( uint64_t* ticks );
 
 /// Yield to be used in a busy loop.
 B2_API void b2Yield( void );
 
-/// Simple djb2 hash function for determinism testing
+/// Starting hash value.
 #define B2_HASH_INIT 5381
-B2_API uint32_t b2Hash( uint32_t hash, const uint8_t* data, int count );
 
-//! @endcond
+/// Simple djb2 hash function for determinism testing
+B2_API uint32_t b2Hash( uint32_t hash, const uint8_t* data, int count );

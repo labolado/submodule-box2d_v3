@@ -16,7 +16,6 @@
 #include "parallel_for.h"
 #include "physics_world.h"
 #include "platform.h"
-#include "qsort.h"
 #include "shape.h"
 #include "simd.h"
 
@@ -30,13 +29,13 @@ void b2CreateBroadPhase( b2BroadPhase* bp, const b2Capacity* capacity )
 	bp->pairSet = b2CreateSet( b2MaxInt( 32, 2 * capacity->contactCount ) );
 
 	int staticCapacity = b2MaxInt( 16, capacity->staticShapeCount );
-	bp->trees[b2_staticBody] = b2CreateDynamicTree( staticCapacity );
+	b2CreateDynamicTreeInternal( bp->trees + b2_staticBody, staticCapacity );
 
 	int kinematicCapacity = 16;
-	bp->trees[b2_kinematicBody] = b2CreateDynamicTree( kinematicCapacity );
+	b2CreateDynamicTreeInternal( bp->trees + b2_kinematicBody, kinematicCapacity );
 
 	int dynamicCapacity = b2MaxInt( 16, capacity->dynamicShapeCount );
-	bp->trees[b2_dynamicBody] = b2CreateDynamicTree( dynamicCapacity );
+	b2CreateDynamicTreeInternal( bp->trees + b2_dynamicBody, dynamicCapacity );
 
 	bp->movedSiblings = NULL;
 }
@@ -45,7 +44,7 @@ void b2DestroyBroadPhase( b2BroadPhase* bp )
 {
 	for ( int i = 0; i < b2_bodyTypeCount; ++i )
 	{
-		b2DestroyDynamicTree( bp->trees + i );
+		b2DestroyDynamicTreeInternal( bp->trees + i );
 	}
 
 	b2DestroySet( &bp->pairSet );
@@ -227,7 +226,7 @@ static void b2FlushCandidatePairs( b2PairContext* context )
 		// Custom user filter
 		if ( shapeA->enableCustomFiltering || shapeB->enableCustomFiltering )
 		{
-			b2CustomFilterFcn* customFilterFcn = world->customFilterFcn;
+			b2CustomFilterCallbackFcn* customFilterFcn = world->customFilterFcn;
 			if ( customFilterFcn != NULL )
 			{
 				b2ShapeId idA = { shapeIdA + 1, world->worldId, shapeA->generation };
@@ -282,19 +281,21 @@ static void b2CollideProxyAndSubtree( const b2TreeNode* proxy, const b2TreeNode*
 	while ( stackCount > 0 )
 	{
 		pair = stack[--stackCount];
-		for ( int i = 0; i < 2; ++i )
+		const b2TreeNode* children = nodes + pair;
+
+		int movedMask = 3;
+		if ( proxyMark == 0 )
 		{
-			const b2TreeNode* node = nodes + pair + i;
-			if ( ( ( node->flagIndex | proxyMark ) & B2_MOVED_NODE ) == 0 )
-			{
-				continue;
-			}
+			movedMask = ( b2IsNodeMoved( children + 0 ) ? 1 : 0 ) | ( b2IsNodeMoved( children + 1 ) ? 2 : 0 );
+		}
 
-			if ( b2OverlapNode( boxv, node ) == false )
-			{
-				continue;
-			}
+		int mask = b2OverlapNodePairMask( boxv, children ) & movedMask;
+		while ( mask != 0 )
+		{
+			int i = (int)b2CTZ32( (uint32_t)mask );
+			mask &= mask - 1;
 
+			const b2TreeNode* node = children + i;
 			if ( b2IsLeaf( node ) )
 			{
 				b2AddCandidatePair( shapeId, node->shapeIndex, context );
@@ -314,15 +315,9 @@ static void b2CollideProxyAndSubtree( const b2TreeNode* proxy, const b2TreeNode*
 	}
 }
 
-// Helper for b2CollideCrossPairs to avoid code duplication.
-B2_FORCE_INLINE void b2VisitPair( const b2TreeNode* arrayA, const b2TreeNode* arrayB, const b2TreeNode* nodeA,
-								  const b2TreeNode* nodeB, b2IndexPair* stack, int* stackCount, b2PairContext* context )
+B2_FORCE_INLINE void b2ExpandPair( const b2TreeNode* arrayA, const b2TreeNode* arrayB, const b2TreeNode* nodeA,
+								   const b2TreeNode* nodeB, b2IndexPair* stack, int* stackCount, b2PairContext* context )
 {
-	if ( b2TestPair( nodeA, nodeB ) == false )
-	{
-		return;
-	}
-
 	bool leafA = b2IsLeaf( nodeA );
 	bool leafB = b2IsLeaf( nodeB );
 	if ( leafA && leafB )
@@ -370,17 +365,26 @@ static void b2CollideCrossPairs( const b2TreeNode* arrayA, const b2TreeNode* arr
 	int stackCount = 0;
 
 	// Seed the stack.
-	b2VisitPair( arrayA, arrayB, subtreeA, subtreeB, stack, &stackCount, context );
+	if ( b2TestPair( subtreeA, subtreeB ) )
+	{
+		b2ExpandPair( arrayA, arrayB, subtreeA, subtreeB, stack, &stackCount, context );
+	}
 
 	while ( stackCount > 0 )
 	{
 		b2IndexPair pair = stack[--stackCount];
-		for ( int i = 0; i < 2; ++i )
+		const b2TreeNode* pairA = arrayA + pair.a;
+		const b2TreeNode* pairB = arrayB + pair.b;
+
+		int movedA = ( b2IsNodeMoved( pairA + 0 ) ? 0x3 : 0 ) | ( b2IsNodeMoved( pairA + 1 ) ? 0xC : 0 );
+		int movedB = ( b2IsNodeMoved( pairB + 0 ) ? 0x5 : 0 ) | ( b2IsNodeMoved( pairB + 1 ) ? 0xA : 0 );
+
+		int mask = b2OverlapPairMask( pairA, pairB ) & ( movedA | movedB );
+		while ( mask != 0 )
 		{
-			for ( int j = 0; j < 2; ++j )
-			{
-				b2VisitPair( arrayA, arrayB, arrayA + pair.a + i, arrayB + pair.b + j, stack, &stackCount, context );
-			}
+			int lane = (int)b2CTZ32( (uint32_t)mask );
+			mask &= mask - 1;
+			b2ExpandPair( arrayA, arrayB, pairA + ( lane >> 1 ), pairB + ( lane & 1 ), stack, &stackCount, context );
 		}
 	}
 }
@@ -505,6 +509,60 @@ static void b2CrossPairsTask( int startIndex, int endIndex, int workerIndex, voi
 	b2TracyCZoneEnd( cross_pairs );
 }
 
+// LSD radix sort. Faster than qsort when count is large and fast enough otherwise.
+// https://en.wikipedia.org/wiki/Radix_sort
+void b2RadixSortKeys( uint64_t* keys, uint64_t* tempKeys, int count )
+{
+	int digitCounts[8][256] = { 0 };
+	for ( int i = 0; i < count; ++i )
+	{
+		uint64_t key = keys[i];
+		for ( int digit = 0; digit < 8; ++digit )
+		{
+			digitCounts[digit][( key >> ( 8 * digit ) ) & 0xFF] += 1;
+		}
+	}
+
+	uint64_t* source = keys;
+	uint64_t* target = tempKeys;
+
+	for ( int digit = 0; digit < 8; ++digit )
+	{
+		int shift = 8 * digit;
+		int* offsets = digitCounts[digit];
+
+		if ( offsets[( source[0] >> shift ) & 0xFF] == count )
+		{
+			// All keys have the same value for this digit. Common for shape pair keys.
+			continue;
+		}
+
+		int sum = 0;
+		for ( int i = 0; i < 256; ++i )
+		{
+			int digitCount = offsets[i];
+			offsets[i] = sum;
+			sum += digitCount;
+		}
+
+		for ( int i = 0; i < count; ++i )
+		{
+			uint64_t key = source[i];
+			target[offsets[( key >> shift ) & 0xFF]++] = key;
+		}
+
+		// Swap for the next pass
+		uint64_t* swap = source;
+		source = target;
+		target = swap;
+	}
+
+	if ( source != keys )
+	{
+		memcpy( keys, source, count * sizeof( uint64_t ) );
+	}
+}
+
 static void b2UpdateTreesTask( void* context )
 {
 	b2TracyCZoneNC( tree_task, "Rebuild BVH", b2_colorFireBrick, true );
@@ -615,21 +673,11 @@ void b2UpdateBroadPhasePairs( b2World* world )
 
 	B2_ASSERT( keyCount == pairCount );
 
+	if ( pairCount > 1 )
 	{
-#define LESS( i, j ) ( pairKeys[(int)( i )] < pairKeys[(int)( j )] )
-#define SWAP( i, j )                                                                                                             \
-	do                                                                                                                           \
-	{                                                                                                                            \
-		uint64_t tmp_ = pairKeys[(int)( i )];                                                                                    \
-		pairKeys[(int)( i )] = pairKeys[(int)( j )];                                                                             \
-		pairKeys[(int)( j )] = tmp_;                                                                                             \
-	}                                                                                                                            \
-	while ( 0 )
-
-		QSORT( pairCount, LESS, SWAP );
-
-#undef LESS
-#undef SWAP
+		uint64_t* tempKeys = b2StackAlloc( alloc, pairCount * sizeof( uint64_t ), "temp keys" );
+		b2RadixSortKeys( pairKeys, tempKeys, pairCount );
+		b2StackFree( alloc, tempKeys );
 	}
 
 	for ( int i = 0; i < keyCount; ++i )
