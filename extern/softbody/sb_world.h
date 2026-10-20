@@ -14,6 +14,7 @@ template<class T> struct World
     struct Pin
     {
         int a,b;std::array<T,16> wa{},wb{};
+        Vec worldAnchor{}; // b == -1 denotes a fixed world endpoint.
         bool active=true;T speed=0,maxTorque=0,gain=0;
     };
     struct TouchJoint
@@ -66,6 +67,8 @@ template<class T> struct World
         for(int i=0;i<16;++i)for(int k=0;k<2;++k)result[k]+=weights[i]*bodies[id].x[i][k];
         return result;
     }
+    Vec pinTarget(const Pin& pin) const
+    { return pin.b<0 ? pin.worldAnchor : anchor(pin.b,pin.wb); }
     Vec center(int id) const
     { Vec result{};for(auto p:bodies[id].x)for(int k=0;k<2;++k)result[k]+=p[k]/T(16);return result; }
     double kinetic(int id) const
@@ -202,6 +205,13 @@ template<class T> struct World
         std::vector<double> torques(bodies.size(),0);double before=0;
         for(const auto& p:pins)if(p.active && p.maxTorque>0)
         {
+            if(p.b<0)
+            {
+                double value=std::max(-double(p.maxTorque),std::min(double(p.maxTorque),
+                    double(p.gain)*(double(p.speed)-omega(p.a))));
+                torques[p.a]+=value;
+                continue;
+            }
             double value=std::max(-double(p.maxTorque),std::min(double(p.maxTorque),double(p.gain)*(double(p.speed)-(omega(p.b)-omega(p.a)))));
             torques[p.b]+=value;torques[p.a]-=value;
         }
@@ -237,14 +247,15 @@ template<class T> struct World
             }
             for(const auto& p:pins)if(p.active)for(int k=0;k<2;++k)
             {
-                T error=anchor(p.a,p.wa)[k]-anchor(p.b,p.wb)[k],inv=0;
-                for(int i=0;i<16;++i)inv+=p.wa[i]*p.wa[i]/bodies[p.a].mass[i]+p.wb[i]*p.wb[i]/bodies[p.b].mass[i];
+                T error=anchor(p.a,p.wa)[k]-pinTarget(p)[k],inv=0;
+                for(int i=0;i<16;++i)inv+=p.wa[i]*p.wa[i]/bodies[p.a].mass[i]+(p.b<0 ? T(0) : p.wb[i]*p.wb[i]/bodies[p.b].mass[i]);
                 if(!(inv>0)){failure="invalid_pin_mass";return;}T lambda=-error/inv;
                 for(int i=0;i<16;++i)
                 {
-                    T da=p.wa[i]*lambda/bodies[p.a].mass[i],db=-p.wb[i]*lambda/bodies[p.b].mass[i];
+                    T da=p.wa[i]*lambda/bodies[p.a].mass[i],db=p.b<0 ? T(0) : -p.wb[i]*lambda/bodies[p.b].mass[i];
                     bodies[p.a].x[i][k]+=da;bodies[p.a].v[i][k]+=da/dt;
-                    bodies[p.b].x[i][k]+=db;bodies[p.b].v[i][k]+=db/dt;
+                    if(p.b>=0){bodies[p.b].x[i][k]+=db;bodies[p.b].v[i][k]+=db/dt;}
+                    else external[k]+=double(bodies[p.a].mass[i])*da/dt;
                 }
             }
         }
@@ -289,7 +300,7 @@ template<class T> struct World
             for(auto p:bodies[a].x)if(inside<T>(p,bodies[b]))m.penetration=std::max(m.penetration,double(nearest<T>(p,bodies[b]).depth));
             for(auto p:bodies[b].x)if(inside<T>(p,bodies[a]))m.penetration=std::max(m.penetration,double(nearest<T>(p,bodies[a]).depth));
         }
-        for(const auto& p:pins)if(p.active){auto a=anchor(p.a,p.wa),b=anchor(p.b,p.wb);m.pin=std::max(m.pin,double(std::hypot(a[0]-b[0],a[1]-b[1])));}
+        for(const auto& p:pins)if(p.active){auto a=anchor(p.a,p.wa),b=pinTarget(p);m.pin=std::max(m.pin,double(std::hypot(a[0]-b[0],a[1]-b[1])));}
         return m;
     }
     Metrics currentMetrics() const

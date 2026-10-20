@@ -65,3 +65,8 @@ validate their own definitions. This guard is not a universal stability guarante
 Normal three-part driving plus extreme parallel-plane compression and touch release
 are tested; arbitrary folded soft/soft collision, complex terrain CCD, incompatible
 negative plane gaps, and mobile performance remain outside that evidence.
+
+World pins use `Pin::b == -1` and a fixed `worldAnchor`; their motor target is
+absolute counterclockwise angular speed. No surrogate heavy body is created.
+Pins with two bodies retain their relative-speed convention. World pin reactions
+contribute to external linear impulse and motor work remains explicitly recorded.
