@@ -70,3 +70,8 @@ World pins use `Pin::b == -1` and a fixed `worldAnchor`; their motor target is
 absolute counterclockwise angular speed. No surrogate heavy body is created.
 Pins with two bodies retain their relative-speed convention. World pin reactions
 contribute to external linear impulse and motor work remains explicitly recorded.
+
+Static oriented boxes (boundary kind 2) use a center, unit x-axis and half sizes.
+Contact uses node/face projection and box-vertex/soft-edge response; the current
+box penetration metric samples nodes. This is not a general edge-edge CCD claim.
+Only planes support prescribed motion.

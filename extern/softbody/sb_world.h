@@ -33,6 +33,7 @@ template<class T> struct World
     {
         // Plane: dot(normal,p)>=offset. Corner: solid x>left && y<top.
         bool active=true,enabled=true;int kind=0;
+        Vec center{}, axis{T(1),T(0)}, halfSize{}; // Static oriented box (kind 2).
         Vec normal{T(0),T(1)};T offset=0,target=0,left=0,top=0,friction=T(.8);
     };
     struct Metrics
@@ -69,6 +70,18 @@ template<class T> struct World
     }
     Vec pinTarget(const Pin& pin) const
     { return pin.b<0 ? pin.worldAnchor : anchor(pin.b,pin.wb); }
+    Vec boxLocal(const Boundary& box,Vec point) const
+    {
+        T x=point[0]-box.center[0], y=point[1]-box.center[1];
+        return {box.axis[0]*x+box.axis[1]*y,-box.axis[1]*x+box.axis[0]*y};
+    }
+    Vec boxVertex(const Boundary& box,int corner) const
+    {
+        T x=(corner&1 ? T(1) : T(-1))*box.halfSize[0];
+        T y=(corner&2 ? T(1) : T(-1))*box.halfSize[1];
+        return {box.center[0]+box.axis[0]*x-box.axis[1]*y,
+                box.center[1]+box.axis[1]*x+box.axis[0]*y};
+    }
     Vec center(int id) const
     { Vec result{};for(auto p:bodies[id].x)for(int k=0;k<2;++k)result[k]+=p[k]/T(16);return result; }
     double kinetic(int id) const
@@ -106,7 +119,11 @@ template<class T> struct World
     }
     void corner(int id,const Boundary& boundary)
     {
-        auto& part=bodies[id];Vec point{boundary.left,boundary.top};
+        boundaryVertex(id,{boundary.left,boundary.top},boundary.friction);
+    }
+    void boundaryVertex(int id,Vec point,T friction)
+    {
+        auto& part=bodies[id];
         if(!inside<T>(point,part))return;
         auto hit=nearest<T>(point,part);if(hit.edge<0){failure="degenerate_contact_edge";return;}if(hit.depth<T(1e-8))return;
         int a=hit.edge,b=(a+1)%16;T wa=T(1)-hit.t,wb=hit.t;
@@ -123,7 +140,7 @@ template<class T> struct World
         };
         apply(normal,j);T speed=0;
         for(int k=0;k<2;++k)speed+=(wa*part.v[a][k]+wb*part.v[b][k])*tangent[k];
-        T jt=std::max(-boundary.friction*j,std::min(boundary.friction*j,-speed/inv));
+        T jt=std::max(-friction*j,std::min(friction*j,-speed/inv));
         double before=kinetic(id);apply(tangent,jt);frictionLoss+=before-kinetic(id);++contacts;++cornerContacts;
     }
     void solveTouchJoint(TouchJoint& joint)
@@ -230,6 +247,19 @@ template<class T> struct World
                     const auto& b=boundaries[j];if(!b.active || !b.enabled)continue;auto p=bodies[id].x[i];
                     if(b.kind==0)
                     { T depth=offsets[j]-b.normal[0]*p[0]-b.normal[1]*p[1];if(depth>0)boundary(int(id),i,b.normal,depth,velocities[j],b.friction); }
+                    else if(b.kind==2)
+                    {
+                        auto local=boxLocal(b,p);
+                        T dx=b.halfSize[0]-std::abs(local[0]);
+                        T dy=b.halfSize[1]-std::abs(local[1]);
+                        if(dx>0 && dy>0)
+                        {
+                            T sign=(dx<dy ? local[0] : local[1])<0 ? T(-1) : T(1);
+                            Vec normal=dx<dy ? Vec{sign*b.axis[0],sign*b.axis[1]}
+                                             : Vec{-sign*b.axis[1],sign*b.axis[0]};
+                            boundary(int(id),i,normal,std::min(dx,dy),0,b.friction);
+                        }
+                    }
                     else
                     {
                         T left=p[0]-b.left,up=b.top-p[1];if(left>0&&up>0)
@@ -239,6 +269,10 @@ template<class T> struct World
             }
             for(const auto& b:boundaries)if(b.active&&b.enabled&&b.kind==1)
                 for(size_t id=0;id<bodies.size();++id)if(bodies[id].active)corner(int(id),b);
+            for(const auto& box:boundaries)if(box.active && box.enabled && box.kind==2)
+                for(size_t id=0;id<bodies.size();++id)if(bodies[id].active)
+                    for(int vertex=0;vertex<4;++vertex)
+                        boundaryVertex(int(id),boxVertex(box,vertex),box.friction);
             for(size_t a=0;a<bodies.size();++a)for(size_t b=a+1;b<bodies.size();++b)if(pairEnabled(int(a),int(b)))
             {
                 if(guardEdgeOnly(bodies[a],bodies[b]))++strictEvents;
@@ -279,6 +313,12 @@ template<class T> struct World
                 {
                     const auto& edge=boundaries[j];if(!edge.active||!edge.enabled)continue;
                     if(edge.kind==0)m.penetration=std::max(m.penetration,double(offsets[j]-edge.normal[0]*p[0]-edge.normal[1]*p[1]));
+                    else if(edge.kind==2)
+                    {
+                        auto local=boxLocal(edge,p);
+                        m.penetration=std::max(m.penetration,double(std::min(
+                            edge.halfSize[0]-std::abs(local[0]),edge.halfSize[1]-std::abs(local[1]))));
+                    }
                     else
                     {
                         double ax=double(p[0])-edge.left,ay=double(edge.top)-p[1],dx=double(q[0])-p[0],dy=double(p[1])-q[1];
