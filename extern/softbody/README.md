@@ -92,3 +92,11 @@ its own new normal impulse. Holding/sticking can depend on substeps and iteratio
 It does not repair folded polygon contact, supply CCD, or guarantee passage through
 an overlapping rotor gap. The rotor example advances farther but still exits left
 and falls; stable transport is not yet validated.
+
+Boundary/body collision exclusions are independent of soft/soft exclusions.
+`Boundary::excludedBodies` contains stable body IDs; an empty list preserves the
+original behavior. `boundaryEnabled` gates node projection, boundary-vertex
+response and penetration metrics. Lua `boundary:setCollisionEnabled(body, bool)`
+is pair-local, idempotent and rejects foreign-world or removed handles. The
+boundary's global `setEnabled` state still takes precedence. No Box2D rigid-body
+filter or LiquidFun behavior is changed.

@@ -31,6 +31,8 @@ template<class T> struct World
     };
     struct Boundary
     {
+        // Body IDs are stable and never reused. Empty means all active bodies.
+        std::vector<int> excludedBodies;
         // Plane: dot(normal,p)>=offset. Corner: solid x>left && y<top.
         bool active=true,enabled=true;int kind=0;
         Vec center{}, axis{T(1),T(0)}, halfSize{}; // Static oriented box (kind 2).
@@ -60,6 +62,12 @@ template<class T> struct World
     {
         if(!bodies[a].active || !bodies[b].active)return false;
         for(auto p:exclusions)if((p[0]==a&&p[1]==b)||(p[0]==b&&p[1]==a))return false;
+        return true;
+    }
+    bool boundaryEnabled(int body,const Boundary& boundary) const
+    {
+        if(!bodies[body].active || !boundary.active || !boundary.enabled)return false;
+        for(int excluded:boundary.excludedBodies)if(excluded==body)return false;
         return true;
     }
     Vec anchor(int id,const std::array<T,16>& weights) const
@@ -244,7 +252,7 @@ template<class T> struct World
             {
                 for(size_t j=0;j<boundaries.size();++j)
                 {
-                    const auto& b=boundaries[j];if(!b.active || !b.enabled)continue;auto p=bodies[id].x[i];
+                    const auto& b=boundaries[j];if(!boundaryEnabled(int(id),b))continue;auto p=bodies[id].x[i];
                     if(b.kind==0)
                     { T depth=offsets[j]-b.normal[0]*p[0]-b.normal[1]*p[1];if(depth>0)boundary(int(id),i,b.normal,depth,velocities[j],b.friction); }
                     else if(b.kind==2)
@@ -268,9 +276,9 @@ template<class T> struct World
                 }
             }
             for(const auto& b:boundaries)if(b.active&&b.enabled&&b.kind==1)
-                for(size_t id=0;id<bodies.size();++id)if(bodies[id].active)corner(int(id),b);
+                for(size_t id=0;id<bodies.size();++id)if(boundaryEnabled(int(id),b))corner(int(id),b);
             for(const auto& box:boundaries)if(box.active && box.enabled && box.kind==2)
-                for(size_t id=0;id<bodies.size();++id)if(bodies[id].active)
+                for(size_t id=0;id<bodies.size();++id)if(boundaryEnabled(int(id),box))
                     for(int vertex=0;vertex<4;++vertex)
                         boundaryVertex(int(id),boxVertex(box,vertex),box.friction);
             for(size_t a=0;a<bodies.size();++a)for(size_t b=a+1;b<bodies.size();++b)if(pairEnabled(int(a),int(b)))
@@ -311,7 +319,7 @@ template<class T> struct World
                 m.nodeSpeed=std::max(m.nodeSpeed,double(std::hypot(b.v[i][0],b.v[i][1])));
                 for(size_t j=0;j<boundaries.size();++j)
                 {
-                    const auto& edge=boundaries[j];if(!edge.active||!edge.enabled)continue;
+                    const auto& edge=boundaries[j];if(!boundaryEnabled(int(id),edge))continue;
                     if(edge.kind==0)m.penetration=std::max(m.penetration,double(offsets[j]-edge.normal[0]*p[0]-edge.normal[1]*p[1]));
                     else if(edge.kind==2)
                     {
