@@ -16,7 +16,8 @@ template<class T> struct Body
     std::array<Vec,16> x{}, v{}, rest{};
     std::array<T,16> mass{}, lengths{};
     mutable const char* failure=nullptr;
-    int kind; // 0: local frames, 1: global frame, 2: pressure tire
+    int kind; // 0: local frames, 1: global frame, 2: pressure tire, 3: recoverable
+    mutable double recoveryCosine=1, recoverySine=0;
     T restArea;
     T preload=T(0);
     T materialScale=T(1);
@@ -54,9 +55,63 @@ template<class T> struct Body
             a+=(x[i][0]-x[0][0])*(x[i+1][1]-x[0][1])-(x[i][1]-x[0][1])*(x[i+1][0]-x[0][0]);
         return a/T(2);
     }
+    // Finite corotated quadratic energy. Unlike pressure, this material is
+    // defined for signed/zero area and overlapping nodes. Node identities and
+    // rest coordinates never change; forces, not a rest-pose teleport, unfold it.
+    T recoverableForce(std::array<Vec,16>& forces) const
+    {
+        double totalMass=0;
+        V center{}, restCenter{};
+        for(int node=0;node<16;++node)
+        {
+            totalMass+=mass[node];
+            for(int axis=0;axis<2;++axis)
+            {
+                center[axis]+=double(mass[node])*x[node][axis];
+                restCenter[axis]+=double(mass[node])*rest[node][axis];
+            }
+        }
+        for(int axis=0;axis<2;++axis)
+        {
+            center[axis]/=totalMass;
+            restCenter[axis]/=totalMass;
+        }
+        double dot=0, cross=0;
+        for(int node=0;node<16;++node)
+        {
+            double rx=rest[node][0]-restCenter[0], ry=rest[node][1]-restCenter[1];
+            double px=x[node][0]-center[0], py=x[node][1]-center[1];
+            dot+=mass[node]*(rx*px+ry*py);
+            cross+=mass[node]*(rx*py-ry*px);
+        }
+        double norm=std::hypot(dot,cross);
+        if(norm>1e-12)
+        {
+            // Proper rotation only: never fit a reflection to an inverted body.
+            recoveryCosine=dot/norm;
+            recoverySine=cross/norm;
+        }
+        // A completely ambiguous covariance retains the last defined rotation.
+        double omega=2*3.14159265358979323846*double(frequency);
+        double energy=0;
+        for(int node=0;node<16;++node)
+        {
+            double rx=rest[node][0]-restCenter[0], ry=rest[node][1]-restCenter[1];
+            V error{x[node][0]-center[0]-recoveryCosine*rx+recoverySine*ry,
+                    x[node][1]-center[1]-recoverySine*rx-recoveryCosine*ry};
+            double stiffness=omega*omega*mass[node]*materialScale;
+            for(int axis=0;axis<2;++axis)
+            {
+                forces[node][axis]=T(-stiffness*error[axis]);
+                energy+=.5*stiffness*error[axis]*error[axis];
+            }
+        }
+        return T(energy);
+    }
     T force(std::array<Vec,16>& f) const
     {
         f={}; T energy=0;
+        if(kind==3)return recoverableForce(f);
         for (int i=0;i<16;++i)
         {
             int j=(i+1)%16;
@@ -146,7 +201,16 @@ template<class T> struct Body
             inertia+=double(mass[i])*(rx*rx+ry*ry);
             angular+=double(mass[i])*(rx*(double(v[i][1])-velocity[1])-ry*(double(v[i][0])-velocity[0]));
         }
-        if (!(inertia>1e-12)) { failure="degenerate_damping_inertia";return; }
+        if (!(inertia>1e-12))
+        {
+            if(kind!=3) { failure="degenerate_damping_inertia";return; }
+            // At a point there is no defined rigid angular velocity. Dampen
+            // only velocity relative to translation until the shape opens.
+            double decay=-std::expm1(-double(damping)*double(dt));
+            for(auto& nodeVelocity:v)for(int axis=0;axis<2;++axis)
+                nodeVelocity[axis]=T(nodeVelocity[axis]-decay*(nodeVelocity[axis]-velocity[axis]));
+            return;
+        }
         double omega=angular/inertia, decay=-std::expm1(-double(damping)*double(dt));
         for (int i=0;i<16;++i)
         {

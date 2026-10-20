@@ -37,7 +37,7 @@ template<class T> struct World
     struct Metrics
     {
         double penetration=0,pin=0,nodeSpeed=0,centerSpeed=0,minArea=1,energy=0;
-        bool selfCross=false;
+        bool selfCross=false, strictSelfCross=false;
     };
     std::vector<B> bodies;
     std::vector<Pin> pins;
@@ -75,13 +75,19 @@ template<class T> struct World
         auto c=center(id);const auto& b=bodies[id];double angular=0,inertia=0;
         for(int i=0;i<16;++i)
         { double x=double(b.x[i][0])-c[0],y=double(b.x[i][1])-c[1];inertia+=b.mass[i]*(x*x+y*y);angular+=b.mass[i]*(x*b.v[i][1]-y*b.v[i][0]); }
-        if(inertia<1e-12){failure="degenerate_motor_inertia";return 0;}return angular/inertia;
+        if(inertia<1e-12){if(b.kind!=3)failure="degenerate_motor_inertia";return 0;}return angular/inertia;
     }
     void torque(int id,double value)
     {
         auto c=center(id);auto& b=bodies[id];double inertia=0;
         for(int i=0;i<16;++i){double x=double(b.x[i][0])-c[0],y=double(b.x[i][1])-c[1];inertia+=b.mass[i]*(x*x+y*y);}
-        if(inertia<1e-12){failure="degenerate_motor_inertia";return;}
+        if(inertia<1e-12)
+        {
+            // A coincident recoverable body has no lever arm. Ignore torque
+            // until material forces open it; never divide by zero inertia.
+            if(b.kind!=3)failure="degenerate_motor_inertia";
+            return;
+        }
         for(int i=0;i<16;++i)
         { double x=double(b.x[i][0])-c[0],y=double(b.x[i][1])-c[1];b.v[i][0]-=T(double(dt)*value*y/inertia);b.v[i][1]+=T(double(dt)*value*x/inertia); }
     }
@@ -170,6 +176,14 @@ template<class T> struct World
         auto previous=bodies;
         for(auto& b:bodies)if(b.active)
         {
+            // For the finite recovery spring, damp the incoming motion before
+            // adding elastic impulses. Damping those impulses afterwards would
+            // reduce the wall reaction without reducing stored elastic energy.
+            if(b.kind==3)
+            {
+                b.dampDeformation(dt);
+                if(b.failure){failure=b.failure;return;}
+            }
             std::array<Vec,16> f{};b.force(f);if(b.failure){failure=b.failure;return;}
             for(int i=0;i<16;++i)for(int k=0;k<2;++k)b.v[i][k]+=dt*(f[i][k]/b.mass[i]+gravity[k]);
         }
@@ -196,7 +210,7 @@ template<class T> struct World
         double after=0;for(size_t i=0;i<bodies.size();++i)if(bodies[i].active)after+=kinetic(int(i));motorWork+=after-before;
         if(failure)return;
         for(auto& b:bodies)if(b.active)
-        { b.dampDeformation(dt);if(b.failure){failure=b.failure;return;}for(int i=0;i<16;++i)for(int k=0;k<2;++k)b.x[i][k]+=dt*b.v[i][k]; }
+        { if(b.kind!=3)b.dampDeformation(dt);if(b.failure){failure=b.failure;return;}for(int i=0;i<16;++i)for(int k=0;k<2;++k)b.x[i][k]+=dt*b.v[i][k]; }
         for(int iteration=0;iteration<iterations;++iteration)
         {
             for(size_t id=0;id<bodies.size();++id)if(bodies[id].active)for(int i=0;i<16;++i)
@@ -261,7 +275,12 @@ template<class T> struct World
                         if(std::abs(dx-dy)>1e-15){double t=(ay-ax)/(dx-dy);if(t>0&&t<1)m.penetration=std::max(m.penetration,std::min(ax+t*dx,ay+t*dy));}
                     }
                 }
-                for(int j=i+2;j<16;++j)if(!(i==0&&j==15))m.selfCross=m.selfCross||strictCross<T>(p,q,b.x[j],b.x[(j+1)%16]);
+                for(int j=i+2;j<16;++j)if(!(i==0&&j==15))
+                {
+                    bool crossing=strictCross<T>(p,q,b.x[j],b.x[(j+1)%16]);
+                    m.selfCross=m.selfCross || crossing;
+                    m.strictSelfCross=m.strictSelfCross || (crossing && b.kind!=3);
+                }
             }
             m.centerSpeed=std::max(m.centerSpeed,std::hypot(cv[0],cv[1]));
         }
@@ -293,7 +312,7 @@ template<class T> struct World
             peak.penetration=std::max(peak.penetration,m.penetration);peak.pin=std::max(peak.pin,m.pin);
             peak.nodeSpeed=std::max(peak.nodeSpeed,m.nodeSpeed);peak.centerSpeed=std::max(peak.centerSpeed,m.centerSpeed);
             peak.minArea=std::min(peak.minArea,m.minArea);peak.selfCross=peak.selfCross||m.selfCross;peak.energy=m.energy;
-            if(m.selfCross){failure="self_crossing";return;}
+            if(m.strictSelfCross){failure="self_crossing";return;}
         }
         for(auto& b:boundaries)b.offset=b.target;
         for(auto& b:bodies){b.forceInput={};b.torqueInput=0;}
