@@ -276,7 +276,7 @@ template<class T> struct World
             for(size_t a=0;a<bodies.size();++a)for(size_t b=a+1;b<bodies.size();++b)if(pairEnabled(int(a),int(b)))
             {
                 if(guardEdgeOnly(bodies[a],bodies[b]))++strictEvents;
-                double impulse=0;int count=projectPair(bodies[a],bodies[b],dt,impulse,false);
+                double impulse=0;int count=projectPair(bodies[a],bodies[b],dt,impulse,false,&frictionLoss);
                 if(count<0){failure="degenerate_contact_edge";return;}contacts+=count;
             }
             for(const auto& p:pins)if(p.active)for(int k=0;k<2;++k)

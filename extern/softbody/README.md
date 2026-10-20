@@ -75,3 +75,20 @@ Static oriented boxes (boundary kind 2) use a center, unit x-axis and half sizes
 Contact uses node/face projection and box-vertex/soft-edge response; the current
 box penetration metric samples nodes. This is not a general edge-edge CCD claim.
 Only planes support prescribed motion.
+
+Soft/soft friction is opt-in with `Body::friction` (Lua `createBody{friction=...}`,
+range 0..10, default 0). Pair coefficients mix as sqrt(muA * muB), so either zero
+keeps the pair frictionless. Boundary coefficients remain independent.
+After each normal projection, the point/edge relative tangent velocity is opposed
+by an impulse limited to mu * (normal positional impulse / dt). Barycentric edge
+reactions preserve linear momentum and, at the coincident corrected contact,
+angular momentum. Only velocities change, keeping normal projection intact.
+`World::frictionLoss` includes soft/soft tangent kinetic-energy loss as well as
+boundary friction. It is not total system energy loss: motors, elastic forces and
+normal projection can add energy.
+This is local Coulomb-like friction, not a persistent static-contact manifold:
+no penetration correction means no friction budget, and each iteration uses only
+its own new normal impulse. Holding/sticking can depend on substeps and iterations.
+It does not repair folded polygon contact, supply CCD, or guarantee passage through
+an overlapping rotor gap. The rotor example advances farther but still exits left
+and falls; stable transport is not yet validated.

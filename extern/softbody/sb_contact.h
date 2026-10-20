@@ -93,7 +93,29 @@ template<class T> const char* guardTransit(const Body<T>& oldA,const Body<T>& a,
     }
     return nullptr;
 }
-template<class T> int projectPair(Body<T>& a,Body<T>& b,T dt,double& impulse,bool strict=true)
+// Called after normal projection, when the point and weighted edge coincide.
+// Velocity-only impulses avoid moving the contact out of the resolved boundary.
+template<class T> T applyPairFriction(Body<T>& point, int i, Body<T>& edge,
+    int j, int k, T wa, T wb, const typename Body<T>::Vec& normal, T normalImpulse)
+{
+    T coefficient=std::sqrt(point.friction*edge.friction);
+    if (coefficient==T(0) || normalImpulse<=T(0)) return T(0);
+    typename Body<T>::Vec tangent={-normal[1],normal[0]};
+    T speed=T(0);
+    for (int d=0;d<2;++d)
+        speed+=(point.v[i][d]-wa*edge.v[j][d]-wb*edge.v[k][d])*tangent[d];
+    T inverseMass=T(1)/point.mass[i]+wa*wa/edge.mass[j]+wb*wb/edge.mass[k];
+    T limit=coefficient*normalImpulse;
+    T impulse=std::max(-limit,std::min(limit,-speed/inverseMass));
+    for (int d=0;d<2;++d)
+    {
+        point.v[i][d]+=impulse*tangent[d]/point.mass[i];
+        edge.v[j][d]-=wa*impulse*tangent[d]/edge.mass[j];
+        edge.v[k][d]-=wb*impulse*tangent[d]/edge.mass[k];
+    }
+    return -(impulse*speed+T(.5)*inverseMass*impulse*impulse);
+}
+template<class T> int projectPair(Body<T>& a,Body<T>& b,T dt,double& impulse,bool strict=true, double* frictionLoss=nullptr)
 {
     if (!overlapAabb(a,b)) return 0;
     if (strict && guardEdgeOnly(a,b)) return -1;int count=0;
@@ -112,6 +134,8 @@ template<class T> int projectPair(Body<T>& a,Body<T>& b,T dt,double& impulse,boo
                 for (int d=0;d<2;++d) { T delta=weight*lambda*hit.normal[d]/body.mass[n];body.x[n][d]+=delta;body.v[n][d]+=delta/dt; }
             };
             apply(point,i,T(1));apply(edge,j,-wa);apply(edge,k,-wb);
+            T loss=applyPairFriction(point,i,edge,j,k,wa,wb,hit.normal,lambda/dt);
+            if (frictionLoss) *frictionLoss+=double(loss);
         }
     }
     return count;
