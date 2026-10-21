@@ -172,6 +172,7 @@ typedef struct b2World
 	float restitutionThreshold;
 	int restitutionIterations;
 	bool enableRestitutionPropagation;
+	bool enableWeldRestitution; // Experimental, defaults off
 	float maxLinearSpeed;
 	float contactSpeed;
 	float contactHertz;

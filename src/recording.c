@@ -748,6 +748,22 @@ void b2RecAccumulateBounds( b2Recording* rec, b2AABB bounds )
 	rec->haveBounds = true;
 }
 
+void b2RecRequireWeldRestitution( b2Recording* recording )
+{
+	if ( recording == NULL )
+	{
+		return;
+	}
+	b2LockMutex( recording->lock );
+	B2_ASSERT( recording->buffer.size >= (int)sizeof( b2RecHeader ) );
+	b2RecHeader header;
+	memcpy( &header, recording->buffer.data, sizeof( header ) );
+	header.versionMinor = B2_REC_WELD_VERSION_MINOR;
+	header.reserved2 = B2_REC_WELD_SIGNATURE;
+	memcpy( recording->buffer.data, &header, sizeof( header ) );
+	b2UnlockMutex( recording->lock );
+}
+
 void b2StartRecordingIntoBuffer( b2World* world, b2Recording* recording )
 {
 	// Reset so a recording handle can be reused for a fresh session
@@ -773,6 +789,10 @@ void b2StartRecordingIntoBuffer( b2World* world, b2Recording* recording )
 	b2RecBufFree( &blob );
 
 	world->recording = recording;
+	if ( world->enableWeldRestitution )
+	{
+		b2RecRequireWeldRestitution( recording );
+	}
 
 	// Seed the bounds with the snapshot state so frame 0 is framed even if nothing moves
 	b2AABB seed;

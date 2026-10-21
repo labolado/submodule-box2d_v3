@@ -162,6 +162,12 @@ B2_API int b2World_GetRestitutionIterations( b2WorldId worldId );
 /// @see b2WorldDef::enableRestitutionPropagation
 B2_API void b2World_EnableRestitutionPropagation( b2WorldId worldId, bool flag );
 
+/// Opt in to restitution iterations for awake rigid welds. Disabled by default.
+/// Does not wake bodies or clear cached impulses. Does not support spring welds.
+/// Recordings using this fork feature require a compatible extended replay reader.
+B2_API void b2World_EnableWeldRestitution( b2WorldId worldId, bool flag );
+B2_API bool b2World_IsWeldRestitutionEnabled( b2WorldId worldId );
+
 /// Is restitution propagation enabled?
 B2_API bool b2World_IsRestitutionPropagationEnabled( b2WorldId worldId );
 

@@ -225,3 +225,4 @@ B2_REC_OP( 0xF1, StateHash, RET_NONE, ARG( WORLDID, world ) ARG( U64, hash ) )
 
 // Accumulated world bounds over the whole recording, written once at stop. Informational.
 B2_REC_OP( 0xF2, RecordingBounds, RET_NONE, ARG( AABB, bounds ) )
+B2_REC_OP( 0xF3, WorldEnableWeldRestitution, RET_NONE, ARG( WORLDID, world ) ARG( BOOL, flag ) )

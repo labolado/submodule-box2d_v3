@@ -36,6 +36,37 @@ typedef struct b2WorkerContext
 	void* userTask;
 } b2WorkerContext;
 
+// Experimental per-world opt-in. Only rigid weld velocity constraints participate.
+
+static void b2SolveRestitutionWelds( b2StepContext* context, int colorIndex, int start, int count, int workerIndex )
+{
+	if ( context->world->enableWeldRestitution == false )
+	{
+		return;
+	}
+	b2JointSim* joints = context->graph->colors[colorIndex].jointSims.data;
+	for ( int i = start; i < start + count; ++i )
+	{
+		b2JointSim* joint = joints + i;
+		if ( joint->type == b2_weldJoint && joint->weldJoint.linearHertz == 0.0f &&
+			 joint->weldJoint.angularHertz == 0.0f )
+		{
+			b2SolveWeldJoint( joint, context, false );
+			// Restitution runs after the normal threshold check. Include its additional
+			// impulses in the same per-worker event bitset, without duplicate events.
+			if ( joint->forceThreshold < FLT_MAX || joint->torqueThreshold < FLT_MAX )
+			{
+				float force, torque;
+				b2GetJointReaction( joint, context->inv_h, &force, &torque );
+				if ( force >= joint->forceThreshold || torque >= joint->torqueThreshold )
+				{
+					b2SetBit( &context->world->taskContexts.data[workerIndex].jointStateBitSet, joint->jointId );
+				}
+			}
+		}
+	}
+}
+
 // Integrate velocities and apply damping
 static void b2IntegrateVelocitiesTask( b2SolverBlock block, b2StepContext* context )
 {
@@ -930,6 +961,10 @@ static void b2ExecuteBlock( b2SolverStage* stage, b2StepContext* context, b2Solv
 			{
 				b2ApplyRestitution_Wide( block, context );
 			}
+			else if ( blockType == b2_graphJointBlock )
+			{
+				b2SolveRestitutionWelds( context, block.colorIndex, block.startIndex, block.count, workerIndex );
+			}
 			break;
 
 		case b2_stageStoreImpulses:
@@ -1191,6 +1226,8 @@ static void b2SolverTask( void* taskContext )
 			for ( int j = 0; j < restitutionIterations; ++j )
 			{
 				b2ApplyRestitution_Overflow( context );
+				b2SolveRestitutionWelds( context, B2_OVERFLOW_INDEX, 0,
+					context->graph->colors[B2_OVERFLOW_INDEX].jointSims.count, 0 );
 
 				int iterationStageIndex = stageIndex;
 				for ( int colorIndex = 0; colorIndex < activeColorCount; ++colorIndex )

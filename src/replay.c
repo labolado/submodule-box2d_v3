@@ -835,6 +835,11 @@ static void b2RecDispatch_WorldRebuildStaticTree( const b2RecArgs_WorldRebuildSt
 	b2World_RebuildStaticTree( rdr->replayWorldId );
 }
 
+static void b2RecDispatch_WorldEnableWeldRestitution( const b2RecArgs_WorldEnableWeldRestitution* a, b2RecReader* rdr )
+{
+	b2World_EnableWeldRestitution( rdr->replayWorldId, a->flag );
+}
+
 static void b2RecDispatch_WorldSetRestitutionIterations( const b2RecArgs_WorldSetRestitutionIterations* a, b2RecReader* rdr )
 {
 	b2World_SetRestitutionIterations( rdr->replayWorldId, a->iterations );
@@ -2099,7 +2104,9 @@ b2Replay* b2CreateReplay( const void* data, int size, int workerCount )
 		return NULL;
 	}
 
-	if ( hdr.versionMajor != B2_REC_VERSION_MAJOR || hdr.versionMinor != B2_REC_VERSION_MINOR )
+	bool ordinaryFormat = hdr.versionMinor == B2_REC_VERSION_MINOR && hdr.reserved2 == 0;
+	bool weldFormat = hdr.versionMinor == B2_REC_WELD_VERSION_MINOR && hdr.reserved2 == B2_REC_WELD_SIGNATURE;
+	if ( hdr.versionMajor != B2_REC_VERSION_MAJOR || ( ordinaryFormat == false && weldFormat == false ) )
 	{
 		printf( "b2CreateReplay: version mismatch (file=%u.%u, runtime=%u.%u)\n", hdr.versionMajor, hdr.versionMinor,
 				B2_REC_VERSION_MAJOR, B2_REC_VERSION_MINOR );

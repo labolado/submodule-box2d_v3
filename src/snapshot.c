@@ -29,6 +29,7 @@
 
 // Snapshot image magic and version
 #define B2_SNAP_MAGIC 0x32534E42u // 'BNS2'
+#define B2_SNAP_WELD_MAGIC 0x31534C57u // 'WLS1': requires the fork weld solver
 
 // Bump this if any of the data structures below get modified. The layout hash only catches
 // size changes, a same-size reinterpretation like the contact cache reshape needs this bump.
@@ -468,6 +469,7 @@ static void b2SerWorldConfig( b2RecBuffer* buf, const b2World* world )
 	flags |= world->enableWarmStarting ? 0x02u : 0u;
 	flags |= world->enableContinuous ? 0x08u : 0u;
 	flags |= world->enableRestitutionPropagation ? 0x10u : 0u;
+	flags |= world->enableWeldRestitution ? 0x20u : 0u;
 	b2RecBufAppend( buf, &flags, 1 );
 }
 
@@ -494,13 +496,14 @@ static void b2DesWorldConfig( b2SnapReader* r, b2World* world )
 	world->enableWarmStarting = ( flags & 0x02u ) != 0;
 	world->enableContinuous = ( flags & 0x08u ) != 0;
 	world->enableRestitutionPropagation = ( flags & 0x10u ) != 0;
+	world->enableWeldRestitution = ( flags & 0x20u ) != 0;
 }
 
 void b2SerializeWorld( b2World* world, b2RecBuffer* buf )
 {
 	// Image header
 	b2SnapHeader hdr;
-	hdr.magic = B2_SNAP_MAGIC;
+	hdr.magic = world->enableWeldRestitution ? B2_SNAP_WELD_MAGIC : B2_SNAP_MAGIC;
 	hdr.version = B2_SNAP_VERSION;
 	hdr.layoutHash = b2ComputeLayoutHash();
 	hdr.flags = B2_ENABLE_VALIDATION ? B2_SNAP_FLAG_VALIDATION : 0u;
@@ -865,7 +868,7 @@ static bool b2OpenSnapshotImage( const uint8_t* image, int size, b2SnapReader* r
 
 	b2SnapHeader hdr;
 	memcpy( &hdr, image, sizeof( hdr ) );
-	if ( hdr.magic != B2_SNAP_MAGIC || hdr.version != B2_SNAP_VERSION )
+	if ( ( hdr.magic != B2_SNAP_MAGIC && hdr.magic != B2_SNAP_WELD_MAGIC ) || hdr.version != B2_SNAP_VERSION )
 	{
 		return false;
 	}

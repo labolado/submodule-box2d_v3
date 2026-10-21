@@ -261,6 +261,7 @@ b2WorldId b2CreateWorld( const b2WorldDef* def )
 	// Clamp this to avoid overflowing the solver sync flags.
 	world->restitutionIterations = b2ClampInt( def->restitutionIterations, 0, B2_MAX_RESTITUTION_ITERATIONS );
 	world->enableRestitutionPropagation = def->enableRestitutionPropagation;
+	world->enableWeldRestitution = false;
 	world->maxLinearSpeed = def->maximumLinearSpeed;
 	world->contactSpeed = b2ClampFloat( def->contactSpeed, 0.0f, FLT_MAX );
 	world->contactHertz = b2ClampFloat( def->contactHertz, 0.0f, FLT_MAX );
@@ -1970,6 +1971,29 @@ bool b2World_IsRestitutionPropagationEnabled( b2WorldId worldId )
 {
 	b2World* world = b2GetWorldFromId( worldId );
 	return world->enableRestitutionPropagation;
+}
+
+void b2World_EnableWeldRestitution( b2WorldId worldId, bool flag )
+{
+	b2World* world = b2GetWorldFromId( worldId );
+	B2_ASSERT( world->locked == false );
+	if ( world->locked )
+	{
+		return;
+	}
+	if ( world->enableWeldRestitution == flag )
+	{
+		return;
+	}
+	b2RecRequireWeldRestitution( world->recording );
+	B2_REC( world, WorldEnableWeldRestitution, worldId, flag );
+	world->enableWeldRestitution = flag;
+}
+
+bool b2World_IsWeldRestitutionEnabled( b2WorldId worldId )
+{
+	b2World* world = b2GetWorldFromId( worldId );
+	return world->enableWeldRestitution;
 }
 
 void b2World_SetHitEventThreshold( b2WorldId worldId, float value )

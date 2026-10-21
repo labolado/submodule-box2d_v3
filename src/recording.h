@@ -50,6 +50,14 @@ typedef struct b2World b2World;
 #define B2_REC_VERSION_MAJOR 3
 #define B2_REC_VERSION_MINOR 13 // shape queries not recorded
 
+// Fork extension. Ordinary recordings retain the upstream version. Recordings that
+// use weld restitution require both this version and the WLD1 signature.
+#define B2_REC_WELD_VERSION_MINOR ( 0x8000u | B2_REC_VERSION_MINOR )
+#define B2_REC_WELD_SIGNATURE 0x31444C57u
+
+struct b2Recording;
+void b2RecRequireWeldRestitution( struct b2Recording* recording );
+
 // File header, fixed 32 bytes, little-endian
 typedef struct b2RecHeader
 {
