@@ -1,6 +1,4 @@
-#pragma once
-#include "sb_body.h"
-#include <limits>
+#include "soft_contact.h"
 namespace SoftBody
 {
 #if defined(__clang__)
@@ -8,8 +6,10 @@ namespace SoftBody
 #endif
 template<class T> T cross(typename Body<T>::Vec a,typename Body<T>::Vec b)
 { return a[0]*b[1]-a[1]*b[0]; }
+
 template<class T> typename Body<T>::Vec sub(typename Body<T>::Vec a,typename Body<T>::Vec b)
 { return {a[0]-b[0],a[1]-b[1]}; }
+
 template<class T> bool inside(typename Body<T>::Vec p,const Body<T>& b)
 {
     bool result=false;
@@ -20,7 +20,7 @@ template<class T> bool inside(typename Body<T>::Vec p,const Body<T>& b)
     }
     return result;
 }
-template<class T> struct Hit { int edge; T depth,t; typename Body<T>::Vec normal; Hit(int e=-1,T d=0,T f=0,typename Body<T>::Vec n={}) : edge(e),depth(d),t(f),normal(n) {} };
+
 template<class T> Hit<T> nearest(typename Body<T>::Vec p,const Body<T>& b)
 {
     Hit<T> hit; T best=std::numeric_limits<T>::max();
@@ -36,6 +36,7 @@ template<class T> Hit<T> nearest(typename Body<T>::Vec p,const Body<T>& b)
     }
     return hit;
 }
+
 template<class T> bool overlapAabb(const Body<T>& a,const Body<T>& b)
 {
     for (int k=0;k<2;++k)
@@ -46,12 +47,14 @@ template<class T> bool overlapAabb(const Body<T>& a,const Body<T>& b)
     }
     return true;
 }
+
 template<class T> bool strictCross(typename Body<T>::Vec a,typename Body<T>::Vec b,typename Body<T>::Vec c,typename Body<T>::Vec d)
 {
     auto orient=[](typename Body<T>::Vec p,typename Body<T>::Vec q,typename Body<T>::Vec r)
     { return (double(q[0])-p[0])*(double(r[1])-p[1])-(double(q[1])-p[1])*(double(r[0])-p[0]); };
     return orient(a,b,c)*orient(a,b,d)<-1e-16 && orient(c,d,a)*orient(c,d,b)<-1e-16;
 }
+
 template<class T> const char* guardEdgeOnly(const Body<T>& a,const Body<T>& b)
 {
     if (!overlapAabb(a,b)) return nullptr;
@@ -60,8 +63,7 @@ template<class T> const char* guardEdgeOnly(const Body<T>& a,const Body<T>& b)
         if (strictCross<T>(a.x[i],a.x[(i+1)%16],b.x[j],b.x[(j+1)%16])) return "edge_only_crossing";
     return nullptr;
 }
-// Crossing guard for linearly moving point and linearly moving segment.
-// Detect an unresolved transit; this is detection, not a CCD collision response.
+
 template<class T> const char* guardTransit(const Body<T>& oldA,const Body<T>& a,const Body<T>& oldB,const Body<T>& b)
 {
     for (int i=0;i<16;++i)
@@ -93,8 +95,7 @@ template<class T> const char* guardTransit(const Body<T>& oldA,const Body<T>& a,
     }
     return nullptr;
 }
-// Called after normal projection, when the point and weighted edge coincide.
-// Velocity-only impulses avoid moving the contact out of the resolved boundary.
+
 template<class T> T applyPairFriction(Body<T>& point, int i, Body<T>& edge,
     int j, int k, T wa, T wb, const typename Body<T>::Vec& normal, T normalImpulse)
 {
@@ -115,7 +116,8 @@ template<class T> T applyPairFriction(Body<T>& point, int i, Body<T>& edge,
     }
     return -(impulse*speed+T(.5)*inverseMass*impulse*impulse);
 }
-template<class T> int projectPair(Body<T>& a,Body<T>& b,T dt,double& impulse,bool strict=true, double* frictionLoss=nullptr)
+
+template<class T> int projectPair(Body<T>& a,Body<T>& b,T dt,double& impulse,bool strict, double* frictionLoss)
 {
     if (!overlapAabb(a,b)) return 0;
     if (strict && guardEdgeOnly(a,b)) return -1;int count=0;
@@ -140,4 +142,26 @@ template<class T> int projectPair(Body<T>& a,Body<T>& b,T dt,double& impulse,boo
     }
     return count;
 }
+template float cross<float>(typename Body<float>::Vec a,typename Body<float>::Vec b);
+template double cross<double>(typename Body<double>::Vec a,typename Body<double>::Vec b);
+template typename Body<float>::Vec sub<float>(typename Body<float>::Vec a,typename Body<float>::Vec b);
+template typename Body<double>::Vec sub<double>(typename Body<double>::Vec a,typename Body<double>::Vec b);
+template bool inside<float>(typename Body<float>::Vec p,const Body<float>& b);
+template bool inside<double>(typename Body<double>::Vec p,const Body<double>& b);
+template Hit<float> nearest<float>(typename Body<float>::Vec p,const Body<float>& b);
+template Hit<double> nearest<double>(typename Body<double>::Vec p,const Body<double>& b);
+template bool overlapAabb<float>(const Body<float>& a,const Body<float>& b);
+template bool overlapAabb<double>(const Body<double>& a,const Body<double>& b);
+template bool strictCross<float>(typename Body<float>::Vec a,typename Body<float>::Vec b,typename Body<float>::Vec c,typename Body<float>::Vec d);
+template bool strictCross<double>(typename Body<double>::Vec a,typename Body<double>::Vec b,typename Body<double>::Vec c,typename Body<double>::Vec d);
+template const char* guardEdgeOnly<float>(const Body<float>& a,const Body<float>& b);
+template const char* guardEdgeOnly<double>(const Body<double>& a,const Body<double>& b);
+template const char* guardTransit<float>(const Body<float>& oldA,const Body<float>& a,const Body<float>& oldB,const Body<float>& b);
+template const char* guardTransit<double>(const Body<double>& oldA,const Body<double>& a,const Body<double>& oldB,const Body<double>& b);
+template int projectPair<float>(Body<float>& a,Body<float>& b,float dt,double& impulse,bool strict, double* frictionLoss);
+template int projectPair<double>(Body<double>& a,Body<double>& b,double dt,double& impulse,bool strict, double* frictionLoss);
+template float applyPairFriction<float>(Body<float>& point, int i, Body<float>& edge,
+    int j, int k, float wa, float wb, const typename Body<float>::Vec& normal, float normalImpulse);
+template double applyPairFriction<double>(Body<double>& point, int i, Body<double>& edge,
+    int j, int k, double wa, double wb, const typename Body<double>::Vec& normal, double normalImpulse);
 }

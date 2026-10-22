@@ -1,13 +1,32 @@
 # Experimental soft-body world
 
-Private C++11, header-only solver, isolated from Box2D and LiquidFun. The engine
-includes `sb_world.h` through its Lua adapter. No Box2D public headers, rigid solver,
-worker scheduler, SIMD flags or LiquidFun behavior are modified.
+Private C++11 solver with compiled implementations and float/double explicit
+instantiations. The engine includes `soft_world.h` through its Lua adapter.
+The core has no Box2D dependency. `soft_box2d_static` is a separate experimental
+adapter using Box2D public APIs. No rigid solver, worker scheduler, SIMD flags or
+LiquidFun behavior are modified.
 
-- `sb_body.h`: fixed 16-node local-frame and pressure materials, deformation damping.
-- `sb_contact.h`: point/edge contact and sweep diagnostics (not general CCD).
-- `sb_world.h`: body storage, mass-weighted pins, equal/opposite motors, force-limited touch springs, planes,
+The `.h` files declare data and operations; the matching `.cpp` files implement
+materials, contacts, stepping and the static bridge. Only float and double are
+instantiated. `World::step(projector, context)` calls an optional synchronous
+projector each soft constraint iteration; it stores neither pointer and invokes
+no worker tasks. The context must outlive the call. No callback is registered by
+the default `step()`. This private C++ entry is not a Box2D substep API.
+
+CMake consumers add this directory and link `softbody`; when the `box2d` target
+exists, `softbody_box2d` is also available. Both disable FP contraction and C++
+exceptions on Clang/GCC. The macOS engine project compiles all four `.cpp` files.
+Other platform engine projects have intentionally not been updated yet: they
+must add these compilation units before building this branch. This is not a
+cross-platform-ready integration.
+
+- `soft_body.h/.cpp`: fixed 16-node local-frame and pressure materials, deformation damping.
+- `soft_contact.h/.cpp`: point/edge contact and sweep diagnostics (not general CCD).
+- `soft_world.h/.cpp`: body storage, mass-weighted pins, equal/opposite motors, force-limited touch springs, planes,
   static solid quadrants, contact iterations and per-substep diagnostics.
+
+- `soft_box2d_static.h/.cpp`: registered static circle/polygon prototype; no CCD,
+  dynamic reaction or Lua bridge. Edge-only crossings remain a known gap.
 
 Units are meters, kilograms and seconds, with no display scaling. The validated
 profile is 60 Hz with 8 substeps and 8 iterations, gravity (0,-20), and a restricted
