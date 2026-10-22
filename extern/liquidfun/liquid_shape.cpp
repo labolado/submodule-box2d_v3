@@ -37,13 +37,13 @@ b2AABB b2LiquidShape::ComputeAABB( b2Transform transform ) const {
 	switch ( type )
 	{
 		case b2_capsuleShape:
-			return b2ComputeCapsuleAABB( &capsule, transform );
+			return b2ComputeCapsuleBounds( &capsule, b2MakeWorldTransform( transform ) );
 
 		case b2_circleShape:
-			return b2ComputeCircleAABB( &circle, transform );
+			return b2ComputeCircleBounds( &circle, b2MakeWorldTransform( transform ) );
 
 		case b2_polygonShape:
-			return b2ComputePolygonAABB( &polygon, transform );
+			return b2ComputePolygonBounds( &polygon, b2MakeWorldTransform( transform ) );
 
 		default:
 			return {b2Vec2_zero, b2Vec2_zero};

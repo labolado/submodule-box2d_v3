@@ -26,6 +26,7 @@
 #define ARRAY_COUNT( A ) (int)( sizeof( A ) / sizeof( A[0] ) )
 #define MAYBE_UNUSED( x ) ( (void)( x ) )
 
+typedef b2Capacity CapacityFcn( void );
 typedef void CreateFcn( b2WorldId worldId );
 typedef float StepFcn( b2WorldId worldId, int stepCount );
 typedef void DestroyFcn( void );
@@ -33,6 +34,9 @@ typedef void DestroyFcn( void );
 typedef struct Benchmark
 {
 	const char* name;
+
+	// Optional initial world capacity to avoid array growth while the scene is built and the first steps run
+	CapacityFcn* capacityFcn;
 	CreateFcn* createFcn;
 	StepFcn* stepFcn;
 	int totalStepCount;
@@ -151,20 +155,20 @@ int main( int argc, char** argv )
 #endif
 
 	Benchmark benchmarks[] = {
-		{ "compounds", CreateCompounds, NULL, 500 },
-		{ "joint_grid", CreateJointGrid, NULL, 500 },
-		{ "junkyard", CreateJunkyard, StepJunkyard, 800 },
-		{ "large_pyramid", CreateLargePyramid, NULL, 500 },
-		{ "many_pyramids", CreateManyPyramids, NULL, 200 },
-		{ "rain", CreateRain, StepRain, 1000 },
-		{ "smash", CreateSmash, NULL, 300 },
-		{ "spinner", CreateSpinner, StepSpinner, 500 },
-		{ "tumbler", CreateTumbler, NULL, 750 },
-		{ "washer", CreateWasher, NULL, 500 },
-		{ "queries", CreateQueries, StepQueries, 200 },
-		{ "tree_cast", CreateTreeCast, StepTreeCast, 200, DestroyTreeCast },
-		{ "tile_world", CreateTileWorld, StepTileWorld, 300, DestroyTileWorld },
-		{ "sleep", CreateSleep, StepSleep, 300 },
+		{ "compounds", GetCompoundsCapacity, CreateCompounds, NULL, 500 },
+		{ "joint_grid", GetJointGridCapacity, CreateJointGrid, NULL, 500 },
+		{ "junkyard", GetJunkyardCapacity, CreateJunkyard, StepJunkyard, 800 },
+		{ "large_pyramid", GetLargePyramidCapacity, CreateLargePyramid, NULL, 500 },
+		{ "many_pyramids", GetManyPyramidsCapacity, CreateManyPyramids, NULL, 200 },
+		{ "rain", GetRainCapacity, CreateRain, StepRain, 1000 },
+		{ "smash", GetSmashCapacity, CreateSmash, NULL, 300 },
+		{ "spinner", GetSpinnerCapacity, CreateSpinner, StepSpinner, 500 },
+		{ "tumbler", GetTumblerCapacity, CreateTumbler, NULL, 750 },
+		{ "washer", GetWasherCapacity, CreateWasher, NULL, 500 },
+		{ "queries", GetQueriesCapacity, CreateQueries, StepQueries, 200 },
+		{ "tree_cast", NULL, CreateTreeCast, StepTreeCast, 200, DestroyTreeCast },
+		{ "tile_world", GetTileWorldCapacity, CreateTileWorld, StepTileWorld, 300, DestroyTileWorld },
+		{ "sleep", GetSleepCapacity, CreateSleep, StepSleep, 300 },
 	};
 
 	int benchmarkCount = ARRAY_COUNT( benchmarks );
@@ -216,6 +220,7 @@ int main( int argc, char** argv )
 	bool recordStepTimes = false;
 	bool fullSteps = false;
 	bool rebuildStatic = false;
+	bool sse2Fallback = false;
 
 	for ( int i = 1; i < argc; ++i )
 	{
@@ -272,6 +277,24 @@ int main( int argc, char** argv )
 			rebuildStatic = true;
 			printf( "Static tree rebuilt after create\n" );
 		}
+		else if ( ( value = MatchValue( arg, "-simd=", "--simd-width=" ) ) != NULL )
+		{
+			int simdWidth = atoi( value );
+			if ( simdWidth == 4 )
+			{
+				sse2Fallback = true;
+			}
+			else if ( simdWidth != 8 )
+			{
+				printf( "The SIMD width must be 4 or 8\n" );
+				exit( 1 );
+			}
+			else if ( b2IsAVX2Available() == false )
+			{
+				printf( "This CPU does not support AVX2\n" );
+				exit( 1 );
+			}
+		}
 		else if ( strcmp( arg, "-l" ) == 0 || strcmp( arg, "--list" ) == 0 )
 		{
 			PrintBenchmarks( benchmarks, benchmarkCount );
@@ -288,6 +311,7 @@ int main( int argc, char** argv )
 					"-s, --record-steps: record step times\n"
 					"-f, --full: run the full step count in a debug build\n"
 					"-rs, --rebuild-static: rebuild the static tree after create and print the time\n"
+					"-simd, --simd-width=<4|8>: force the SSE2 path with 4, the default is 8 when the CPU has AVX2\n"
 					"-l, --list: list the registered benchmarks\n"
 					"-h, --help: print this help\n" );
 			exit( 0 );
@@ -304,6 +328,7 @@ int main( int argc, char** argv )
 	}
 
 	printf( "Starting Box2D benchmarks\n" );
+	printf( "SIMD width: %d\n", b2IsAVX2Available() && sse2Fallback == false ? 8 : 4 );
 	printf( "======================================\n" );
 
 	for ( int benchmarkIndex = 0; benchmarkIndex < benchmarkCount; ++benchmarkIndex )
@@ -343,7 +368,14 @@ int main( int argc, char** argv )
 				b2WorldDef worldDef = b2DefaultWorldDef();
 				worldDef.enableContinuous = enableContinuous;
 				worldDef.workerCount = threadCount;
+
+				if ( benchmark->capacityFcn != NULL )
+				{
+					worldDef.capacity = benchmark->capacityFcn();
+				}
+
 				b2WorldId worldId = b2CreateWorld( &worldDef );
+				b2World_EnableSSE2Fallback( worldId, sse2Fallback );
 
 				benchmark->createFcn( worldId );
 

@@ -149,7 +149,7 @@ namespace // anonymous namespace.
 			return true;
 		}
 
-		b2AABB aabb = b2Shape_GetAABB(shapeId);
+		b2AABB aabb = b2Shape_GetBounds(shapeId);
 		b2ParticleSystem* system = queryContext->system;
 		b2ParticleSystem::InsideBoundsEnumerator enumerator = system->GetInsideBoundsEnumerator(aabb);
 		int32 index = -7;
@@ -203,7 +203,7 @@ namespace // anonymous namespace.
 					p1 = ap;
 				}
 				b2Vec2 p2 = ap + queryContext->step.dt * av;
-				b2WorldCastOutput output = b2Shape_RayCast(shapeId, p1, p2 - p1);
+				b2WorldCastOutput output = b2Shape_CastRay(shapeId, p1, p2 - p1);
 
 				// Initial overlaps have no ray normal. Preserve outward motion,
 				// but do not let relative inward motion deepen the overlap.
@@ -268,7 +268,7 @@ namespace // anonymous namespace.
 			return true;
 		}
 
-		b2AABB aabb = b2Shape_GetAABB(shapeId);
+		b2AABB aabb = b2Shape_GetBounds(shapeId);
 		b2ParticleSystem::InsideBoundsEnumerator enumerator = system->GetInsideBoundsEnumerator(aabb);
 		// Without a fixture filter there is no user code inside this query. The
 		// shape transform and mass properties can be reused for all candidates.
@@ -5283,7 +5283,7 @@ void b2ParticleSystem::QueryShapeAABB(b2LiquidQueryCallback* callback,
 {
 	// b2AABB aabb;
 	// shape.ComputeAABB(&aabb, xf, 0);
-	b2AABB aabb = b2Shape_GetAABB(shape);
+	b2AABB aabb = b2Shape_GetBounds(shape);
 	QueryAABB(callback, aabb);
 }
 

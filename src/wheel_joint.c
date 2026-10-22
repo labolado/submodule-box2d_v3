@@ -126,23 +126,23 @@ bool b2WheelJoint_IsMotorEnabled( b2JointId jointId )
 	return joint->wheelJoint.enableMotor;
 }
 
-void b2WheelJoint_SetMotorSpeed( b2JointId jointId, float motorSpeed )
+void b2WheelJoint_SetTargetMotorSpeed( b2JointId jointId, float motorSpeed )
 {
 	B2_CHECK_INPUT( b2IsValidFloat( motorSpeed ) );
 
 	b2World* world = b2GetWorld( jointId.world0 );
-	B2_REC( world, WheelJointSetMotorSpeed, jointId, motorSpeed );
+	B2_REC( world, WheelJointSetTargetMotorSpeed, jointId, motorSpeed );
 	b2JointSim* joint = b2GetJointSimCheckType( jointId, b2_wheelJoint );
 	joint->wheelJoint.motorSpeed = motorSpeed;
 }
 
-float b2WheelJoint_GetMotorSpeed( b2JointId jointId )
+float b2WheelJoint_GetTargetMotorSpeed( b2JointId jointId )
 {
 	b2JointSim* joint = b2GetJointSimCheckType( jointId, b2_wheelJoint );
 	return joint->wheelJoint.motorSpeed;
 }
 
-float b2WheelJoint_GetMotorTorque( b2JointId jointId )
+float b2WheelJoint_GetCurrentMotorTorque( b2JointId jointId )
 {
 	b2World* world = b2GetWorld( jointId.world0 );
 	b2JointSim* joint = b2GetJointSimCheckType( jointId, b2_wheelJoint );

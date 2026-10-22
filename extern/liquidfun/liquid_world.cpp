@@ -30,7 +30,7 @@ bool operator<( b2ShapeId a, b2ShapeId b ) {
 static b2WorldCastOutput CastMovingBoundary( b2ShapeId shape, b2Vec2 start, b2Vec2 end )
 {
 	b2Vec2 translation = end - start;
-	b2WorldCastOutput hit = b2Shape_RayCast( shape, start, translation );
+	b2WorldCastOutput hit = b2Shape_CastRay( shape, start, translation );
 	hit.point = start + hit.fraction * translation;
 	if ( hit.hit && b2LengthSquared( hit.normal ) > 0.0f )
 	{
@@ -311,7 +311,7 @@ void b2LiquidWorld::PostStep( b2Vec2* const* startPositions )
 			{
 				continue;
 			}
-			b2AABB aabb = b2Shape_GetAABB( shape );
+			b2AABB aabb = b2Shape_GetBounds( shape );
 			b2Vec2 lo = aabb.lowerBound - current.p;
 			b2Vec2 hi = aabb.upperBound - current.p;
 			reach = b2MaxFloat( reach, b2Length( { b2MaxFloat( std::fabs( lo.x ), std::fabs( hi.x ) ),

@@ -17,32 +17,18 @@ pub const Options = struct {
     shared: bool,
     unit_tests: bool,
     disable_simd: bool,
-    avx2: bool,
 
     const defaults = Options{
         .shared = false,
         .unit_tests = false,
         .disable_simd = false,
-        .avx2 = false,
     };
 
-    pub fn getOptions(b: *Build, target: ResolvedTarget) Options {
-        const disable_simd = b.option(bool, "disable_simd", "Disable SIMD math (slower)") orelse defaults.disable_simd;
-
-        const avx2 = avx2_option_blk: {
-            const has_avx2 = target.result.cpu.has(.x86, .avx2);
-            if (has_avx2 and !disable_simd) {
-                break :avx2_option_blk b.option(bool, "avx2", "Enable AVX2") orelse defaults.avx2;
-            }
-
-            break :avx2_option_blk false;
-        };
-
+    pub fn getOptions(b: *Build) Options {
         return .{
             .shared = b.option(bool, "shared", "Compile as shared library") orelse defaults.shared,
             .unit_tests = b.option(bool, "unit_tests", "Compile unit tests") orelse defaults.unit_tests,
-            .disable_simd = disable_simd,
-            .avx2 = avx2,
+            .disable_simd = b.option(bool, "disable_simd", "Disable SIMD math (slower)") orelse defaults.disable_simd,
         };
     }
 };
@@ -50,7 +36,7 @@ pub const Options = struct {
 pub fn build(b: *Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const options = Options.getOptions(b, target);
+    const options = Options.getOptions(b);
     const lib = try compileBox2d(b, target, optimize, options);
 
     // Translate the box2d headers and export them as a module
@@ -105,13 +91,6 @@ fn compileBox2d(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, optio
         });
     }
 
-    if (options.avx2) {
-        module.addCMacro("BOX2D_AVX2", "");
-        try box2d_flags_arr.appendSlice(b.allocator, &[_][]const u8{
-            "-mavx2",
-        });
-    }
-
     const linkage: std.builtin.LinkMode = if (options.shared) .dynamic else .static;
     const box2d = b.addLibrary(.{
         .root_module = module,
@@ -127,6 +106,8 @@ fn compileBox2d(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, optio
         "src/broad_phase.c",
         "src/constraint_graph.c",
         "src/contact_solver.c",
+        "src/contact_solver_w4.c",
+        "src/contact_solver_w8.c",
         "src/contact.c",
         "src/core.c",
         "src/distance_joint.c",
@@ -152,6 +133,7 @@ fn compileBox2d(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, optio
         "src/scheduler.c",
         "src/sensor.c",
         "src/shape.c",
+        "src/simd.c",
         "src/snapshot.c",
         "src/solver_set.c",
         "src/solver.c",
@@ -199,6 +181,7 @@ fn buildTests(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, box2d_l
             "test/test_restitution.c",
             "test/test_shape.c",
             "test/test_snapshot.c",
+            "test/test_sort.c",
             "test/test_table.c",
             "test/test_thread.c",
             "test/test_world.c",

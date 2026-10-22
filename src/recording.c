@@ -488,15 +488,6 @@ void b2RecW_SHAPEPROXY( b2RecBuffer* buf, b2ShapeProxy v )
 	b2RecW_F32( buf, v.radius );
 }
 
-void b2RecW_WORLDCASTOUTPUT( b2RecBuffer* buf, b2WorldCastOutput v )
-{
-	b2RecW_VEC2( buf, v.normal );
-	b2RecW_POSITION( buf, v.point );
-	b2RecW_F32( buf, v.fraction );
-	b2RecW_I32( buf, v.iterations );
-	b2RecW_BOOL( buf, v.hit );
-}
-
 void b2RecW_RAYRESULT( b2RecBuffer* buf, b2RayResult v )
 {
 	b2RecW_SHAPEID( buf, v.shapeId );
@@ -757,6 +748,22 @@ void b2RecAccumulateBounds( b2Recording* rec, b2AABB bounds )
 	rec->haveBounds = true;
 }
 
+void b2RecRequireWeldRestitution( b2Recording* recording )
+{
+	if ( recording == NULL )
+	{
+		return;
+	}
+	b2LockMutex( recording->lock );
+	B2_ASSERT( recording->buffer.size >= (int)sizeof( b2RecHeader ) );
+	b2RecHeader header;
+	memcpy( &header, recording->buffer.data, sizeof( header ) );
+	header.versionMinor = B2_REC_WELD_VERSION_MINOR;
+	header.reserved2 = B2_REC_WELD_SIGNATURE;
+	memcpy( recording->buffer.data, &header, sizeof( header ) );
+	b2UnlockMutex( recording->lock );
+}
+
 void b2StartRecordingIntoBuffer( b2World* world, b2Recording* recording )
 {
 	// Reset so a recording handle can be reused for a fresh session
@@ -782,6 +789,10 @@ void b2StartRecordingIntoBuffer( b2World* world, b2Recording* recording )
 	b2RecBufFree( &blob );
 
 	world->recording = recording;
+	if ( world->enableWeldRestitution )
+	{
+		b2RecRequireWeldRestitution( recording );
+	}
 
 	// Seed the bounds with the snapshot state so frame 0 is framed even if nothing moves
 	b2AABB seed;
@@ -825,7 +836,7 @@ void b2StopRecordingInternal( b2World* world )
 // Convenience file I/O. The library never opens files while recording. These let a host persist
 // or reload a recording buffer without writing its own I/O. fopen precedent: b2World_DumpMemoryStats.
 
-bool b2SaveRecordingToFile( const b2Recording* recording, const char* path )
+bool b2Recording_SaveToFile( const b2Recording* recording, const char* path )
 {
 	if ( recording == NULL || path == NULL )
 	{
@@ -843,7 +854,7 @@ bool b2SaveRecordingToFile( const b2Recording* recording, const char* path )
 	return (int)written == recording->buffer.size;
 }
 
-b2Recording* b2LoadRecordingFromFile( const char* path )
+b2Recording* b2CreateRecordingFromFile( const char* path )
 {
 	if ( path == NULL )
 	{

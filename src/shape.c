@@ -788,15 +788,15 @@ b2AABB b2ComputeShapeAABB( const b2Shape* shape, b2WorldTransform xf )
 	switch ( shape->type )
 	{
 		case b2_capsuleShape:
-			return b2ComputeCapsuleAABB( &shape->capsule, xf );
+			return b2ComputeCapsuleBounds( &shape->capsule, xf );
 		case b2_circleShape:
-			return b2ComputeCircleAABB( &shape->circle, xf );
+			return b2ComputeCircleBounds( &shape->circle, xf );
 		case b2_polygonShape:
-			return b2ComputePolygonAABB( &shape->polygon, xf );
+			return b2ComputePolygonBounds( &shape->polygon, xf );
 		case b2_segmentShape:
-			return b2ComputeSegmentAABB( &shape->segment, xf );
+			return b2ComputeSegmentBounds( &shape->segment, xf );
 		case b2_chainSegmentShape:
-			return b2ComputeSegmentAABB( &shape->chainSegment.segment, xf );
+			return b2ComputeSegmentBounds( &shape->chainSegment.segment, xf );
 		default:
 		{
 			B2_ASSERT( false );
@@ -1007,19 +1007,19 @@ b2CastOutput b2RayCastShape( const b2RayCastInput* input, const b2Shape* shape, 
 	switch ( shape->type )
 	{
 		case b2_capsuleShape:
-			output = b2RayCastCapsule( &shape->capsule, &localInput );
+			output = b2CastRayCapsule( &shape->capsule, &localInput );
 			break;
 		case b2_circleShape:
-			output = b2RayCastCircle( &shape->circle, &localInput );
+			output = b2CastRayCircle( &shape->circle, &localInput );
 			break;
 		case b2_polygonShape:
-			output = b2RayCastPolygon( &shape->polygon, &localInput );
+			output = b2CastRayPolygon( &shape->polygon, &localInput );
 			break;
 		case b2_segmentShape:
-			output = b2RayCastSegment( &shape->segment, &localInput, false );
+			output = b2CastRaySegment( &shape->segment, &localInput, false );
 			break;
 		case b2_chainSegmentShape:
-			output = b2RayCastSegment( &shape->chainSegment.segment, &localInput, true );
+			output = b2CastRaySegment( &shape->chainSegment.segment, &localInput, true );
 			break;
 		default:
 			return output;
@@ -1053,16 +1053,16 @@ b2CastOutput b2ShapeCastShape( const b2ShapeCastInput* input, const b2Shape* sha
 	switch ( shape->type )
 	{
 		case b2_capsuleShape:
-			output = b2ShapeCastCapsule( &shape->capsule, &localInput );
+			output = b2CastShapeCapsule( &shape->capsule, &localInput );
 			break;
 		case b2_circleShape:
-			output = b2ShapeCastCircle( &shape->circle, &localInput );
+			output = b2CastShapeCircle( &shape->circle, &localInput );
 			break;
 		case b2_polygonShape:
-			output = b2ShapeCastPolygon( &shape->polygon, &localInput );
+			output = b2CastShapePolygon( &shape->polygon, &localInput );
 			break;
 		case b2_segmentShape:
-			output = b2ShapeCastSegment( &shape->segment, &localInput );
+			output = b2CastShapeSegment( &shape->segment, &localInput );
 			break;
 		case b2_chainSegmentShape:
 		{
@@ -1084,7 +1084,7 @@ b2CastOutput b2ShapeCastShape( const b2ShapeCastInput* input, const b2Shape* sha
 				return output;
 			}
 
-			output = b2ShapeCastSegment( &shape->chainSegment.segment, &localInput );
+			output = b2CastShapeSegment( &shape->chainSegment.segment, &localInput );
 		}
 		break;
 		default:
@@ -1242,22 +1242,12 @@ bool b2Shape_TestPoint( b2ShapeId shapeId, b2Pos point )
 			break;
 	}
 
-	if ( world->recording != NULL )
-	{
-		b2RecBuffer recBuf = { 0 };
-		b2RecW_SHAPEID( &recBuf, shapeId );
-		b2RecW_POSITION( &recBuf, point );
-		b2RecW_BOOL( &recBuf, result );
-		b2RecCommitRecord( world->recording, 0xE7, recBuf.data, recBuf.size );
-		b2RecBufFree( &recBuf );
-	}
-
 	return result;
 }
 
-b2WorldCastOutput b2Shape_RayCast( b2ShapeId shapeId, b2Pos origin, b2Vec2 translation )
+b2WorldCastOutput b2Shape_CastRay( b2ShapeId shapeId, b2Pos origin, b2Vec2 translation )
 {
-	B2_ASSERT( b2IsValidPosition( origin ) );
+	B2_ASSERT( b2IsValidPos( origin ) );
 	B2_ASSERT( b2IsValidVec2( translation ) );
 
 	b2World* world = b2GetWorld( shapeId.world0 );
@@ -1277,17 +1267,6 @@ b2WorldCastOutput b2Shape_RayCast( b2ShapeId shapeId, b2Pos origin, b2Vec2 trans
 	output.fraction = local.fraction;
 	output.iterations = local.iterations;
 	output.hit = local.hit;
-
-	if ( world->recording != NULL )
-	{
-		b2RecBuffer recBuf = { 0 };
-		b2RecW_SHAPEID( &recBuf, shapeId );
-		b2RecW_POSITION( &recBuf, origin );
-		b2RecW_VEC2( &recBuf, translation );
-		b2RecW_WORLDCASTOUTPUT( &recBuf, output );
-		b2RecCommitRecord( world->recording, 0xE8, recBuf.data, recBuf.size );
-		b2RecBufFree( &recBuf );
-	}
 
 	return output;
 }
@@ -1941,7 +1920,7 @@ int b2Shape_GetSensorData( b2ShapeId shapeId, b2ShapeId* visitorIds, int capacit
 	return count;
 }
 
-b2AABB b2Shape_GetAABB( b2ShapeId shapeId )
+b2AABB b2Shape_GetBounds( b2ShapeId shapeId )
 {
 	b2World* world = b2GetWorld( shapeId.world0 );
 	if ( world == NULL )
@@ -1989,7 +1968,7 @@ b2Pos b2Shape_GetClosestPoint( b2ShapeId shapeId, b2Pos target )
 	input.useRadii = true;
 
 	b2SimplexCache cache = { 0 };
-	b2DistanceOutput output = b2ShapeDistance( &input, &cache, NULL, 0 );
+	b2DistanceOutput output = b2ComputeShapeDistance( &input, &cache, NULL, 0 );
 
 	return b2TransformWorldPoint( transform, output.pointA );
 }
