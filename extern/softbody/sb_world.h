@@ -199,7 +199,13 @@ template<class T> struct World
         }
         appliedWork+=kinetic(joint.body)-before;
     }
+    // Optional external constraints run on the caller thread, inside each soft
+    // iteration. The default functor is empty and needs no stored callback.
+    struct NoExternalContacts { void operator()(World&) const {} };
     void solveSubstep(const std::vector<T>& offsets,const std::vector<T>& velocities)
+    { solveSubstep(offsets,velocities,NoExternalContacts()); }
+    template<class Project> void solveSubstep(const std::vector<T>& offsets,
+        const std::vector<T>& velocities,const Project& project)
     {
         auto previous=bodies;
         for(auto& b:bodies)if(b.active)
@@ -281,6 +287,8 @@ template<class T> struct World
                 for(size_t id=0;id<bodies.size();++id)if(boundaryEnabled(int(id),box))
                     for(int vertex=0;vertex<4;++vertex)
                         boundaryVertex(int(id),boxVertex(box,vertex),box.friction);
+            project(*this);
+            if(failure)return;
             for(size_t a=0;a<bodies.size();++a)for(size_t b=a+1;b<bodies.size();++b)if(pairEnabled(int(a),int(b)))
             {
                 if(guardEdgeOnly(bodies[a],bodies[b]))++strictEvents;
@@ -353,7 +361,8 @@ template<class T> struct World
     }
     Metrics currentMetrics() const
     { std::vector<T> offsets;for(const auto& b:boundaries)offsets.push_back(b.offset);return metrics(offsets); }
-    void step()
+    void step() { step(NoExternalContacts()); }
+    template<class Project> void step(const Project& project)
     {
         if(failure)return;peak=Metrics();
         minimumY.assign(bodies.size(),std::numeric_limits<T>::max());
@@ -363,7 +372,7 @@ template<class T> struct World
         for(int s=1;s<=substeps;++s)
         {
             for(size_t j=0;j<boundaries.size();++j)offsets[j]=starts[j]+(boundaries[j].target-starts[j])*T(s)/T(substeps);
-            solveSubstep(offsets,velocities);++completedSubsteps;if(failure)return;
+            solveSubstep(offsets,velocities,project);++completedSubsteps;if(failure)return;
             auto m=metrics(offsets);if(failure)return;
             maxUnforcedEnergy=std::max(maxUnforcedEnergy,m.energy-motorWork-boundaryWork-appliedWork);
             for(size_t id=0;id<bodies.size();++id)if(bodies[id].active)
