@@ -81,7 +81,8 @@ template<class T> struct World
     Metrics metrics(const std::vector<T>& offsets) const;
     Metrics currentMetrics() const;
     void step();
-    void step(ContactProjector project,const void* context);
+    using ContactMeasure = double (*)(const World&,const void*);
+    void step(ContactProjector project,const void* context,ContactMeasure measure=nullptr);
     void removeBody(int id);
 };
 extern template struct World<float>;

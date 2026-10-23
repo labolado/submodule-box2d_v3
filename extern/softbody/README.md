@@ -8,7 +8,7 @@ LiquidFun behavior are modified.
 
 The `.h` files declare data and operations; the matching `.cpp` files implement
 materials, contacts, stepping and the static bridge. Only float and double are
-instantiated. `World::step(projector, context)` calls an optional synchronous
+instantiated. `World::step(projector, context, measure)` calls an optional synchronous
 projector each soft constraint iteration; it stores neither pointer and invokes
 no worker tasks. The context must outlive the call. No callback is registered by
 the default `step()`. This private C++ entry is not a Box2D substep API.
@@ -26,7 +26,9 @@ cross-platform-ready integration.
   static solid quadrants, contact iterations and per-substep diagnostics.
 
 - `soft_box2d_static.h/.cpp`: registered static circle/polygon prototype; no CCD,
-  dynamic reaction or Lua bridge. Edge-only crossings remain a known gap.
+  dynamic reaction. Solar2D exposes an experimental static attachment. Polygon segment clipping and coherent endpoint
+  separation cover the tested discrete edge crossings; high-speed transit and
+  arbitrary deeply interlocked geometry are not certified.
 
 Units are meters, kilograms and seconds, with no display scaling. The validated
 profile is 60 Hz with 8 substeps and 8 iterations, gravity (0,-20), and a restricted
@@ -37,8 +39,8 @@ Parameters outside that profile are not certified stable.
 Planes interpolate their scalar offset over each world step; work includes their
 normal motion. Forces and torques accumulate for the next outer step and then clear.
 Bodies have uniform node mass. Pressure pretension is supported for circles only.
-There is no arbitrary mesh, rotating-boundary response, Box2D coupling, broad-phase
-acceleration, threading or SIMD implementation in this module yet.
+Static Box2D coupling uses public AABB queries in the separate bridge. There is no
+arbitrary mesh, moving rigid boundary response, threading or SIMD implementation.
 
 Body removal disables attached pins; IDs are not reused during the world's lifetime.
 Lua owns the world lifetime. Core callers must validate definitions and IDs before
@@ -108,9 +110,9 @@ normal projection can add energy.
 This is local Coulomb-like friction, not a persistent static-contact manifold:
 no penetration correction means no friction budget, and each iteration uses only
 its own new normal impulse. Holding/sticking can depend on substeps and iterations.
-It does not repair folded polygon contact, supply CCD, or guarantee passage through
-an overlapping rotor gap. The rotor example advances farther but still exits left
-and falls; stable transport is not yet validated.
+It does not repair arbitrary folded polygon contact, supply CCD, or guarantee
+passage through an overlapping rotor gap. The frozen C1 rotor fixture clears both
+rotors; this is a bounded scene result, not a general transport guarantee.
 
 Boundary/body collision exclusions are independent of soft/soft exclusions.
 `Boundary::excludedBodies` contains stable body IDs; an empty list preserves the
@@ -119,3 +121,26 @@ response and penetration metrics. Lua `boundary:setCollisionEnabled(body, bool)`
 is pair-local, idempotent and rejects foreign-world or removed handles. The
 boundary's global `setEnabled` state still takes precedence. No Box2D rigid-body
 filter or LiquidFun behavior is changed.
+
+## C1 static bridge contract
+
+Only registered static circles and zero-radius convex polygons with zero bounce
+respond. Disabled bodies and sensors do not respond. Unsupported active shapes,
+nonstatic bodies, and locked worlds fail validation. Lua reflects Box2D y-down
+coordinates to the existing metre/y-up soft world; it does not change its step API.
+Shape filters and geometric-mean friction are read live. Native custom material
+and filter callbacks are unsupported. Registrations retain deterministic order
+following public AABB queries; zero-bit filters retain positive-group overrides.
+
+Static penetration is measured over edges as well as nodes, after each substep,
+and merged into the core peak. Query/candidate counters include metric queries.
+The sweep guard detects some complete-body transits and fails with
+`static_swept_transit`; it neither supplies collision response nor guarantees
+pointwise CCD. A failed step may have partially advanced state. Recreate the
+world after failure. Deep interlocking and arbitrary folded contact are not certified.
+
+Current acceptance and Lua contracts live in the independent test repository:
+`doc/jellycar-soft-body/static-c1-acceptance.md` and
+`physics_soft_body_static_bridge/README.md`. No Box2D src or LiquidFun scheduler
+changes are required for this static stage. Dynamic coupling requires a separate
+synchronization decision; manual soft stepping is not that protocol.

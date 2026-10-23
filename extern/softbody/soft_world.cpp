@@ -326,7 +326,7 @@ template<class T> typename World<T>::Metrics World<T>::currentMetrics() const
 template<class T> void World<T>::step()
 { step(nullptr,nullptr); }
 
-template<class T> void World<T>::step(ContactProjector project,const void* context)
+template<class T> void World<T>::step(ContactProjector project,const void* context,ContactMeasure measure)
 {
     if(failure)return;peak=Metrics();
     minimumY.assign(bodies.size(),std::numeric_limits<T>::max());
@@ -338,6 +338,7 @@ template<class T> void World<T>::step(ContactProjector project,const void* conte
         for(size_t j=0;j<boundaries.size();++j)offsets[j]=starts[j]+(boundaries[j].target-starts[j])*T(s)/T(substeps);
         solveSubstep(offsets,velocities,project,context);++completedSubsteps;if(failure)return;
         auto m=metrics(offsets);if(failure)return;
+        if(measure)m.penetration=std::max(m.penetration,measure(*this,context));
         maxUnforcedEnergy=std::max(maxUnforcedEnergy,m.energy-motorWork-boundaryWork-appliedWork);
         for(size_t id=0;id<bodies.size();++id)if(bodies[id].active)
             for(auto p:bodies[id].x)minimumY[id]=std::min(minimumY[id],p[1]);

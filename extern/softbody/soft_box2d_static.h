@@ -19,6 +19,9 @@ public:
     std::vector<Shape> shapes;
     // Missing entries use Box2D's default filter. This is separate from soft-soft filters.
     std::vector<b2Filter> filters;
+    bool flipY=false; // Solar2D uses down-positive coordinates; the experiment uses up.
+    mutable unsigned long queryCount=0,candidateCount=0;
+    double penetration(const Core& world) const;
 
     static bool allows(b2Filter a, b2Filter b);
 
@@ -31,6 +34,11 @@ public:
     void operator()(Core& world) const;
 
 private:
+    mutable std::vector<std::array<Vec,16>> previous;
+    std::vector<size_t> candidates(const Core& world,int body,bool swept) const;
+    bool enabled(const Shape& shape,int body) const;
+    void polygonPoints(b2ShapeId shape,std::array<Vec,B2_MAX_POLYGON_VERTICES>& points,int& count) const;
+    Vec circleCenter(b2ShapeId shape) const;
     // Weighted edge correction; no rigid reaction in the static-only phase.
     static void edgeContact(Core& world,int id,int edge,float fraction,Vec normal,float depth,float friction);
 
