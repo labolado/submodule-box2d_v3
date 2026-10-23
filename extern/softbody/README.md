@@ -15,7 +15,7 @@ the default `step()`. This private C++ entry is not a Box2D substep API.
 
 CMake consumers add this directory and link `softbody`; when the `box2d` target
 exists, `softbody_box2d` is also available. Both disable FP contraction and C++
-exceptions on Clang/GCC. The macOS engine project compiles all four `.cpp` files.
+exceptions on Clang/GCC. The macOS engine project compiles all five `.cpp` files.
 Other platform engine projects have intentionally not been updated yet: they
 must add these compilation units before building this branch. This is not a
 cross-platform-ready integration.
@@ -144,3 +144,31 @@ Current acceptance and Lua contracts live in the independent test repository:
 `physics_soft_body_static_bridge/README.md`. No Box2D src or LiquidFun scheduler
 changes are required for this static stage. Dynamic coupling requires a separate
 synchronization decision; manual soft stepping is not that protocol.
+
+## Restricted box bridge (C2b-1)
+
+`soft_box2d_box.h/.cpp` adds `Box2DBoxContacts` to `softbody_box2d`.
+This is separate from the C1 static bridge; it has no engine scheduling or Lua registration.
+The caller steps Box2D first, then calls `step` with exactly one soft substep.
+`project` is the synchronous per-iteration callback operation. Calls must be serialized
+while the rigid world is unlocked. No rigid world is owned or advanced by this adapter.
+
+Register explicit shape IDs in deterministic order. Active non-sensor attachments must be
+single centred sharp rectangular fixtures, with zero friction/restitution and no dynamic
+motion locks. Dimensions, mass, centre of mass and inertia are read from Box2D.
+Only recoverable, frictionless soft bodies are supported. Unsupported live data fails
+before soft advancement; a failure during contact can leave a partial step, so callers
+must latch the fault rather than retry it. Deleted IDs are inert; an engine wrapper still
+needs world-generation and handle lifecycle guards. Duplicate bodies and mixed worlds
+are rejected. Filters, group overrides, exclusions, sensors and disabled bodies are handled.
+
+`flipY` maps the existing metre/y-up soft frame to Box2D's frame, including normals,
+point velocities and reaction impulses. Position correction remains soft-only and does
+not turn penetration into velocity. Penetration metrics cover segments and contained
+corners; this is discrete collision response, not CCD or arbitrary overlap recovery.
+The known deeply interlocked/degenerate contour cases are not fixed by this extraction.
+
+macOS and native CMake build this adapter. Other engine platform projects still need the
+pre-existing soft core/C1 sources as well as this file; they remain unvalidated.
+Regression evidence is in the independent test repository at
+`doc/jellycar-soft-body/native-box-bridge.md` and `physics_soft_body_sync/box_bridge.cpp`.
