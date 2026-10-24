@@ -160,13 +160,8 @@ template<class T> void World<T>::solveTouchJoint(TouchJoint& joint)
     appliedWork+=kinetic(joint.body)-before;
 }
 
-template<class T> void World<T>::solveSubstep(const std::vector<T>& offsets,const std::vector<T>& velocities)
-{ solveSubstep(offsets,velocities,nullptr,nullptr); }
-
-template<class T> void World<T>::solveSubstep(const std::vector<T>& offsets,const std::vector<T>& velocities,
-    ContactProjector project,const void* context)
+template<class T> void World<T>::advanceMaterialVelocity()
 {
-    auto previous=bodies;
     for(auto& b:bodies)if(b.active)
     {
         // For the finite recovery spring, damp the incoming motion before
@@ -180,6 +175,16 @@ template<class T> void World<T>::solveSubstep(const std::vector<T>& offsets,cons
         std::array<Vec,16> f{};b.force(f);if(b.failure){failure=b.failure;return;}
         for(int i=0;i<16;++i)for(int k=0;k<2;++k)b.v[i][k]+=dt*(f[i][k]/b.mass[i]+gravity[k]);
     }
+}
+
+template<class T> void World<T>::solveSubstep(const std::vector<T>& offsets,const std::vector<T>& velocities)
+{ solveSubstep(offsets,velocities,nullptr,nullptr); }
+
+template<class T> void World<T>::solveSubstep(const std::vector<T>& offsets,const std::vector<T>& velocities,
+    ContactProjector project,const void* context)
+{
+    auto previous=bodies;
+    advanceMaterialVelocity();
     for(size_t id=0;id<bodies.size();++id)if(bodies[id].active)
     {
         auto& b=bodies[id];double before=kinetic(int(id));

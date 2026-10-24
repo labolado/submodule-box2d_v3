@@ -156,6 +156,10 @@ typedef struct b2JointPrepareSpan
 // Context for a time step. Recreated each time step.
 typedef struct b2StepContext
 {
+	// Private per-call experimental stage hook; never stored on the world.
+	void (*softStage)( void*, int, void* );
+	void* softContext;
+
 	// time step
 	float dt;
 

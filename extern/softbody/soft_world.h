@@ -75,6 +75,7 @@ template<class T> struct World
     // Optional external constraints run synchronously inside each soft iteration.
     // No callback is stored; context must remain valid for this step only.
     using ContactProjector = void (*)(World&,const void*);
+    void advanceMaterialVelocity(); // Experimental no-contact phase split.
     void solveSubstep(const std::vector<T>& offsets,const std::vector<T>& velocities);
     void solveSubstep(const std::vector<T>& offsets,const std::vector<T>& velocities,
         ContactProjector project,const void* context);
