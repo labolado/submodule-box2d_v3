@@ -243,3 +243,19 @@ bool b2ComputeWorldBounds( b2World* world, b2AABB* bounds );
 void b2ValidateConnectivity( b2World* world );
 void b2ValidateSolverSets( b2World* world );
 void b2ValidateContacts( b2World* world );
+
+// Private experimental phase entry, not part of the installed Box2D SDK.
+// The caller owns context for the entire synchronous call. A stage executes on
+// the solver orchestrator (not necessarily the calling OS thread), while the
+// world is locked. No Lua, body creation/deletion, wake operations or reentry.
+// Stages observe/modify only prepared solver state at synchronization barriers.
+// With no awake rigid bodies the solver returns without invoking these stages.
+typedef enum b2SoftStage
+{
+    b2_softStageMaterialVelocity = 0,
+    b2_softStageAttachment = 1,
+    b2_softStageContactAndRelax = 2
+} b2SoftStage;
+typedef void b2SoftStageFcn( void* step, int phase, void* context );
+void b2World_StepWithSoftStages( b2WorldId worldId, float timeStep, int subStepCount,
+    b2LiquidFunStepFcn* liquidStep, void* liquidContext, b2SoftStageFcn* stage, void* softContext );

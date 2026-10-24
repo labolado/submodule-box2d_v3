@@ -6,8 +6,6 @@ extern "C" {
 #include "../../src/physics_world.h"
 }
 
-extern "C" void b2World_StepSoftProbe(b2WorldId,float,int,b2LiquidFunStepFcn*,void*,void (*)(void*,int,void*),void*);
-
 namespace SoftBody
 {
 #if defined(__clang__)
@@ -239,6 +237,8 @@ struct GuardContext
     Box2DBoxContacts::StepGuard::Stage stage;
     void* user;
     int next=0;
+    GuardContext(Box2DBoxContacts::StepGuard& g,Core& s,Box2DBoxContacts::StepGuard::Stage f,void* u)
+        :guard(g),soft(s),stage(f),user(u){}
 };
 void guardedStage(void* step,int phase,void* user)
 {
@@ -279,7 +279,7 @@ bool Box2DBoxContacts::StepGuard::advance(b2WorldId world,Core& soft,const b2Bod
     }
     GuardContext context{*this,soft,stage,user};
     ++entered;
-    b2World_StepSoftProbe(world,soft.dt,1,nullptr,nullptr,guardedStage,&context);
+    b2World_StepWithSoftStages(world,soft.dt,1,nullptr,nullptr,guardedStage,&context);
     if(faulted)return false;
     if(context.next!=3){error="incomplete_stage_sequence";faulted=true;return false;}
     metrics=soft.currentMetrics();

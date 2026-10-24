@@ -921,14 +921,12 @@ static void b2Collide( b2StepContext* context )
 	b2TracyCZoneEnd( collide );
 }
 
-void b2World_StepSoftProbe( b2WorldId worldId, float timeStep, int subStepCount, b2LiquidFunStepFcn* fcn, void* liquidFunContext, void (*stage)( void*, int, void* ), void* softContext );
-
 void b2World_Step( b2WorldId worldId, float timeStep, int subStepCount, b2LiquidFunStepFcn* fcn, void* liquidFunContext )
 {
-	b2World_StepSoftProbe( worldId, timeStep, subStepCount, fcn, liquidFunContext, NULL, NULL );
+	b2World_StepWithSoftStages( worldId, timeStep, subStepCount, fcn, liquidFunContext, NULL, NULL );
 }
 
-void b2World_StepSoftProbe( b2WorldId worldId, float timeStep, int subStepCount, b2LiquidFunStepFcn* fcn, void* liquidFunContext, void (*stage)( void*, int, void* ), void* softContext )
+void b2World_StepWithSoftStages( b2WorldId worldId, float timeStep, int subStepCount, b2LiquidFunStepFcn* fcn, void* liquidFunContext, void (*stage)( void*, int, void* ), void* softContext )
 {
 	B2_CHECK_INPUT( b2IsValidFloat( timeStep ) );
 	B2_ASSERT( 0 < subStepCount );

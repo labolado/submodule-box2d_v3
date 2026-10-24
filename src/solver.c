@@ -1153,7 +1153,7 @@ static void b2SolverTask( void* taskContext )
 
 			profile->integrateVelocities += b2GetMillisecondsAndReset( &ticks );
 
-			if ( context->softStage ) context->softStage( context, 0, context->softContext );
+			if ( context->softStage ) context->softStage( context, b2_softStageMaterialVelocity, context->softContext );
 
 			// Warm start constraints
 			b2WarmStartJoints_Overflow( context );
@@ -1170,7 +1170,7 @@ static void b2SolverTask( void* taskContext )
 
 			profile->warmStart += b2GetMillisecondsAndReset( &ticks );
 
-			if ( context->softStage ) context->softStage( context, 1, context->softContext );
+			if ( context->softStage ) context->softStage( context, b2_softStageAttachment, context->softContext );
 
 			// Solve constraints
 			bool useBias = true;
@@ -1201,7 +1201,7 @@ static void b2SolverTask( void* taskContext )
 
 			profile->integratePositions += b2GetMillisecondsAndReset( &ticks );
 
-			if ( context->softStage ) context->softStage( context, 2, context->softContext );
+			if ( context->softStage ) context->softStage( context, b2_softStageContactAndRelax, context->softContext );
 
 			// Relax constraints
 			useBias = false;
