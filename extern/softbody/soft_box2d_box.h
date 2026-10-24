@@ -40,6 +40,35 @@ public:
     static void writeStepBody(void* step,int index,const StateView& state);
     static void projectState(Core& world,int body,StateView& state,float hx,float hy,unsigned long& contacts);
     static double statePenetration(Core& world,int body,StateView& state,float hx,float hy);
+    // Private single-step owner. Preflight failures do not advance either world.
+    // A failure after entering the rigid solver is non-transactional and poisons
+    // this owner; callers must discard the pair instead of silently resuming.
+    struct StepGuard
+    {
+        const char* error=nullptr;
+        bool faulted=false;
+        unsigned long long completed=0,entered=0;
+        using Stage=bool (*)(void* step,int phase,void* user);
+        bool advance(b2WorldId world,Core& soft,const b2BodyId* targets,int count,Stage stage,void* user);
+    };
+    // Restricted native owner: one soft body, one attachment, optional box contact.
+    // Owns neither world. Configuration is explicit; no user stage callbacks.
+    struct AttachmentOwner
+    {
+        Pin attachment;
+        b2ShapeId contact=b2_nullShapeId;
+        b2Filter filter=b2DefaultFilter();
+        StepGuard guard;
+        b2Vec2 impulse{};
+        unsigned long contacts=0;
+        double angularResidual=0,preDepth=0,postDepth=0;
+        bool advance(b2WorldId world,Core& soft);
+    private:
+        b2WorldId boundWorld=b2_nullWorldId;
+        Core* boundSoft=nullptr;
+        struct Context;
+        static bool stage(void* step,int phase,void* user);
+    };
     std::vector<Pin> pins;
     bool pinActive(const Core& world,const Pin& pin) const;
     double pinError(const Core& world,const Pin& pin) const;

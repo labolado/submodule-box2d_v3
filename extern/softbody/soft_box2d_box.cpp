@@ -6,6 +6,8 @@ extern "C" {
 #include "../../src/physics_world.h"
 }
 
+extern "C" void b2World_StepSoftProbe(b2WorldId,float,int,b2LiquidFunStepFcn*,void*,void (*)(void*,int,void*),void*);
+
 namespace SoftBody
 {
 #if defined(__clang__)
@@ -228,6 +230,64 @@ static void projectBoxes(Core& world,const void* context)
 {static_cast<const Box2DBoxContacts*>(context)->project(world);}
 }
 
+namespace
+{
+struct GuardContext
+{
+    Box2DBoxContacts::StepGuard& guard;
+    Core& soft;
+    Box2DBoxContacts::StepGuard::Stage stage;
+    void* user;
+    int next=0;
+};
+void guardedStage(void* step,int phase,void* user)
+{
+    auto& c=*static_cast<GuardContext*>(user);
+    if(c.guard.faulted)return;
+    if(phase!=c.next || !c.stage(step,phase,c.user) || c.soft.failure)
+    {
+        c.guard.error=c.soft.failure?c.soft.failure:"stage_failed";
+        c.guard.faulted=true;return;
+    }
+    ++c.next;
+}
+}
+bool Box2DBoxContacts::StepGuard::advance(b2WorldId world,Core& soft,const b2BodyId* targets,int count,Stage stage,void* user)
+{
+    if(faulted){error="step_owner_faulted";return false;}
+    error=nullptr;
+    if(!b2World_IsValid(world)){error="invalid_world";return false;}
+    if(b2World_IsLocked(world)){error="world_locked";return false;}
+    if(!stage || !targets || count<1 || count>64){error="invalid_step_targets";return false;}
+    if(soft.failure){error="soft_world_failed";return false;}
+    if(soft.dt!=1.f/480 || soft.substeps!=1 || soft.iterations!=8)
+    {error="unsupported_step_configuration";return false;}
+    if(soft.bodies.size()!=1 || !soft.bodies[0].active || !soft.pins.empty() || !soft.touchJoints.empty() || !soft.boundaries.empty())
+    {error="unsupported_soft_configuration";return false;}
+    auto& body=soft.bodies[0];
+    if(body.forceInput[0]!=0 || body.forceInput[1]!=0 || body.torqueInput!=0)
+    {error="unsupported_external_load";return false;}
+    Box2DBoxContacts validation;
+    if((error=validation.validate(soft)))return false;
+    auto metrics=soft.currentMetrics();
+    if(soft.failure || metrics.selfCross){error="invalid_soft_state";return false;}
+    for(int i=0;i<count;++i)
+    {
+        if((error=validateStepBody(world,targets[i])))return false;
+        for(int j=0;j<i;++j)if(B2_ID_EQUALS(targets[i],targets[j]))
+        {error="duplicate_step_target";return false;}
+    }
+    GuardContext context{*this,soft,stage,user};
+    ++entered;
+    b2World_StepSoftProbe(world,soft.dt,1,nullptr,nullptr,guardedStage,&context);
+    if(faulted)return false;
+    if(context.next!=3){error="incomplete_stage_sequence";faulted=true;return false;}
+    metrics=soft.currentMetrics();
+    if(soft.failure || metrics.selfCross){error="invalid_completed_state";faulted=true;return false;}
+    soft.peak=metrics;++soft.completedSubsteps;++completed;
+    return true;
+}
+
 const char* Box2DBoxContacts::validateStepBody(b2WorldId world,b2BodyId body)
 {
     if(!b2World_IsValid(world))return "invalid_world";
@@ -270,6 +330,98 @@ void Box2DBoxContacts::projectState(Core& world,int body,StateView& state,float 
 {Box<StateView*> box{world,world.bodies[body],&state,hx,hy,1,contacts};box.project();}
 double Box2DBoxContacts::statePenetration(Core& world,int body,StateView& state,float hx,float hy)
 {unsigned long unused=0;Box<StateView*> box{world,world.bodies[body],&state,hx,hy,1,unused};return box.penetration();}
+
+struct Box2DBoxContacts::AttachmentOwner::Context
+{
+    AttachmentOwner& owner;
+    Core& soft;
+    b2BodyId contactBody;
+    float hx,hy;
+    bool contactEnabled;
+};
+bool Box2DBoxContacts::AttachmentOwner::advance(b2WorldId world,Core& soft)
+{
+    if(guard.faulted){guard.error="step_owner_faulted";return false;}
+    if(boundSoft && (boundSoft!=&soft || world.index1!=boundWorld.index1 || world.generation!=boundWorld.generation))
+    {guard.error="attachment_owner_mismatch";return false;}
+    guard.error=validateStepBody(world,attachment.rigid);
+    if(guard.error)return false;
+    if(!attachment.active || attachment.softBody!=0){guard.error="unsupported_attachment";return false;}
+    b2ShapeId supportShape=b2_nullShapeId;
+    if(b2Body_GetShapeCount(attachment.rigid)!=1){guard.error="attachment_requires_single_box";return false;}
+    b2Body_GetShapes(attachment.rigid,&supportShape,1);
+    Box2DBoxContacts validation;
+    validation.shapes.push_back({supportShape,{0}});validation.pins.push_back(attachment);
+    validation.filters.push_back(filter);
+    b2BodyId targets[2]={attachment.rigid,b2_nullBodyId};int count=1;
+    float hx=0,hy=0;bool contactEnabled=false;
+    if(B2_IS_NON_NULL(contact))
+    {
+        if(!b2Shape_IsValid(contact)){guard.error="invalid_contact_shape";return false;}
+        targets[count++]=b2Shape_GetBody(contact);
+        if((guard.error=validateStepBody(world,targets[1])))return false;
+        if(b2Shape_IsSensor(contact)){guard.error="contact_sensor_unsupported";return false;}
+        validation.shapes.push_back({contact,{}});
+        if((guard.error=dimensions(contact,hx,hy)))return false;
+        contactEnabled=validation.enabled(validation.shapes.back(),0);
+    }
+    if((guard.error=validation.validate(soft)))return false;
+    if(guard.completed==0 && validation.pinError(soft,attachment)>.001)
+    {guard.error="initial_anchor_separation";return false;}
+    Context context{*this,soft,targets[1],hx,hy,contactEnabled};
+    auto entered=guard.entered;
+    bool result=guard.advance(world,soft,targets,count,stage,&context);
+    if(guard.entered!=entered){boundWorld=world;boundSoft=&soft;}
+    return result;
+}
+bool Box2DBoxContacts::AttachmentOwner::stage(void* pointer,int phase,void* user)
+{
+    auto& context=*static_cast<Context*>(user);auto& owner=context.owner;auto& soft=context.soft;
+    auto& c=*static_cast<b2StepContext*>(pointer);auto& pin=owner.attachment;
+    StateView support{};int index=-1;
+    if(!readStepBody(pointer,pin.rigid,support,index))return false;
+    if(phase==0){owner.impulse={0,0};soft.advanceMaterialVelocity();return !soft.failure;}
+    auto& body=soft.bodies[0];
+    if(phase==2)
+    {
+        for(int i=0;i<16;++i)for(int k=0;k<2;++k)body.x[i][k]+=c.h*body.v[i][k];
+        if(context.contactEnabled)
+        {
+            StateView view{};int contactIndex=-1;
+            if(!readStepBody(pointer,context.contactBody,view,contactIndex))return false;
+            owner.preDepth=std::max(owner.preDepth,statePenetration(soft,0,view,context.hx,context.hy));
+            for(int i=0;i<soft.iterations && !soft.failure;++i)projectState(soft,0,view,context.hx,context.hy,owner.contacts);
+            if(soft.failure)return false;
+            owner.postDepth=std::max(owner.postDepth,statePenetration(soft,0,view,context.hx,context.hy));
+            writeStepBody(pointer,contactIndex,view);
+        }
+    }
+    auto& rigid=c.states[index];auto& sim=c.sims[index];
+    b2Rot rotation=b2MulRot(rigid.deltaRotation,sim.transform.q);
+    b2Vec2 r=b2RotateVector(rotation,b2Sub(pin.localAnchor,sim.localCenter));
+    double inverse=sim.invMass,vx=0,vy=0,x=0,y=0;
+    for(int i=0;i<16;++i)
+    {
+        double w=pin.weights[i];inverse+=w*w/body.mass[i];
+        vx+=w*body.v[i][0];vy+=w*body.v[i][1];x+=w*body.x[i][0];y+=w*body.x[i][1];
+    }
+    double biasX=phase==1?(x-sim.center.x-rigid.deltaPosition.x-r.x)/c.h:0;
+    double biasY=phase==1?(y-sim.center.y-rigid.deltaPosition.y-r.y)/c.h:0;
+    double kxx=inverse+sim.invInertia*r.y*r.y,kxy=-sim.invInertia*r.x*r.y;
+    double kyy=inverse+sim.invInertia*r.x*r.x,det=kxx*kyy-kxy*kxy;
+    if(!(det>0) || !std::isfinite(det))return false;
+    double cx=vx-rigid.linearVelocity.x+rigid.angularVelocity*r.y+biasX;
+    double cy=vy-rigid.linearVelocity.y-rigid.angularVelocity*r.x+biasY;
+    b2Vec2 j={float(-(kyy*cx-kxy*cy)/det),float(-(kxx*cy-kxy*cx)/det)};
+    if(!std::isfinite(j.x)||!std::isfinite(j.y))return false;
+    for(int i=0;i<16;++i){body.v[i][0]+=pin.weights[i]*j.x/body.mass[i];body.v[i][1]+=pin.weights[i]*j.y/body.mass[i];}
+    rigid.linearVelocity.x-=sim.invMass*j.x;rigid.linearVelocity.y-=sim.invMass*j.y;
+    double before=rigid.angularVelocity;
+    rigid.angularVelocity-=sim.invInertia*b2Cross(r,j);
+    owner.angularResidual=std::max(owner.angularResidual,std::abs((rigid.angularVelocity-before)/sim.invInertia+b2Cross(r,j)));
+    owner.impulse.x+=j.x;owner.impulse.y+=j.y;
+    return true;
+}
 
 bool Box2DBoxContacts::enabled(const Shape& entry,int id) const
 {
