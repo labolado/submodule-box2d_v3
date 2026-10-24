@@ -1,5 +1,10 @@
 #include "soft_box2d_box.h"
 #include <limits>
+extern "C" {
+#include "../../src/body.h"
+#include "../../src/solver.h"
+#include "../../src/physics_world.h"
+}
 
 namespace SoftBody
 {
@@ -35,10 +40,22 @@ const char* dimensions(b2ShapeId id,float& hx,float& hy)
     }
     return mask==15 ? nullptr : "box_bridge_invalid_rectangle";
 }
+using View=Box2DBoxContacts::StateView;
+b2Pos b2Body_GetWorldCenter(View* v){return v->center;}
+b2Vec2 b2Body_GetLocalPoint(View* v,b2Pos p){return b2InvTransformWorldPoint({v->origin,v->rotation},p);}
+b2Pos b2Body_GetWorldPoint(View* v,b2Vec2 p){return b2TransformWorldPoint({v->origin,v->rotation},p);}
+b2Vec2 b2Body_GetWorldVector(View* v,b2Vec2 n){return b2RotateVector(v->rotation,n);}
+b2BodyType b2Body_GetType(View* v){return v->inverseMass>0?b2_dynamicBody:b2_kinematicBody;}
+float b2Body_GetMass(View* v){return 1/v->inverseMass;}
+float b2Body_GetRotationalInertia(View* v){return 1/v->inverseInertia;}
+b2Vec2 b2Body_GetLocalPointVelocity(View* v,b2Vec2 p)
+{auto r=b2RotateVector(v->rotation,b2Sub(p,v->localCenter));return {v->velocity.x-v->angularVelocity*r.y,v->velocity.y+v->angularVelocity*r.x};}
+void b2Body_ApplyLinearImpulse(View* v,b2Vec2 j,b2Pos p,bool)
+{v->velocity=b2MulAdd(v->velocity,v->inverseMass,j);v->angularVelocity+=v->inverseInertia*b2Cross(b2SubPos(p,v->center),j);}
 struct Contact { int edge;float fraction;b2Pos point;b2Vec2 normal;float depth; };
-struct Box
+template<class Rigid> struct Box
 {
-    Core& world;Core::B& b;b2BodyId rigid;float hx,hy,sign;unsigned long& contacts;
+    Core& world;Core::B& b;Rigid rigid;float hx,hy,sign;unsigned long& contacts;
     float separation(b2Vec2 p,int face) const
     {return p.x*normals[face].x+p.y*normals[face].y-(face<2?hx:hy);}
     b2Vec2 local(int node) const
@@ -211,6 +228,49 @@ static void projectBoxes(Core& world,const void* context)
 {static_cast<const Box2DBoxContacts*>(context)->project(world);}
 }
 
+const char* Box2DBoxContacts::validateStepBody(b2WorldId world,b2BodyId body)
+{
+    if(!b2World_IsValid(world))return "invalid_world";
+    if(b2World_IsLocked(world))return "world_locked";
+    if(!b2Body_IsValid(body))return "invalid_body";
+    auto owner=b2Body_GetWorld(body);
+    if(owner.index1!=world.index1 || owner.generation!=world.generation)return "foreign_world";
+    if(!b2Body_IsEnabled(body))return "disabled_body";
+    if(b2Body_GetType(body)==b2_staticBody)return "static_body_unsupported";
+    if(!b2Body_IsAwake(body))return "sleeping_body";
+    auto locks=b2Body_GetMotionLocks(body);
+    if(locks.linearX || locks.linearY || locks.angularZ)return "motion_lock_unsupported";
+    return nullptr;
+}
+bool Box2DBoxContacts::readStepBody(void* step,b2BodyId id,StateView& state,int& index)
+{
+    auto& c=*static_cast<b2StepContext*>(step);index=-1;
+    // IDs were validated before locking. No create/delete/wake is allowed in a stage.
+    if(id.world0!=c.world->worldId)return false;
+    auto body=b2GetBodyFullId(c.world,id);
+    if(body->setIndex!=b2_awakeSet)return false;
+    int i=body->localIndex;
+    if(i<0 || i>=c.world->solverSets.data[b2_awakeSet].bodyStates.count || c.sims[i].bodyId!=body->id)return false;
+    auto& sim=c.sims[i];auto& current=c.states[i];
+    state={b2OffsetPos(sim.center,current.deltaPosition),b2MulRot(current.deltaRotation,sim.transform.q),
+        current.linearVelocity,current.angularVelocity,sim.invMass,sim.invInertia,sim.localCenter};
+    // Preserve the original geometry transform before any integration. Rebuilding
+    // it through the mass centre can perturb strict feature classifications.
+    if(current.deltaPosition.x==0 && current.deltaPosition.y==0 && current.deltaRotation.c==1 && current.deltaRotation.s==0)
+        state.origin=sim.transform.p;
+    index=i;return true;
+}
+void Box2DBoxContacts::writeStepBody(void* step,int index,const StateView& state)
+{
+    auto& c=*static_cast<b2StepContext*>(step);
+    if(c.sims[index].invMass>0){c.states[index].linearVelocity=state.velocity;c.states[index].angularVelocity=state.angularVelocity;}
+}
+
+void Box2DBoxContacts::projectState(Core& world,int body,StateView& state,float hx,float hy,unsigned long& contacts)
+{Box<StateView*> box{world,world.bodies[body],&state,hx,hy,1,contacts};box.project();}
+double Box2DBoxContacts::statePenetration(Core& world,int body,StateView& state,float hx,float hy)
+{unsigned long unused=0;Box<StateView*> box{world,world.bodies[body],&state,hx,hy,1,unused};return box.penetration();}
+
 bool Box2DBoxContacts::enabled(const Shape& entry,int id) const
 {
     if(!b2Shape_IsValid(entry.id))return false;
@@ -292,7 +352,7 @@ void Box2DBoxContacts::project(Core& world) const
         for(const auto& entry:shapes)if(enabled(entry,int(i)))
         {
             float hx,hy;dimensions(entry.id,hx,hy);
-            Box box{world,world.bodies[i],b2Shape_GetBody(entry.id),hx,hy,flipY?-1.f:1.f,contacts};
+            Box<b2BodyId> box{world,world.bodies[i],b2Shape_GetBody(entry.id),hx,hy,flipY?-1.f:1.f,contacts};
             box.project();if(world.failure)return;
         }
     solvePins(world);
@@ -358,7 +418,7 @@ double Box2DBoxContacts::penetration(const Core& world) const
         for(const auto& entry:shapes)if(enabled(entry,int(i)))
         {
             float hx,hy;dimensions(entry.id,hx,hy);
-            Box box{view,view.bodies[i],b2Shape_GetBody(entry.id),hx,hy,flipY?-1.f:1.f,contacts};
+            Box<b2BodyId> box{view,view.bodies[i],b2Shape_GetBody(entry.id),hx,hy,flipY?-1.f:1.f,contacts};
             result=std::max(result,box.penetration());
         }
     return result;
