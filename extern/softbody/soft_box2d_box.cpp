@@ -255,6 +255,23 @@ const char* Box2DBoxContacts::validate(const Core& world) const
             if(!(m>0 && inertia>0) || !std::isfinite(m) || !std::isfinite(inertia))return "box_bridge_invalid_rigid_mass";
         }
     }
+    for(const auto& pin:pins)if(pin.active)
+    {
+        if(pin.softBody<0 || pin.softBody>=int(world.bodies.size()))return "rigid_pin_invalid_soft_body";
+        if(!pinActive(world,pin))continue;
+        if(b2Body_GetType(pin.rigid)!=b2_dynamicBody)return "rigid_pin_requires_dynamic_body";
+        bool attached=false;
+        for(const auto& shape:shapes)if(b2Shape_IsValid(shape.id) && B2_ID_EQUALS(b2Shape_GetBody(shape.id),pin.rigid))attached=true;
+        if(!attached)return "rigid_pin_requires_attachment";
+        for(const auto& shape:shapes)if(b2Shape_IsValid(shape.id) && B2_ID_EQUALS(b2Shape_GetBody(shape.id),pin.rigid) && b2Shape_IsSensor(shape.id))
+            return "rigid_pin_sensor_unsupported";
+        if(!(pin.frequency>0 && pin.frequency<=60 && pin.dampingRatio>=0 && pin.dampingRatio<=10))return "rigid_pin_invalid_spring";
+        if(!std::isfinite(pin.localAnchor.x)||!std::isfinite(pin.localAnchor.y))return "rigid_pin_invalid_anchor";
+        double sum=0;
+        for(float weight:pin.weights)
+        {if(!(weight>=0 && weight<=1))return "rigid_pin_invalid_weights";sum+=weight;}
+        if(std::abs(sum-1)>1e-6)return "rigid_pin_invalid_weights";
+    }
     return nullptr;
 }
 bool Box2DBoxContacts::step(Core& world) const
@@ -262,6 +279,7 @@ bool Box2DBoxContacts::step(Core& world) const
     if(world.failure)return false;
     if(world.substeps!=1){world.failure="box_bridge_requires_single_soft_step";return false;}
     if(const char* error=validate(world)){world.failure=error;return false;}
+    for(const auto& pin:pins)pin.impulse={0,0};
     world.step(projectBoxes,this,[](const Core& target,const void* context)
         {return static_cast<const Box2DBoxContacts*>(context)->penetration(target);});
     return !world.failure;
@@ -277,6 +295,58 @@ void Box2DBoxContacts::project(Core& world) const
             Box box{world,world.bodies[i],b2Shape_GetBody(entry.id),hx,hy,flipY?-1.f:1.f,contacts};
             box.project();if(world.failure)return;
         }
+    solvePins(world);
+}
+bool Box2DBoxContacts::pinActive(const Core& world,const Pin& pin) const
+{
+    return pin.active && pin.softBody>=0 && pin.softBody<int(world.bodies.size()) &&
+        world.bodies[pin.softBody].active && b2Body_IsValid(pin.rigid) && b2Body_IsEnabled(pin.rigid);
+}
+double Box2DBoxContacts::pinError(const Core& world,const Pin& pin) const
+{
+    if(!pinActive(world,pin))return 0;
+    auto anchor=world.anchor(pin.softBody,pin.weights);
+    auto target=b2Body_GetWorldPoint(pin.rigid,pin.localAnchor);
+    return std::hypot(double(anchor[0])-target.x,double(flipY?-anchor[1]:anchor[1])-target.y);
+}
+void Box2DBoxContacts::solvePins(Core& world) const
+{
+    for(const auto& pin:pins)if(pinActive(world,pin))
+    {
+        auto& body=world.bodies[pin.softBody];float sign=flipY?-1.f:1.f;
+        auto anchor=world.anchor(pin.softBody,pin.weights);
+        auto target=b2Body_GetWorldPoint(pin.rigid,pin.localAnchor);
+        auto center=b2Body_GetWorldCenter(pin.rigid);
+        double rx=target.x-center.x,ry=target.y-center.y;
+        double inverseSoft=0,vx=0,vy=0;
+        for(int i=0;i<16;++i)
+        {
+            double weight=pin.weights[i];inverseSoft+=weight*weight/body.mass[i];
+            vx+=weight*body.v[i][0];vy+=weight*sign*body.v[i][1];
+        }
+        double im=1.0/b2Body_GetMass(pin.rigid),ii=1.0/b2Body_GetRotationalInertia(pin.rigid);
+        // K = (inverse soft anchor mass + inverse rigid mass) I + I^-1 perp(r) perp(r)^T.
+        double a=inverseSoft+im+ii*ry*ry,b=-ii*rx*ry,d=inverseSoft+im+ii*rx*rx;
+        double determinant=a*d-b*b;
+        if(!(determinant>0) || !std::isfinite(determinant)){world.failure="rigid_pin_invalid_effective_mass";return;}
+        auto rigidVelocity=b2Body_GetLocalPointVelocity(pin.rigid,pin.localAnchor);
+        double omega=2*3.14159265358979323846*pin.frequency;
+        double denominator=2*pin.dampingRatio+world.dt*omega;
+        double spring=world.dt*omega*denominator;
+        double massScale=spring/(1+spring),impulseScale=1/(1+spring),bias=omega/denominator;
+        double ex=double(anchor[0])-target.x,ey=double(sign*anchor[1])-target.y;
+        double cx=vx-rigidVelocity.x+bias*ex,cy=vy-rigidVelocity.y+bias*ey;
+        b2Vec2 impulse={float(-massScale*(d*cx-b*cy)/determinant-impulseScale*pin.impulse.x),
+                        float(-massScale*(a*cy-b*cx)/determinant-impulseScale*pin.impulse.y)};
+        if(!std::isfinite(impulse.x)||!std::isfinite(impulse.y)){world.failure="rigid_pin_nonfinite_impulse";return;}
+        pin.impulse.x+=impulse.x;pin.impulse.y+=impulse.y;
+        for(int i=0;i<16;++i)
+        {
+            body.v[i][0]+=pin.weights[i]*impulse.x/body.mass[i];
+            body.v[i][1]+=sign*pin.weights[i]*impulse.y/body.mass[i];
+        }
+        b2Body_ApplyLinearImpulse(pin.rigid,{-impulse.x,-impulse.y},target,true);
+    }
 }
 double Box2DBoxContacts::penetration(const Core& world) const
 {
