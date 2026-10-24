@@ -38,8 +38,8 @@ public:
     static const char* validateStepBody(b2WorldId world,b2BodyId body);
     static bool readStepBody(void* step,b2BodyId body,StateView& state,int& index);
     static void writeStepBody(void* step,int index,const StateView& state);
-    static void projectState(Core& world,int body,StateView& state,float hx,float hy,unsigned long& contacts);
-    static double statePenetration(Core& world,int body,StateView& state,float hx,float hy);
+    static void projectState(Core& world,int body,StateView& state,float hx,float hy,unsigned long& contacts,bool flipY=false);
+    static double statePenetration(Core& world,int body,StateView& state,float hx,float hy,bool flipY=false);
     // Private single-step owner. Preflight failures do not advance either world.
     // A failure after entering the rigid solver is non-transactional and poisons
     // this owner; callers must discard the pair instead of silently resuming.
@@ -56,6 +56,7 @@ public:
     struct AttachmentOwner
     {
         Pin attachment;
+        bool flipY=false; // Soft coordinates stay unchanged; rigid y is reflected.
         b2ShapeId contact=b2_nullShapeId;
         b2Filter filter=b2DefaultFilter();
         StepGuard guard;
@@ -66,6 +67,7 @@ public:
     private:
         b2WorldId boundWorld=b2_nullWorldId;
         Core* boundSoft=nullptr;
+        bool boundFlipY=false;
         struct Context;
         static bool stage(void* step,int phase,void* user);
     };
