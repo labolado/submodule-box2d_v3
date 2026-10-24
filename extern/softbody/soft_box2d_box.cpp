@@ -262,8 +262,25 @@ bool Box2DBoxContacts::StepGuard::advance(b2WorldId world,Core& soft,const b2Bod
     if(soft.failure){error="soft_world_failed";return false;}
     if(soft.dt!=1.f/480 || soft.substeps!=1 || soft.iterations!=8)
     {error="unsupported_step_configuration";return false;}
-    if(soft.bodies.size()!=1 || !soft.bodies[0].active || !soft.pins.empty() || !soft.touchJoints.empty() || !soft.boundaries.empty())
+    if(soft.bodies.size()!=1 || !soft.bodies[0].active || !soft.pins.empty() || !soft.boundaries.empty())
     {error="unsupported_soft_configuration";return false;}
+    int activeTouches=0;
+    for(const auto& touch:soft.touchJoints)if(touch.active)
+    {
+        if(++activeTouches>1){error="only_one_active_touch_supported";return false;}
+        if(touch.body!=0 || !std::isfinite(touch.target[0]) || !std::isfinite(touch.target[1]) ||
+           !(touch.frequency>=.01f && touch.frequency<=60) ||
+           !(touch.dampingRatio>=0 && touch.dampingRatio<=10) ||
+           !(touch.maxForce>=0 && touch.maxForce<=1e5f))
+        {error="invalid_attachment_touch";return false;}
+        double sum=0;
+        for(float weight:touch.weights)
+        {
+            if(!(weight>=0 && weight<=1)){error="invalid_touch_weights";return false;}
+            sum+=weight;
+        }
+        if(std::abs(sum-1)>1e-6){error="invalid_touch_weights";return false;}
+    }
     auto& body=soft.bodies[0];
     if(body.forceInput[0]!=0 || body.forceInput[1]!=0 || body.torqueInput!=0)
     {error="unsupported_external_load";return false;}
@@ -382,7 +399,15 @@ bool Box2DBoxContacts::AttachmentOwner::stage(void* pointer,int phase,void* user
     auto& c=*static_cast<b2StepContext*>(pointer);auto& pin=owner.attachment;float sign=owner.flipY?-1.f:1.f;
     StateView support{};int index=-1;
     if(!readStepBody(pointer,pin.rigid,support,index))return false;
-    if(phase==0){owner.impulse={0,0};soft.advanceMaterialVelocity();return !soft.failure;}
+    if(phase==0)
+    {
+        owner.impulse={0,0};soft.advanceMaterialVelocity();
+        if(soft.failure)return false;
+        // Once per complete step, before attachment impulses and rigid constraints.
+        // The prescribed target supplies external work, not a position projection.
+        for(auto& touch:soft.touchJoints)if(touch.active)soft.solveTouchJoint(touch);
+        return !soft.failure;
+    }
     auto& body=soft.bodies[0];
     if(phase==2)
     {
