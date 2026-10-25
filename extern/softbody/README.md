@@ -6,6 +6,11 @@ macOS and Android compile this path; other engine platforms are not yet integrat
 The older raw `World` interfaces described below are retained for historical
 experimental modes, not the supported boundary for new assembly consumers.
 
+When editing softbody C++ files, use the Box2D repository's `.clang-format`
+(`clang-format -i extern/softbody/<file>` from the submodule root). Do not introduce
+an independent softbody style. Solar2D bindings follow their neighbouring engine
+style; this formatter rule does not apply to the rest of the engine.
+
 ## Historical kernel and prototype interfaces
 
 Private C++11 solver with compiled implementations and float/double explicit
