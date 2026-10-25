@@ -125,7 +125,8 @@ bool Assembly::prepare()
 			return false;
 		}
 		for ( int i = 0; i < contact.boxCount; ++i )
-			if ( b2Body_GetType( contact.boxes[i].body ) == b2_dynamicBody )
+			if ( !enableDynamicContacts &&
+				 b2Body_GetType( contact.boxes[i].body ) == b2_dynamicBody )
 			{
 				error = "assembly_shared_dynamic_contacts_unsupported";
 				return false;
@@ -217,6 +218,37 @@ void Assembly::solveLinks()
 	}
 }
 
+bool Assembly::refreshDynamic( Solver& contact, void* step )
+{
+	if ( !enableDynamicContacts )
+		return true;
+	// Box2D's step state is authoritative across parts. Each local contact
+	// batch observes previous batches, including their warm-start impulses.
+	for ( int i = 0; i < contact.boxCount; ++i )
+	{
+		auto& box = contact.boxes[i];
+		if ( box.enabled && box.state.inverseMass > 0 &&
+			 !contact.read( step, box.body, box.state, box.index ) )
+		{
+			error = "assembly_dynamic_state";
+			return false;
+		}
+	}
+	return true;
+}
+
+void Assembly::publishDynamic( Solver& contact, void* step )
+{
+	if ( !enableDynamicContacts )
+		return;
+	for ( int i = 0; i < contact.boxCount; ++i )
+	{
+		const auto& box = contact.boxes[i];
+		if ( box.enabled && box.state.inverseMass > 0 )
+			contact.write( step, box.index, box.state );
+	}
+}
+
 void Assembly::stage( void* step, int phase, void* context )
 {
 	auto& owner = *static_cast<Assembly*>( context );
@@ -292,6 +324,7 @@ void Assembly::stage( void* step, int phase, void* context )
 					contact.apply( row, b2Add( b2MulSV( row.normalImpulse, row.normal ),
 											   b2MulSV( row.tangentImpulse, tangent ) ) );
 				}
+				owner.publishDynamic( contact, step );
 			}
 	}
 	{
@@ -302,6 +335,8 @@ void Assembly::stage( void* step, int phase, void* context )
 				if ( part )
 				{
 					auto& contact = part->contact;
+					if ( !owner.refreshDynamic( contact, step ) )
+						return;
 					for ( int i = 0; i < contact.rowCount && !contact.error; ++i )
 						contact.solve( contact.rows[i] );
 					if ( contact.error )
@@ -309,6 +344,7 @@ void Assembly::stage( void* step, int phase, void* context )
 						owner.error = contact.error;
 						return;
 					}
+					owner.publishDynamic( contact, step );
 				}
 			owner.solveLinks();
 		}

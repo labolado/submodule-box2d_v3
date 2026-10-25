@@ -36,6 +36,7 @@ struct Assembly
 	b2WorldId world = b2_nullWorldId;
 	b2WorldId boundWorld = b2_nullWorldId;
 	bool flipY = false, boundFlipY = false;
+	bool enableDynamicContacts = false;
 	const char* error = nullptr;
 	unsigned long long entered = 0, completed = 0;
 	int nextPhase = 0;
@@ -54,6 +55,8 @@ struct Assembly
 	void motors();
 	void prepareLinks();
 	void solveLinks();
+	bool refreshDynamic( Solver& contact, void* step );
+	void publishDynamic( Solver& contact, void* step );
 	static void stage( void* step, int phase, void* context );
 };
 } // namespace Game

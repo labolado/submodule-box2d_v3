@@ -55,6 +55,7 @@ struct Box2DCoupling::Impl
 		state.coupled = true;
 		solver.world = def.world;
 		solver.flipY = def.flipY;
+		solver.enableDynamicContacts = def.enableDynamicContacts;
 		solver.profile.enabled = def.profile;
 		attachments.reserve( def.maxAttachments );
 		valid = true;
