@@ -1,5 +1,6 @@
 #pragma once
 #include "soft_game_world.h"
+#include "soft_profile.h"
 
 namespace SoftBody { namespace Game
 {
@@ -33,6 +34,7 @@ struct Assembly
     unsigned long long entered = 0, completed = 0;
     int nextPhase = 0;
     double peakGap = 0, peakSpeed = 0, peakDepth = 0;
+    Profile profile;
 
     explicit Assembly(Core& core) : soft(core) {}
     Assembly(const Assembly&) = delete;

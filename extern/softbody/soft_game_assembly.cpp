@@ -24,6 +24,7 @@ bool validWeights(const std::array<float, 16>& weights)
 
 bool Assembly::prepare()
 {
+    Profile::Scope timing(profile, Profile::Prepare);
     if (error) return false;
     if (entered && (b2StoreWorldId(world) != b2StoreWorldId(boundWorld) || flipY != boundFlipY))
     { error = "assembly_owner_changed"; return false; }
@@ -151,6 +152,7 @@ void Assembly::stage(void* step, int phase, void* context)
     if (phase != owner.nextPhase++) { owner.error = "assembly_phase_order"; return; }
     if (phase == 0)
     {
+        Profile::Scope timing(owner.profile, Profile::MaterialMotor);
         for (auto& part : owner.parts)
         {
             part.core.advanceMaterialVelocity();
@@ -171,60 +173,71 @@ void Assembly::stage(void* step, int phase, void* context)
     }
     if (phase == 1)
     {
+        Profile::Scope timing(owner.profile, Profile::InitialLinks);
         owner.prepareLinks();
         owner.solveLinks();
         return;
     }
-    for (auto& part : owner.parts)
     {
-        auto& contact = part.contact;
-        auto& body = part.core.bodies[0];
-        for (int i = 0; i < 16; ++i)
-            for (int axis = 0; axis < 2; ++axis) body.x[i][axis] += Step * body.v[i][axis];
-        if (!contact.observeRecovery()) { owner.error = contact.error; return; }
-        for (int i = 0; i < contact.boxCount; ++i)
-        {
-            auto& box = contact.boxes[i];
-            if (box.enabled && b2Body_GetType(box.body) != b2_staticBody && !contact.read(step, box.body, box.state, box.index))
-            { owner.error = "assembly_contact_state"; return; }
-        }
-        if (!contact.projectGeometry()) { owner.error = contact.error; return; }
-        contact.gather();
-        if (contact.error) { owner.error = contact.error; return; }
-        for (int i = 0; i < contact.rowCount; ++i)
-        {
-            auto& row = contact.rows[i];
-            b2Vec2 tangent = {-row.normal.y, row.normal.x};
-            contact.apply(row, b2Add(b2MulSV(row.normalImpulse, row.normal), b2MulSV(row.tangentImpulse, tangent)));
-        }
-    }
-    for (int sweep = 0; sweep < Sweeps; ++sweep)
-    {
+        Profile::Scope timing(owner.profile, Profile::ContactGeometry);
         for (auto& part : owner.parts)
         {
             auto& contact = part.contact;
-            for (int i = 0; i < contact.rowCount && !contact.error; ++i) contact.solve(contact.rows[i]);
+            auto& body = part.core.bodies[0];
+            for (int i = 0; i < 16; ++i)
+                for (int axis = 0; axis < 2; ++axis) body.x[i][axis] += Step * body.v[i][axis];
+            if (!contact.observeRecovery()) { owner.error = contact.error; return; }
+            for (int i = 0; i < contact.boxCount; ++i)
+            {
+                auto& box = contact.boxes[i];
+                if (box.enabled && b2Body_GetType(box.body) != b2_staticBody && !contact.read(step, box.body, box.state, box.index))
+                { owner.error = "assembly_contact_state"; return; }
+            }
+            if (!contact.projectGeometry()) { owner.error = contact.error; return; }
+            contact.gather();
             if (contact.error) { owner.error = contact.error; return; }
+            for (int i = 0; i < contact.rowCount; ++i)
+            {
+                auto& row = contact.rows[i];
+                b2Vec2 tangent = {-row.normal.y, row.normal.x};
+                contact.apply(row, b2Add(b2MulSV(row.normalImpulse, row.normal), b2MulSV(row.tangentImpulse, tangent)));
+            }
         }
-        owner.solveLinks();
     }
-    for (auto& part : owner.parts)
     {
-        auto& contact = part.contact;
-        contact.previous = contact.rows;
-        contact.previousCount = contact.rowCount;
-        contact.lastDepth = 0;
-        for (int i = 0; i < contact.boxCount; ++i) if (contact.boxes[i].enabled)
+        Profile::Scope timing(owner.profile, Profile::ContactSolve);
+        for (int sweep = 0; sweep < Sweeps; ++sweep)
         {
-            auto& box = contact.boxes[i];
-            BoxProjection geometry(part.core.bodies[0], box.state, box.hx, box.hy);
-            contact.lastDepth = std::max(contact.lastDepth, geometry.boundaryDepth());
+            for (auto& part : owner.parts)
+            {
+                auto& contact = part.contact;
+                for (int i = 0; i < contact.rowCount && !contact.error; ++i) contact.solve(contact.rows[i]);
+                if (contact.error) { owner.error = contact.error; return; }
+            }
+            owner.solveLinks();
+        }
+    }
+    {
+        Profile::Scope timing(owner.profile, Profile::Observe);
+        for (auto& part : owner.parts)
+        {
+            auto& contact = part.contact;
+            contact.previous = contact.rows;
+            contact.previousCount = contact.rowCount;
+            contact.lastDepth = 0;
+            for (int i = 0; i < contact.boxCount; ++i) if (contact.boxes[i].enabled)
+            {
+                auto& box = contact.boxes[i];
+                BoxProjection geometry(part.core.bodies[0], box.state, box.hx, box.hy);
+                contact.lastDepth = std::max(contact.lastDepth, geometry.boundaryDepth());
+            }
         }
     }
 }
 
 bool Assembly::advance()
 {
+    Profile::Scope timing(profile, Profile::Advance);
     if (!prepare()) return false;
     for (auto& part : parts)
     {
@@ -235,18 +248,22 @@ bool Assembly::advance()
     nextPhase = 0;
     boundWorld = world; boundFlipY = flipY;
     ++entered;
-    b2World_StepWithSoftStages(world, Step, 1, nullptr, nullptr, stage, this);
-    bool staticOnly = true;
-    for (const auto& part : parts)
-        for (int i = 0; i < part.contact.boxCount; ++i)
-            if (part.contact.boxes[i].enabled && b2Body_GetType(part.contact.boxes[i].body) != b2_staticBody) staticOnly = false;
-    if (nextPhase == 0 && staticOnly)
-        for (int phase = 0; phase < 3; ++phase) stage(nullptr, phase, this);
+    {
+        Profile::Scope nativeTiming(profile, Profile::NativeWorld);
+        b2World_StepWithSoftStages(world, Step, 1, nullptr, nullptr, stage, this);
+        bool staticOnly = true;
+        for (const auto& part : parts)
+            for (int i = 0; i < part.contact.boxCount; ++i)
+                if (part.contact.boxes[i].enabled && b2Body_GetType(part.contact.boxes[i].body) != b2_staticBody) staticOnly = false;
+        if (nextPhase == 0 && staticOnly)
+            for (int phase = 0; phase < 3; ++phase) stage(nullptr, phase, this);
+    }
     if (!error && nextPhase != 3) error = "assembly_missing_stage";
     // There is no rollback after native entry. Publish partial material state
     // even on failure, and leave the owner faulted until it is rebuilt.
     for (int id = 0; id < PartCount; ++id) soft.bodies[id] = parts[id].core.bodies[0];
     if (error) return false;
+    Profile::Scope observationTiming(profile, Profile::Finalize);
     for (auto& part : parts)
     {
         auto& contact = part.contact;

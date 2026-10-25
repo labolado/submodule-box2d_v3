@@ -172,3 +172,12 @@ macOS and native CMake build this adapter. Other engine platform projects still 
 pre-existing soft core/C1 sources as well as this file; they remain unvalidated.
 Regression evidence is in the independent test repository at
 `doc/jellycar-soft-body/native-box-bridge.md` and `physics_soft_body_sync/box_bridge.cpp`.
+
+### Assembly timing diagnostics
+
+`Assembly::profile.enabled` defaults to false. `soft_profile.h` records inclusive
+wall and current-thread CPU intervals only when enabled; it does not change the
+solver configuration. `nativeWorld` includes soft callbacks (including the static
+world fallback), and `advance` includes `nativeWorld`. Do not add nested buckets.
+`adapter` is populated only by the Solar2D integration. Unsupported clock targets
+can use the normal disabled path. This internal header is not a public plugin API.
