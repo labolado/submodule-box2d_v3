@@ -277,6 +277,40 @@ bool Simulation::setTouchTarget( ObjectId touch, Point target )
 	impl_->core.touchJoints[touch.index].target = target;
 	return true;
 }
+bool Simulation::applyLinearImpulse( ObjectId id, Point impulse )
+{
+	if ( !impl_ || !impl_->editable() )
+		return false;
+	if ( !impl_->check( id, ObjectKind::Body ) || !point( impulse ) )
+	{
+		impl_->error = "invalid soft linear impulse";
+		return false;
+	}
+	auto& body = impl_->core.bodies[id.index];
+	double mass = 0;
+	for ( float value : body.mass )
+		mass += value;
+	auto next = body.v;
+	double work = 0;
+	for ( int i = 0; i < 16; ++i )
+		for ( int axis = 0; axis < 2; ++axis )
+		{
+			double before = body.v[i][axis];
+			next[i][axis] = float( before + impulse[axis] / mass );
+			if ( !range( next[i][axis], -1e4f, 1e4f ) )
+			{
+				impl_->error = "soft impulse exceeds supported velocity";
+				return false;
+			}
+			work +=
+				.5 * body.mass[i] * ( double( next[i][axis] ) * next[i][axis] - before * before );
+		}
+	// Validate the complete update before changing any node. Equal velocity
+	// increments give a total impulse independent of the node mass layout.
+	body.v = next;
+	impl_->core.appliedWork += work;
+	return true;
+}
 bool Simulation::setCollisionEnabled( ObjectId a, ObjectId b, bool enabled )
 {
 	if ( !impl_ || !impl_->editable() )

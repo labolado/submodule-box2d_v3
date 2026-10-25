@@ -86,6 +86,9 @@ public:
 	bool remove( ObjectId id );
 	bool setMotor( ObjectId joint, float speed, float maxTorque );
 	bool setTouchTarget( ObjectId touch, Point target );
+	// Total impulse in kg*m/s, distributed by node mass. Translation only:
+	// shape, position and angular momentum about the centre are unchanged.
+	bool applyLinearImpulse( ObjectId body, Point impulse );
 	bool setCollisionEnabled( ObjectId a, ObjectId b, bool enabled );
 	bool getBodyState( ObjectId body, SoftBodyState& state ) const;
 	bool getTouchState( ObjectId touch, SoftTouchState& state ) const;
