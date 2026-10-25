@@ -1,5 +1,13 @@
 # Experimental soft-body world
 
+Current recoverable assembly consumers use [the native operation API](API.md):
+`Simulation` plus `Box2DCoupling`. Car layout and controls stay in application Lua.
+macOS and Android compile this path; other engine platforms are not yet integrated.
+The older raw `World` interfaces described below are retained for historical
+experimental modes, not the supported boundary for new assembly consumers.
+
+## Historical kernel and prototype interfaces
+
 Private C++11 solver with compiled implementations and float/double explicit
 instantiations. The engine includes `soft_world.h` through its Lua adapter.
 The core has no Box2D dependency. `soft_box2d_static` is a separate experimental
@@ -15,10 +23,8 @@ the default `step()`. This private C++ entry is not a Box2D substep API.
 
 CMake consumers add this directory and link `softbody`; when the `box2d` target
 exists, `softbody_box2d` is also available. Both disable FP contraction and C++
-exceptions on Clang/GCC. The macOS engine project compiles all five `.cpp` files.
-Other platform engine projects have intentionally not been updated yet: they
-must add these compilation units before building this branch. This is not a
-cross-platform-ready integration.
+exceptions on Clang/GCC. The current macOS and Android engine projects compile the core and coupling sources.
+Other platform engine projects still need these compilation units and validation.
 
 - `soft_body.h/.cpp`: fixed 16-node local-frame and pressure materials, deformation damping.
 - `soft_contact.h/.cpp`: point/edge contact and sweep diagnostics (not general CCD).
@@ -179,5 +185,5 @@ Regression evidence is in the independent test repository at
 wall and current-thread CPU intervals only when enabled; it does not change the
 solver configuration. `nativeWorld` includes soft callbacks (including the static
 world fallback), and `advance` includes `nativeWorld`. Do not add nested buckets.
-`adapter` is populated only by the Solar2D integration. Unsupported clock targets
+`adapter` is populated by the native `Box2DCoupling` layer. Unsupported clock targets
 can use the normal disabled path. This internal header is not a public plugin API.
