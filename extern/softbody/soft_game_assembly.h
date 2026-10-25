@@ -1,5 +1,6 @@
 #pragma once
 #include "soft_game_world.h"
+#include "soft_pair_contacts.h"
 #include "soft_profile.h"
 
 #include <memory>
@@ -31,12 +32,14 @@ struct Assembly
 		float inverseMass = 0, gamma = 0;
 	};
 	Core& soft;
+	PairContacts pairs;
 	std::vector<std::unique_ptr<Part>> parts;
 	std::vector<Link> links;
 	b2WorldId world = b2_nullWorldId;
 	b2WorldId boundWorld = b2_nullWorldId;
 	bool flipY = false, boundFlipY = false;
 	bool enableDynamicContacts = false;
+	bool enableSoftContacts = false;
 	const char* error = nullptr;
 	unsigned long long entered = 0, completed = 0;
 	int nextPhase = 0;
@@ -45,6 +48,7 @@ struct Assembly
 
 	explicit Assembly( Core& core )
 		: soft( core )
+		, pairs( core )
 	{
 	}
 	Assembly( const Assembly& ) = delete;
@@ -57,6 +61,7 @@ struct Assembly
 	void solveLinks();
 	bool refreshDynamic( Solver& contact, void* step );
 	void publishDynamic( Solver& contact, void* step );
+	bool pairGeometry( void* step );
 	static void stage( void* step, int phase, void* context );
 };
 } // namespace Game

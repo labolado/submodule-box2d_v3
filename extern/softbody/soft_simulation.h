@@ -29,6 +29,7 @@ struct SimulationDef
 	float timeStep = 1.f / 480;
 	int iterations = 8;
 	Point gravity{ { 0, -20 } };
+	bool enableSoftContacts = false;
 };
 struct SoftBodyDef
 {

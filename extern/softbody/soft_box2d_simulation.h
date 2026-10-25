@@ -23,6 +23,11 @@ struct CouplingState
 {
 	unsigned long long entered = 0, completed = 0, contactRows = 0, warmHits = 0;
 	unsigned long long recoveryEntries = 0, recoveryExits = 0, recoverySteps = 0;
+	unsigned long long softContactRows = 0, softRecoverySteps = 0;
+	unsigned long long softRecoveryEntries = 0, softRecoveryExits = 0;
+	int softRecoveringPairs = 0;
+	// Accumulated magnitude of whole-body position assistance, in metres.
+	double softRecoveryDistance = 0, softContactDepth = 0;
 	double contactDepth = 0, peakGap = 0;
 	bool recovering = false;
 	const char* failure = nullptr;

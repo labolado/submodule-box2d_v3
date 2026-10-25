@@ -240,6 +240,25 @@ void Solver::gather()
 				}
 			}
 			if ( distance > Margin )
+			{
+				// A retained side is considered below even if another box face
+				// has a tiny positive gap at a seam.
+				if ( !retainBoundarySides )
+					continue;
+			}
+			if ( retainBoundarySides )
+			{
+				BoxProjection geometry( body, box.state, box.hx, box.hy );
+				geometry.nodeFaces = &box.nodeFaces;
+				geometry.faceMargin = Margin;
+				int retained = geometry.retainedFace( node );
+				if ( retained >= 0 )
+				{
+					face = retained;
+					distance = geometry.separation( p, face );
+				}
+			}
+			if ( distance > Margin )
 				continue;
 			Row row;
 			row.box = id;
@@ -305,6 +324,11 @@ bool Solver::projectGeometry()
 			if ( !box.enabled )
 				continue;
 			BoxProjection geometry( body(), box.state, box.hx, box.hy );
+			if ( retainBoundarySides )
+			{
+				geometry.nodeFaces = &box.nodeFaces;
+				geometry.faceMargin = Margin;
+			}
 			// Folded boundaries have no well-defined interior.
 			{
 				if ( !observed && !observeRecovery() )
@@ -329,6 +353,140 @@ bool Solver::projectGeometry()
 				return false;
 		}
 	return true;
+}
+
+void Solver::captureBoundarySides()
+{
+	for ( int j = 0; j < boxCount; ++j )
+	{
+		auto& box = boxes[j];
+		if ( !box.enabled )
+		{
+			box.nodeFaces.fill( -1 );
+			continue;
+		}
+		BoxProjection geometry( body(), box.state, box.hx, box.hy );
+		geometry.nodeFaces = &box.nodeFaces;
+		geometry.faceMargin = Margin;
+		auto center = soft.center( bodyIndex );
+		auto centerLocal = b2InvTransformWorldPoint( geometry.transform, { center[0], center[1] } );
+		int centerFace = 0;
+		for ( int i = 1; i < 4; ++i )
+			if ( geometry.separation( centerLocal, i ) >
+				 geometry.separation( centerLocal, centerFace ) )
+				centerFace = i;
+		for ( int node = 0; node < 16; ++node )
+		{
+			auto p = geometry.local( node );
+			int face = geometry.retainedFace( node );
+			if ( face >= 0 && geometry.separation( p, face ) <= Margin )
+				continue;
+			face = 0;
+			for ( int i = 1; i < 4; ++i )
+				if ( geometry.separation( p, i ) > geometry.separation( p, face ) )
+					face = i;
+			// A newly registered body may already overlap a box. Its exterior
+			// centre supplies a coherent initial side, rather than pinning its
+			// nodes to opposite faces of the same thin plate.
+			if ( box.nodeFaces[node] < 0 && geometry.separation( p, face ) < 0 &&
+				 geometry.separation( centerLocal, centerFace ) > 0 )
+				face = centerFace;
+			box.nodeFaces[node] = face;
+		}
+	}
+}
+
+float Solver::limitCorrection( int node, Core::Vec delta ) const
+{
+	float fraction = 1;
+	for ( int j = 0; j < boxCount; ++j )
+	{
+		const auto& box = boxes[j];
+		if ( !box.enabled || box.nodeFaces[node] < 0 )
+			continue;
+		int face = box.nodeFaces[node];
+		b2WorldTransform transform{ box.state.origin, box.state.rotation };
+		auto p = b2InvTransformWorldPoint( transform, { body().x[node][0], body().x[node][1] } );
+		auto d = b2InvRotateVector( transform.q, { delta[0], delta[1] } );
+		float tangent = face < 2 ? p.y : p.x;
+		float extent = face < 2 ? box.hy : box.hx;
+		if ( std::abs( tangent ) > extent + Margin )
+			continue;
+		auto normal = BoxProjection::normal( face );
+		float toward = b2Dot( d, normal );
+		if ( toward >= 0 )
+			continue;
+		float gap = b2Dot( p, normal ) - ( face < 2 ? box.hx : box.hy );
+		fraction = std::min( fraction, std::max( 0.f, gap / -toward ) );
+	}
+	return fraction;
+}
+
+Core::Vec Solver::projectTranslation( Core::Vec desired ) const
+{
+	// Euclidean projection onto at most four faces per attached box. Origin
+	// is feasible: pre-existing penetration is handled by rigid projection.
+	struct Plane
+	{
+		b2Vec2 normal;
+		float gap;
+	};
+	Plane planes[4 * MaxBoxes];
+	int count = 0;
+	for ( int j = 0; j < boxCount; ++j )
+	{
+		const auto& box = boxes[j];
+		if ( !box.enabled )
+			continue;
+		b2WorldTransform transform{ box.state.origin, box.state.rotation };
+		for ( int face = 0; face < 4; ++face )
+		{
+			float gap = 1e30f;
+			for ( int node = 0; node < 16; ++node )
+			{
+				if ( box.nodeFaces[node] != face )
+					continue;
+				auto p =
+					b2InvTransformWorldPoint( transform, { body().x[node][0], body().x[node][1] } );
+				if ( std::abs( face < 2 ? p.y : p.x ) > ( face < 2 ? box.hy : box.hx ) + Margin )
+					continue;
+				gap = std::min( gap, std::max( 0.f, b2Dot( p, BoxProjection::normal( face ) ) -
+														( face < 2 ? box.hx : box.hy ) ) );
+			}
+			if ( gap < 1e30f )
+				planes[count++] = { b2RotateVector( transform.q, BoxProjection::normal( face ) ),
+									gap };
+		}
+	}
+	b2Vec2 target{ desired[0], desired[1] }, best{};
+	float bestError = b2LengthSquared( target );
+	auto consider = [&]( b2Vec2 candidate ) {
+		for ( int i = 0; i < count; ++i )
+			if ( b2Dot( planes[i].normal, candidate ) + planes[i].gap < -1e-6f )
+				return;
+		float error = b2LengthSquared( b2Sub( candidate, target ) );
+		if ( error < bestError )
+		{
+			best = candidate;
+			bestError = error;
+		}
+	};
+	consider( target );
+	for ( int i = 0; i < count; ++i )
+	{
+		const auto& a = planes[i];
+		consider( b2MulAdd( target, -a.gap - b2Dot( a.normal, target ), a.normal ) );
+		for ( int j = i + 1; j < count; ++j )
+		{
+			const auto& b = planes[j];
+			float det = b2Cross( a.normal, b.normal );
+			if ( std::abs( det ) < 1e-6f )
+				continue;
+			consider( { ( -a.gap * b.normal.y + b.gap * a.normal.y ) / det,
+						( -b.gap * a.normal.x + a.gap * b.normal.x ) / det } );
+		}
+	}
+	return { best.x, best.y };
 }
 
 bool Solver::observeRecovery( bool endOfStep )

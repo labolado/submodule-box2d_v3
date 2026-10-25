@@ -31,6 +31,8 @@ struct Box
 	b2Filter filter = b2DefaultFilter();
 	bool enabled = false;
 	bool stateCached = false;
+	std::array<int, 16> nodeFaces{
+		{ -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 } };
 	b2WorldTransform cachedTransform{};
 	b2BodyType cachedType = b2_staticBody;
 	float cachedMass = 0, cachedInertia = 0;
@@ -49,6 +51,7 @@ struct Solver
 	Core& soft;
 	int bodyIndex = 0;
 	bool sharedWorld = false;
+	bool retainBoundarySides = false;
 	SoftBody::Body<float>& body()
 	{
 		return soft.bodies[bodyIndex];
@@ -125,6 +128,9 @@ struct Solver
 	void gather();
 
 	bool projectGeometry();
+	void captureBoundarySides();
+	float limitCorrection( int node, Core::Vec delta ) const;
+	Core::Vec projectTranslation( Core::Vec desired ) const;
 
 	bool observeRecovery( bool endOfStep = false );
 

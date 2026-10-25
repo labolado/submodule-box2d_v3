@@ -56,6 +56,7 @@ struct Box2DCoupling::Impl
 		solver.world = def.world;
 		solver.flipY = def.flipY;
 		solver.enableDynamicContacts = def.enableDynamicContacts;
+		solver.enableSoftContacts = state.limits.enableSoftContacts;
 		solver.profile.enabled = def.profile;
 		attachments.reserve( def.maxAttachments );
 		valid = true;
@@ -303,6 +304,13 @@ CouplingState Box2DCoupling::getState() const
 	const auto& solver = impl_->solver;
 	result.entered = solver.entered;
 	result.completed = solver.completed;
+	result.softContactRows = solver.pairs.rowSolves;
+	result.softRecoverySteps = solver.pairs.recoverySteps;
+	result.softContactDepth = solver.pairs.depth;
+	result.softRecoveryEntries = solver.pairs.recoveryEntries;
+	result.softRecoveryExits = solver.pairs.recoveryExits;
+	result.softRecoveringPairs = solver.pairs.recoveringPairs;
+	result.softRecoveryDistance = solver.pairs.recoveryDistance;
 	result.peakGap = solver.peakGap;
 	result.failure = lastError();
 	for ( const auto& part : solver.parts )

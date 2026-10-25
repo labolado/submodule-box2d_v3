@@ -74,7 +74,7 @@ bool Assembly::prepare()
 	}
 	for ( int a = 0; a < int( parts.size() ); ++a )
 		for ( int b = a + 1; b < int( parts.size() ); ++b )
-			if ( soft.pairEnabled( a, b ) )
+			if ( !enableSoftContacts && soft.pairEnabled( a, b ) )
 			{
 				error = "assembly_requires_explicit_soft_collision_exclusions";
 				return false;
@@ -116,6 +116,7 @@ bool Assembly::prepare()
 		if ( !parts[id] )
 			continue;
 		auto& contact = parts[id]->contact;
+		contact.retainBoundarySides = enableSoftContacts;
 		contact.world = world;
 		contact.flipY = flipY;
 		contact.friction = soft.bodies[id].friction;
@@ -249,6 +250,83 @@ void Assembly::publishDynamic( Solver& contact, void* step )
 	}
 }
 
+bool Assembly::pairGeometry( void* step )
+{
+	pairs.positionContext = this;
+	pairs.projectTranslation = []( void* context, int id, Core::Vec desired ) {
+		return static_cast<Assembly*>( context )->parts[id]->contact.projectTranslation( desired );
+	};
+	pairs.positionLimit = []( void* context, int id, int node, Core::Vec delta ) {
+		return static_cast<Assembly*>( context )->parts[id]->contact.limitCorrection( node, delta );
+	};
+	// All positions must be current before gathering any pair or rigid rows.
+	for ( auto& part : parts )
+		if ( part )
+		{
+			auto& contact = part->contact;
+			auto& body = contact.body();
+			for ( int i = 0; i < contact.boxCount; ++i )
+			{
+				auto& box = contact.boxes[i];
+				if ( box.enabled && b2Body_GetType( box.body ) != b2_staticBody &&
+					 !contact.read( step, box.body, box.state, box.index ) )
+				{
+					error = "assembly_contact_state";
+					return false;
+				}
+			}
+			contact.captureBoundarySides();
+			for ( int i = 0; i < 16; ++i )
+				for ( int axis = 0; axis < 2; ++axis )
+					body.x[i][axis] += Step * body.v[i][axis];
+		}
+	pairs.beginStep();
+	// Fixed passes share the per-node correction budgets. End with rigid
+	// projection to retain the existing wall/press containment policy.
+	for ( int pass = 0; pass < 2; ++pass )
+	{
+		if ( !pairs.project() )
+		{
+			error = pairs.error;
+			return false;
+		}
+		for ( auto& part : parts )
+			if ( part && ( !part->contact.observeRecovery() || !part->contact.projectGeometry() ) )
+			{
+				error = part->contact.error;
+				return false;
+			}
+	}
+	if ( !pairs.gather() )
+	{
+		error = pairs.error;
+		return false;
+	}
+	pairs.warmStart();
+	for ( auto& part : parts )
+		if ( part )
+		{
+			auto& contact = part->contact;
+			if ( !refreshDynamic( contact, step ) )
+				return false;
+			contact.gather();
+			if ( contact.error )
+			{
+				error = contact.error;
+				return false;
+			}
+			for ( int i = 0; i < contact.rowCount; ++i )
+			{
+				auto& row = contact.rows[i];
+				b2Vec2 tangent = { -row.normal.y, row.normal.x };
+				contact.apply( row, b2Add( b2MulSV( row.normalImpulse, row.normal ),
+										   b2MulSV( row.tangentImpulse, tangent ) ) );
+			}
+			publishDynamic( contact, step );
+		}
+	return true;
+}
+
 void Assembly::stage( void* step, int phase, void* context )
 {
 	auto& owner = *static_cast<Assembly*>( context );
@@ -283,54 +361,62 @@ void Assembly::stage( void* step, int phase, void* context )
 	}
 	{
 		Profile::Scope timing( owner.profile, Profile::ContactGeometry );
-		for ( auto& part : owner.parts )
-			if ( part )
-			{
-				auto& contact = part->contact;
-				auto& body = part->contact.body();
-				for ( int i = 0; i < 16; ++i )
-					for ( int axis = 0; axis < 2; ++axis )
-						body.x[i][axis] += Step * body.v[i][axis];
-				if ( !contact.observeRecovery() )
+		if ( owner.enableSoftContacts )
+		{
+			if ( !owner.pairGeometry( step ) )
+				return;
+		}
+		else
+			for ( auto& part : owner.parts )
+				if ( part )
 				{
-					owner.error = contact.error;
-					return;
-				}
-				for ( int i = 0; i < contact.boxCount; ++i )
-				{
-					auto& box = contact.boxes[i];
-					if ( box.enabled && b2Body_GetType( box.body ) != b2_staticBody &&
-						 !contact.read( step, box.body, box.state, box.index ) )
+					auto& contact = part->contact;
+					auto& body = part->contact.body();
+					for ( int i = 0; i < 16; ++i )
+						for ( int axis = 0; axis < 2; ++axis )
+							body.x[i][axis] += Step * body.v[i][axis];
+					if ( !contact.observeRecovery() )
 					{
-						owner.error = "assembly_contact_state";
+						owner.error = contact.error;
 						return;
 					}
+					for ( int i = 0; i < contact.boxCount; ++i )
+					{
+						auto& box = contact.boxes[i];
+						if ( box.enabled && b2Body_GetType( box.body ) != b2_staticBody &&
+							 !contact.read( step, box.body, box.state, box.index ) )
+						{
+							owner.error = "assembly_contact_state";
+							return;
+						}
+					}
+					if ( !contact.projectGeometry() )
+					{
+						owner.error = contact.error;
+						return;
+					}
+					contact.gather();
+					if ( contact.error )
+					{
+						owner.error = contact.error;
+						return;
+					}
+					for ( int i = 0; i < contact.rowCount; ++i )
+					{
+						auto& row = contact.rows[i];
+						b2Vec2 tangent = { -row.normal.y, row.normal.x };
+						contact.apply( row, b2Add( b2MulSV( row.normalImpulse, row.normal ),
+												   b2MulSV( row.tangentImpulse, tangent ) ) );
+					}
+					owner.publishDynamic( contact, step );
 				}
-				if ( !contact.projectGeometry() )
-				{
-					owner.error = contact.error;
-					return;
-				}
-				contact.gather();
-				if ( contact.error )
-				{
-					owner.error = contact.error;
-					return;
-				}
-				for ( int i = 0; i < contact.rowCount; ++i )
-				{
-					auto& row = contact.rows[i];
-					b2Vec2 tangent = { -row.normal.y, row.normal.x };
-					contact.apply( row, b2Add( b2MulSV( row.normalImpulse, row.normal ),
-											   b2MulSV( row.tangentImpulse, tangent ) ) );
-				}
-				owner.publishDynamic( contact, step );
-			}
 	}
 	{
 		Profile::Scope timing( owner.profile, Profile::ContactSolve );
 		for ( int sweep = 0; sweep < Sweeps; ++sweep )
 		{
+			if ( owner.enableSoftContacts )
+				owner.pairs.solve();
 			for ( auto& part : owner.parts )
 				if ( part )
 				{
@@ -351,6 +437,8 @@ void Assembly::stage( void* step, int phase, void* context )
 	}
 	{
 		Profile::Scope timing( owner.profile, Profile::Observe );
+		if ( owner.enableSoftContacts )
+			owner.pairs.finish();
 		for ( auto& part : owner.parts )
 			if ( part )
 			{
