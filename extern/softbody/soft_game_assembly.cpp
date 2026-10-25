@@ -22,6 +22,21 @@ bool validWeights(const std::array<float, 16>& weights)
 }
 }
 
+bool Assembly::syncParts()
+{
+    if (soft.bodies.size() > MaxBodies || soft.pins.size() > MaxLinks)
+    { error = "assembly_capacity_exceeded"; return false; }
+    parts.resize(soft.bodies.size());
+    links.resize(soft.pins.size());
+    for (size_t id = 0; id < parts.size(); ++id)
+    {
+        if (!soft.bodies[id].active) { parts[id].reset(); continue; }
+        if (!parts[id] || parts[id]->generation != soft.bodies[id].generation)
+            parts[id].reset(new Part(soft, int(id)));
+    }
+    return true;
+}
+
 bool Assembly::prepare()
 {
     Profile::Scope timing(profile, Profile::Prepare);
@@ -29,21 +44,21 @@ bool Assembly::prepare()
     if (entered && (b2StoreWorldId(world) != b2StoreWorldId(boundWorld) || flipY != boundFlipY))
     { error = "assembly_owner_changed"; return false; }
     if (soft.failure) { error = soft.failure; return false; }
-    if (soft.bodies.size() != PartCount || soft.pins.size() > LinkCount || !soft.boundaries.empty() ||
+    if (!syncParts()) return false;
+    if (!soft.boundaries.empty() ||
         soft.dt != Step || soft.substeps != 1 || soft.iterations != Sweeps)
     { error = "unsupported_assembly_configuration"; return false; }
-    for (int a = 0; a < PartCount; ++a)
-        for (int b = a + 1; b < PartCount; ++b)
+    for (int a = 0; a < int(parts.size()); ++a)
+        for (int b = a + 1; b < int(parts.size()); ++b)
             if (soft.pairEnabled(a, b))
             { error = "assembly_requires_explicit_soft_collision_exclusions"; return false; }
     for (size_t id = 0; id < soft.pins.size(); ++id)
     {
         const auto& pin = soft.pins[id];
-        const auto& link = links[id];
         if (!pin.active) continue;
-        if (pin.a < 0 || pin.a >= PartCount || pin.b < 0 || pin.b >= PartCount || pin.a == pin.b ||
+        if (pin.a < 0 || pin.a >= int(parts.size()) || pin.b < 0 || pin.b >= int(parts.size()) || pin.a == pin.b || !parts[pin.a] || !parts[pin.b] ||
             !validWeights(pin.wa) || !validWeights(pin.wb) ||
-            !(link.frequency >= .01f && link.frequency <= 60) || !(link.dampingRatio >= 0 && link.dampingRatio <= 10) ||
+            !(pin.frequency >= .01f && pin.frequency <= 60) || !(pin.dampingRatio >= 0 && pin.dampingRatio <= 10) ||
             !std::isfinite(pin.speed) || !(pin.maxTorque >= 0 && pin.maxTorque <= 1e6f) ||
             !(pin.gain >= 0 && pin.gain <= 1e6f))
         { error = "invalid_assembly_connection"; return false; }
@@ -51,19 +66,16 @@ bool Assembly::prepare()
     int touches = 0;
     for (const auto& touch : soft.touchJoints) if (touch.active)
     {
-        if (++touches > 1 || touch.body < 0 || touch.body >= PartCount || !validWeights(touch.weights) ||
+        if (++touches > 64 || touch.body < 0 || touch.body >= int(parts.size()) || !parts[touch.body] || !validWeights(touch.weights) ||
             !std::isfinite(touch.target[0]) || !std::isfinite(touch.target[1]) ||
             !(touch.frequency >= .01f && touch.frequency <= 60) || !(touch.dampingRatio >= 0 && touch.dampingRatio <= 10) ||
             !(touch.maxForce >= 0 && touch.maxForce <= 1e5f))
         { error = "invalid_assembly_touch"; return false; }
     }
-    for (int id = 0; id < PartCount; ++id)
+    for (int id = 0; id < int(parts.size()); ++id)
     {
-        auto& part = parts[id];
-        if (part.core.bodies.empty()) part.core.bodies.push_back(soft.bodies[id]);
-        else part.core.bodies[0] = soft.bodies[id];
-        part.core.gravity = soft.gravity;
-        auto& contact = part.contact;
+        if (!parts[id]) continue;
+        auto& contact = parts[id]->contact;
         contact.world = world;
         contact.flipY = flipY;
         contact.friction = soft.bodies[id].friction;
@@ -78,17 +90,17 @@ bool Assembly::prepare()
 
 void Assembly::motors()
 {
-    double torques[PartCount] = {}, before = 0, after = 0;
+    double torques[MaxBodies] = {}, before = 0, after = 0;
     for (const auto& pin : soft.pins) if (pin.active && pin.maxTorque > 0)
     {
-        double relative = parts[pin.b].core.omega(0) - parts[pin.a].core.omega(0);
+        double relative = soft.omega(pin.b) - soft.omega(pin.a);
         double torque = std::max(-double(pin.maxTorque), std::min(double(pin.maxTorque), double(pin.gain) * (double(pin.speed) - relative)));
         torques[pin.b] += torque;
         torques[pin.a] -= torque;
     }
-    for (auto& part : parts) before += part.core.kinetic(0);
-    for (int id = 0; id < PartCount; ++id) if (torques[id] != 0) parts[id].core.torque(0, torques[id]);
-    for (auto& part : parts) after += part.core.kinetic(0);
+    for (int id = 0; id < int(parts.size()); ++id) if (parts[id]) before += soft.kinetic(id);
+    for (int id = 0; id < int(parts.size()); ++id) if (torques[id] != 0) soft.torque(id, torques[id]);
+    for (int id = 0; id < int(parts.size()); ++id) if (parts[id]) after += soft.kinetic(id);
     soft.motorWork += after - before;
 }
 
@@ -99,20 +111,20 @@ void Assembly::prepareLinks()
         const auto& pin = soft.pins[id];
         if (!pin.active) continue;
         auto& link = links[id];
-        auto& a = parts[pin.a].core;
-        auto& b = parts[pin.b].core;
+        auto& a = soft.bodies[pin.a];
+        auto& b = soft.bodies[pin.b];
         link.inverseMass = 0;
         link.impulse = {0, 0};
         for (int i = 0; i < 16; ++i)
-            link.inverseMass += pin.wa[i] * pin.wa[i] / a.bodies[0].mass[i] + pin.wb[i] * pin.wb[i] / b.bodies[0].mass[i];
-        float omega = 2 * 3.14159265358979323846f * link.frequency;
-        float denominator = 2 * link.dampingRatio * omega + Step * omega * omega;
+            link.inverseMass += pin.wa[i] * pin.wa[i] / a.mass[i] + pin.wb[i] * pin.wb[i] / b.mass[i];
+        float omega = 2 * 3.14159265358979323846f * pin.frequency;
+        float denominator = 2 * pin.dampingRatio * omega + Step * omega * omega;
         // Implicit spring compliance: gamma=1/(h*(d+h*k)), where k=m*w*w.
         // Accumulated impulses make repeated sweeps solve the same spring,
         // rather than applying the full spring force eight times.
         link.gamma = link.inverseMass / (Step * denominator);
         float biasRate = omega * omega / denominator;
-        auto x = a.anchor(0, pin.wa), y = b.anchor(0, pin.wb);
+        auto x = soft.anchor(pin.a, pin.wa), y = soft.anchor(pin.b, pin.wb);
         link.bias = {biasRate * (y[0] - x[0]), biasRate * (y[1] - x[1])};
     }
 }
@@ -124,8 +136,8 @@ void Assembly::solveLinks()
         const auto& pin = soft.pins[id];
         if (!pin.active) continue;
         auto& link = links[id];
-        auto& a = parts[pin.a].core.bodies[0];
-        auto& b = parts[pin.b].core.bodies[0];
+        auto& a = soft.bodies[pin.a];
+        auto& b = soft.bodies[pin.b];
         b2Vec2 relative{};
         for (int i = 0; i < 16; ++i)
         {
@@ -153,21 +165,10 @@ void Assembly::stage(void* step, int phase, void* context)
     if (phase == 0)
     {
         Profile::Scope timing(owner.profile, Profile::MaterialMotor);
-        for (auto& part : owner.parts)
-        {
-            part.core.advanceMaterialVelocity();
-            if (part.core.failure) { owner.error = part.core.failure; return; }
-        }
+        owner.soft.advanceMaterialVelocity();
+        if (owner.soft.failure) { owner.error = owner.soft.failure; return; }
         for (auto& touch : owner.soft.touchJoints) if (touch.active)
-        {
-            auto local = touch;
-            local.body = 0;
-            auto& core = owner.parts[touch.body].core;
-            double before = core.appliedWork;
-            core.solveTouchJoint(local);
-            owner.soft.appliedWork += core.appliedWork - before;
-            touch.lastForce = local.lastForce;
-        }
+            owner.soft.solveTouchJoint(touch);
         owner.motors();
         return;
     }
@@ -180,10 +181,10 @@ void Assembly::stage(void* step, int phase, void* context)
     }
     {
         Profile::Scope timing(owner.profile, Profile::ContactGeometry);
-        for (auto& part : owner.parts)
+        for (auto& part : owner.parts) if (part)
         {
-            auto& contact = part.contact;
-            auto& body = part.core.bodies[0];
+            auto& contact = part->contact;
+            auto& body = part->contact.body();
             for (int i = 0; i < 16; ++i)
                 for (int axis = 0; axis < 2; ++axis) body.x[i][axis] += Step * body.v[i][axis];
             if (!contact.observeRecovery()) { owner.error = contact.error; return; }
@@ -208,9 +209,9 @@ void Assembly::stage(void* step, int phase, void* context)
         Profile::Scope timing(owner.profile, Profile::ContactSolve);
         for (int sweep = 0; sweep < Sweeps; ++sweep)
         {
-            for (auto& part : owner.parts)
+            for (auto& part : owner.parts) if (part)
             {
-                auto& contact = part.contact;
+                auto& contact = part->contact;
                 for (int i = 0; i < contact.rowCount && !contact.error; ++i) contact.solve(contact.rows[i]);
                 if (contact.error) { owner.error = contact.error; return; }
             }
@@ -219,16 +220,16 @@ void Assembly::stage(void* step, int phase, void* context)
     }
     {
         Profile::Scope timing(owner.profile, Profile::Observe);
-        for (auto& part : owner.parts)
+        for (auto& part : owner.parts) if (part)
         {
-            auto& contact = part.contact;
+            auto& contact = part->contact;
             contact.previous = contact.rows;
             contact.previousCount = contact.rowCount;
             contact.lastDepth = 0;
             for (int i = 0; i < contact.boxCount; ++i) if (contact.boxes[i].enabled)
             {
                 auto& box = contact.boxes[i];
-                BoxProjection geometry(part.core.bodies[0], box.state, box.hx, box.hy);
+                BoxProjection geometry(part->contact.body(), box.state, box.hx, box.hy);
                 contact.lastDepth = std::max(contact.lastDepth, geometry.boundaryDepth());
             }
         }
@@ -239,9 +240,9 @@ bool Assembly::advance()
 {
     Profile::Scope timing(profile, Profile::Advance);
     if (!prepare()) return false;
-    for (auto& part : parts)
+    for (auto& part : parts) if (part)
     {
-        auto& contact = part.contact;
+        auto& contact = part->contact;
         contact.recovery.remaining.fill(contact.recovery.maxCorrection);
         if (contact.recovery.active) contact.clearCache();
     }
@@ -252,29 +253,27 @@ bool Assembly::advance()
         Profile::Scope nativeTiming(profile, Profile::NativeWorld);
         b2World_StepWithSoftStages(world, Step, 1, nullptr, nullptr, stage, this);
         bool staticOnly = true;
-        for (const auto& part : parts)
-            for (int i = 0; i < part.contact.boxCount; ++i)
-                if (part.contact.boxes[i].enabled && b2Body_GetType(part.contact.boxes[i].body) != b2_staticBody) staticOnly = false;
+        for (const auto& part : parts) if (part)
+            for (int i = 0; i < part->contact.boxCount; ++i)
+                if (part->contact.boxes[i].enabled && b2Body_GetType(part->contact.boxes[i].body) != b2_staticBody) staticOnly = false;
         if (nextPhase == 0 && staticOnly)
             for (int phase = 0; phase < 3; ++phase) stage(nullptr, phase, this);
     }
     if (!error && nextPhase != 3) error = "assembly_missing_stage";
-    // There is no rollback after native entry. Publish partial material state
-    // even on failure, and leave the owner faulted until it is rebuilt.
-    for (int id = 0; id < PartCount; ++id) soft.bodies[id] = parts[id].core.bodies[0];
+    // There is no rollback after native entry. Material state is already in
+    // the authoritative world; a failed step remains latched.
     if (error) return false;
     Profile::Scope observationTiming(profile, Profile::Finalize);
-    for (auto& part : parts)
+    for (auto& part : parts) if (part)
     {
-        auto& contact = part.contact;
+        auto& contact = part->contact;
         if (!contact.observeRecovery(true)) { error = contact.error; return false; }
         for (int i = 0; i < contact.boxCount; ++i)
             contact.boxes[i].cachedTransform = b2Body_GetTransform(contact.boxes[i].body);
-        ++part.core.completedSubsteps;
-        peakSpeed = std::max(peakSpeed, part.core.currentMetrics().nodeSpeed);
         peakDepth = std::max(peakDepth, contact.lastDepth);
     }
     soft.peak = soft.currentMetrics();
+    peakSpeed = std::max(peakSpeed, soft.peak.nodeSpeed);
     peakGap = std::max(peakGap, soft.peak.pin);
     ++soft.completedSubsteps; ++completed;
     return true;

@@ -44,6 +44,10 @@ struct Row
 struct Solver
 {
     Core& soft;
+    int bodyIndex = 0;
+    bool sharedWorld = false;
+    SoftBody::Body<float>& body() { return soft.bodies[bodyIndex]; }
+    const SoftBody::Body<float>& body() const { return soft.bodies[bodyIndex]; }
     bool flipY = false;
     unsigned long long entered = 0;
     b2WorldId boundWorld = b2_nullWorldId;
@@ -71,6 +75,7 @@ struct Solver
     int nextPhase = 0;
 
     explicit Solver(Core& core) : soft(core) { pin.active = cachedPin.active = false; }
+    Solver(Core& core, int index) : soft(core), bodyIndex(index), sharedWorld(true) { pin.active = cachedPin.active = false; }
     Solver(const Solver&) = delete;
     Solver& operator=(const Solver&) = delete;
 

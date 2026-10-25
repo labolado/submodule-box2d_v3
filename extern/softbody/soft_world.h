@@ -16,6 +16,8 @@ template<class T> struct World
         int a,b;std::array<T,16> wa{},wb{};
         Vec worldAnchor{}; // b == -1 denotes a fixed world endpoint.
         bool active=true;T speed=0,maxTorque=0,gain=0;
+        T frequency=T(12),dampingRatio=T(1);
+        unsigned long long generation=1;
     };
     struct TouchJoint
     {

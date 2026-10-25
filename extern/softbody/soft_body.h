@@ -22,6 +22,7 @@ template<class T> struct Body
     T preload=T(0);
     T materialScale=T(1);
     T friction=T(0); // Soft/soft Coulomb friction; boundaries have their own coefficient.
+    unsigned long long generation=1;
     bool active=true;
     Vec forceInput{};T torqueInput=0;
     T stiffness,frequency,damping,frameOverlap;

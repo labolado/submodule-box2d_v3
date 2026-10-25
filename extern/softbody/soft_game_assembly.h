@@ -1,32 +1,31 @@
 #pragma once
 #include "soft_game_world.h"
 #include "soft_profile.h"
+#include <memory>
 
 namespace SoftBody { namespace Game
 {
-// Bounded assembly owner. Existing Solver/World layouts and standalone paths
-// stay unchanged. Parts retain their contact caches; material state is synchronized
-// with three fixed single-body workspaces at preflight and completion. Only
-// this owner advances time; a workspace never steps the native world.
+// Internal bounded multi-body solver. Core owns all material state; each part
+// owns only its contact/recovery cache and references a stable body slot.
+// This owner alone advances the coupled rigid world.
 struct Assembly
 {
-    static constexpr int PartCount = 3;
-    static constexpr int LinkCount = 2;
+    static constexpr int MaxBodies = 32;
+    static constexpr int MaxLinks = 64;
     struct Part
     {
-        Core core;
+        unsigned long long generation;
         Solver contact;
-        Part() : contact(core) { core.dt = Step; core.substeps = 1; }
+        Part(Core& core, int id) : generation(core.bodies[id].generation), contact(core, id) {}
     };
     struct Link
     {
         b2Vec2 impulse{}, bias{};
         float inverseMass = 0, gamma = 0;
-        float frequency = 12, dampingRatio = 1;
     };
     Core& soft;
-    std::array<Part, PartCount> parts;
-    std::array<Link, LinkCount> links;
+    std::vector<std::unique_ptr<Part>> parts;
+    std::vector<Link> links;
     b2WorldId world = b2_nullWorldId;
     b2WorldId boundWorld = b2_nullWorldId;
     bool flipY = false, boundFlipY = false;
@@ -39,6 +38,7 @@ struct Assembly
     explicit Assembly(Core& core) : soft(core) {}
     Assembly(const Assembly&) = delete;
     Assembly& operator=(const Assembly&) = delete;
+    bool syncParts();
     bool prepare();
     bool advance();
     void motors();

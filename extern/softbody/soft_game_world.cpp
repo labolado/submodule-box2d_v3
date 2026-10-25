@@ -149,7 +149,7 @@ bool Solver::prepareTargets()
 
 b2Vec2 Solver::point(const Row& row) const
 {
-    const auto& body = soft.bodies[0];
+    const auto& body = this->body();
     const auto& a = body.x[row.edge];
     const auto& b = body.x[(row.edge + 1) % 16];
     return {(1 - row.fraction) * a[0] + row.fraction * b[0],
@@ -158,7 +158,7 @@ b2Vec2 Solver::point(const Row& row) const
 
 float Solver::softInverse(const Row& row) const
 {
-    const auto& mass = soft.bodies[0].mass;
+    const auto& mass = body().mass;
     return (1 - row.fraction) * (1 - row.fraction) / mass[row.edge] +
            row.fraction * row.fraction / mass[(row.edge + 1) % 16];
 }
@@ -193,7 +193,7 @@ void Solver::gather()
 {
     rowCount = 0;
     const b2Vec2 normals[4] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
-    auto& body = soft.bodies[0];
+    auto& body = this->body();
     for (int id = 0; id < boxCount; ++id)
     {
         auto& box = boxes[id];
@@ -261,7 +261,7 @@ bool Solver::projectGeometry()
             int id = j;
             auto& box = boxes[id];
             if (!box.enabled) continue;
-            BoxProjection geometry(soft.bodies[0], box.state, box.hx, box.hy);
+            BoxProjection geometry(body(), box.state, box.hx, box.hy);
             // Folded boundaries have no well-defined interior.
             {
                 if (!observed && !observeRecovery()) return false;
@@ -284,7 +284,7 @@ bool Solver::projectGeometry()
 
 bool Solver::observeRecovery(bool endOfStep)
 {
-    auto topology = inspectTopology(soft.bodies[0]);
+    auto topology = inspectTopology(body());
     if (!topology.finite) { error = "nonfinite_state"; return false; }
     if (recovery.observe(topology, endOfStep)) clearCache();
     return true;
@@ -293,7 +293,7 @@ bool Solver::observeRecovery(bool endOfStep)
 double Solver::anchorCoupling(const Row& row) const
 {
     if (!pin.active) return 0;
-    const auto& body = soft.bodies[0];
+    const auto& body = this->body();
     return pin.weights[row.edge] * double(1 - row.fraction) / body.mass[row.edge] +
            pin.weights[(row.edge + 1) % 16] * double(row.fraction) / body.mass[(row.edge + 1) % 16];
 }
@@ -314,7 +314,7 @@ bool Solver::preparePinResponse(void* step)
     auto anchor = b2TransformWorldPoint({rigid.origin, rigid.rotation}, localPinAnchor());
     double rx = anchor.x - rigid.center.x, ry = anchor.y - rigid.center.y;
     double inverse = rigid.inverseMass;
-    for (int i = 0; i < 16; ++i) inverse += double(pin.weights[i]) * pin.weights[i] / soft.bodies[0].mass[i];
+    for (int i = 0; i < 16; ++i) inverse += double(pin.weights[i]) * pin.weights[i] / body().mass[i];
     double xx = inverse + rigid.inverseInertia * ry * ry;
     double xy = -rigid.inverseInertia * rx * ry;
     double yy = inverse + rigid.inverseInertia * rx * rx;
@@ -342,7 +342,7 @@ float Solver::inverseMass(const Row& row, b2Vec2 direction) const
 
 float Solver::relativeSpeed(const Row& row, b2Vec2 direction) const
 {
-    const auto& body = soft.bodies[0];
+    const auto& body = this->body();
     const auto& rigid = boxes[row.box].state;
     auto p = point(row);
     float vx = (1 - row.fraction) * body.v[row.edge][0] + row.fraction * body.v[(row.edge + 1) % 16][0];
@@ -353,7 +353,7 @@ float Solver::relativeSpeed(const Row& row, b2Vec2 direction) const
 
 void Solver::apply(const Row& row, b2Vec2 impulse)
 {
-    auto& body = soft.bodies[0];
+    auto& body = this->body();
     auto& rigid = boxes[row.box].state;
     auto p = point(row);
     double px = 0, py = 0;
@@ -434,7 +434,7 @@ bool Solver::attachment(void* step, bool bias)
     int index;
     if (!read(step, pin.rigid, rigid, index)) return false;
     ++pinSolves;
-    auto& body = soft.bodies[0];
+    auto& body = this->body();
     auto anchor = b2TransformWorldPoint({rigid.origin, rigid.rotation}, localPinAnchor());
     b2Vec2 r = {float(anchor.x - rigid.center.x), float(anchor.y - rigid.center.y)};
     double inverse = rigid.inverseMass, x = 0, y = 0, vx = 0, vy = 0;
@@ -477,7 +477,7 @@ void Solver::stage(void* step, int phase, void* context)
             if (touch.active) solver.soft.solveTouchJoint(touch);
         {
             if (solver.soft.failure) solver.error = solver.soft.failure;
-            else if (!inspectTopology(solver.soft.bodies[0]).finite) solver.error = "nonfinite_state";
+            else if (!inspectTopology(solver.body()).finite) solver.error = "nonfinite_state";
         }
         return;
     }
@@ -488,7 +488,7 @@ void Solver::stage(void* step, int phase, void* context)
     }
     for (int i = 0; i < 16; ++i)
         for (int axis = 0; axis < 2; ++axis)
-            solver.soft.bodies[0].x[i][axis] += Step * solver.soft.bodies[0].v[i][axis];
+            solver.body().x[i][axis] += Step * solver.body().v[i][axis];
     if (!solver.observeRecovery()) return;
     solver.lastDepth = 0;
     for (int i = 0; i < solver.boxCount; ++i)
@@ -527,11 +527,11 @@ void Solver::stage(void* step, int phase, void* context)
         auto& box = solver.boxes[i];
         if (!box.enabled) continue;
         double depth;
-        if (!inspectTopology(solver.soft.bodies[0]).valid())
+        if (!inspectTopology(solver.body()).valid())
         {
             // Only boundary segments have a defined overlap while folded;
             // this metric is not an interior penetration certificate.
-            BoxProjection geometry(solver.soft.bodies[0], box.state, box.hx, box.hy);
+            BoxProjection geometry(solver.body(), box.state, box.hx, box.hy);
             depth = geometry.boundaryDepth();
         }
         else depth = Bridge::statePenetration(solver.soft, 0, box.state, box.hx, box.hy);
@@ -582,11 +582,11 @@ bool Solver::advance()
     if (lastDepth > 1e-6) ++overlapSteps;
     for (int i = 0; i < 16; ++i)
         for (int axis = 0; axis < 2; ++axis)
-            if (!std::isfinite(soft.bodies[0].x[i][axis]) || !std::isfinite(soft.bodies[0].v[i][axis]))
+            if (!std::isfinite(body().x[i][axis]) || !std::isfinite(body().v[i][axis]))
                 error = "nonfinite_state";
     if (pin.active)
     {
-        auto a = soft.anchor(0, pin.weights);
+        auto a = soft.anchor(bodyIndex, pin.weights);
         auto b = b2Body_GetWorldPoint(pin.rigid, pin.localAnchor);
         maxGap = std::max(maxGap, std::hypot(double(a[0]) - b.x, double(a[1]) - (flipY ? -b.y : b.y)));
     }
@@ -637,10 +637,10 @@ bool Solver::validate()
     if (soft.failure) { error = soft.failure; return false; }
     if (soft.dt != Step || soft.substeps != 1 || soft.iterations != Sweeps)
     { error = "unsupported_game_step"; return false; }
-    if (soft.bodies.size() != 1 || !soft.bodies[0].active || soft.bodies[0].kind != 3 ||
-        !soft.pins.empty() || !soft.boundaries.empty())
+    if (bodyIndex < 0 || size_t(bodyIndex) >= soft.bodies.size() || !body().active || body().kind != 3 ||
+        (!sharedWorld && (soft.bodies.size() != 1 || !soft.pins.empty() || !soft.boundaries.empty())))
     { error = "unsupported_game_body"; return false; }
-    const auto& body = soft.bodies[0];
+    const auto& body = this->body();
     if (body.forceInput[0] != 0 || body.forceInput[1] != 0 || body.torqueInput != 0)
     { error = "unsupported_game_load"; return false; }
     if (!(friction >= 0 && friction <= 10)) { error = "invalid_game_friction"; return false; }
@@ -650,7 +650,7 @@ bool Solver::validate()
         { error = "invalid_game_mass"; return false; }
     }
     int touches = 0;
-    for (const auto& touch : soft.touchJoints) if (touch.active)
+    for (const auto& touch : soft.touchJoints) if (!sharedWorld && touch.active)
     {
         if (++touches > 1 || touch.body != 0 || !std::isfinite(touch.target[0]) || !std::isfinite(touch.target[1]) ||
             !(touch.frequency >= .01f && touch.frequency <= 60) ||
