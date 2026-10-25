@@ -250,6 +250,11 @@ void Solver::gather()
 
 bool Solver::projectGeometry()
 {
+    // Within this call only BoxProjection::move can change node positions;
+    // it increments corrections before every write. Velocities stay unchanged.
+    // Repeated endOfStep=false observations of unchanged topology are idempotent.
+    // Keep the observation local so edits between calls cannot reuse stale data.
+    bool observed = false;
     for (int sweep = 0; sweep < Sweeps; ++sweep)
         for (int j = 0; j < boxCount; ++j)
         {
@@ -259,7 +264,8 @@ bool Solver::projectGeometry()
             BoxProjection geometry(soft.bodies[0], box.state, box.hx, box.hy);
             // Folded boundaries have no well-defined interior.
             {
-                if (!observeRecovery()) return false;
+                if (!observed && !observeRecovery()) return false;
+                observed = true;
                 geometry.pointsOnly = recovery.active;
                 geometry.stopOnInvalid = !recovery.active;
                 if (recovery.active)
@@ -271,7 +277,7 @@ bool Solver::projectGeometry()
             geometry.project();
             geometryCorrections += geometry.corrections;
             if (geometry.error) { error = geometry.error; return false; }
-            if (!observeRecovery()) return false;
+            if (geometry.corrections != 0 && !observeRecovery()) return false;
         }
     return true;
 }
