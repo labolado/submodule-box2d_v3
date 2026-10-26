@@ -30,8 +30,14 @@ contact/link iterations. The application supplies eight complete steps per 60 Hz
 frame. This is not Box2D's amortized eight-substep algorithm.
 
 The material, motor and contact formulas are unchanged by this API extraction.
-Only recoverable 16-node ellipses are exposed. Joint and touch anchors use 16
-nonnegative weights whose sum is one. Positive motor speed is relative angular
+Recoverable bodies accept one simple hole-free contour with at least three nodes
+(`SoftBodyDef.shape.nodes`, optional `boundary`); the omitted shape remains the
+16-node ellipse. Nodes, weights and snapshots are sized dynamically. Joint and
+touch anchors require exactly one nonnegative weight per input node, summing to one.
+Native `Weights` is a vector: resize it for custom shapes. Definition defaults
+still contain 16 zero weights for the ellipse; zero-padded extra entries are rejected.
+`SoftBodyState.vertices`, `velocities` and `boundary` are variable-size values.
+Boundary winding is normalized without renumbering public node identities. Positive motor speed is relative angular
 velocity of B with respect to A. Frequency is Hz; dampingRatio is dimensionless;
 material `damping` retains the existing deformation-velocity damping coefficient.
 Mass is total mass, distributed uniformly over nodes. There is no density API yet.
@@ -58,18 +64,43 @@ entry. Counters report entered rigid steps and successfully completed soft steps
 
 - Configurable bounds: 1..32 body slots, 0..64 joints, 0..64 touches (default one).
   These are allocation limits, not certified mobile scene capacities.
+- `SimulationDef.maxNodes` (Lua `maxNodes`) defaults to 512 **active nodes in the
+  whole simulation**, not 16 per body. Increase at world creation as needed;
+  no rebuild is required. Removing bodies releases the logical budget. Inactive
+  slots/caches can retain storage until reuse, synchronization or world destruction.
+  `availableNodes()` reports the native remaining budget. Creation checks it before
+  allocating body storage or consuming slots; `getBodyNodeCount()` avoids snapshots.
+- `maxSoftContactRows` defaults to 512 gathered soft/soft rows. Exhaustion reports
+  `soft_pair_contact_capacity`, never silently drops contacts. It can happen after
+  entering a step, so the normal sticky-failure rule applies. Rigid rows are sized
+  from the node count (node/vertex rows for polygons, node/edge rows for circles).
+  Scratch is reused after preflight/first-step warmup. These budgets are not a
+  memory quota or a certified mobile limit. No new parallelism or SIMD is implied.
 - Soft-soft contacts are off by default: all active pairs must explicitly
   disable collision. `SimulationDef.enableSoftContacts = true` enables the
   experimental path below; it does not change joint collision exclusions.
-- Static/kinematic, single centred sharp box fixtures only, zero restitution;
-  up to four registered contact boxes per soft body, at most 64 registrations.
-  Pair exclusions allow different bodies to use different registered boxes.
+- Static/kinematic, single circle or sharp convex polygon fixture (3–8 vertices),
+  zero restitution. Local offsets/rotations are supported; circles use analytic
+  distances. Centered boxes retain their original feature order and arithmetic.
+  Up to four registered contact shapes per soft body, at most 64 registrations.
+  Pair exclusions allow different soft bodies to use different registered shapes.
+- Compound fixtures, capsules, segments/chains and rounded polygons are rejected.
+  Fixture friction, filter, sensor and enabled state are respected. Supported
+  geometry edits clear cached contacts; shape replacement/count changes require
+  detach/reattach. `boxContacts` in the Lua snapshot now counts all supported
+  rigid shape rows; its historical name is preserved.
 - `Box2DCouplingDef.enableDynamicContacts` separately opts into awake, unlocked,
-  single-box dynamic contacts. Jointed mechanisms, general CCD, arbitrary topology,
+  single-shape dynamic contacts. Jointed mechanisms, general CCD, arbitrary topology,
   world/rigid pins and direct force loading are not certified in this path.
 - Historical standalone, static, attachment and single-body game modes retain
-  their internal interfaces for regression. Their capabilities are not implicitly
-  available through this new operation boundary.
+  their internal interfaces and geometry restrictions for regression. The new
+  geometry is enabled only by `Box2DCoupling` (Lua `couplingMode='assembly'`).
+
+The P4j local fixture covers static support, long-edge contacts, rotating circle
+friction, offset dynamic reaction, mirrored local geometry, bounded touch and
+curved pressing/release. This does not certify arbitrary initial containment,
+interlocked geometry, continuous collision detection or mobile cost. Native
+positions/forces retain metre, kilogram, second and y-up units.
 
 `getProfile()` is disabled by default. Inclusive buckets retain their prior
 meaning; `adapter` is now populated by the native coupling layer. Do not add
@@ -89,10 +120,12 @@ the pair, including its recovery. No Box2D rigid solver changes are required.
 
 Deep overlap uses a persistent pair state keyed by both body generations. It
 retains the last separated direction and leaves recovery only after eight complete
-steps with valid contours and disjoint projection intervals. This is a sufficient
-separating-plane certificate, not an exact overlap-area calculation. The two-body
-validation uses fixed ellipses; general concave shapes and trapped assemblies
-need separate validation.
+steps with valid contours and disjoint projection intervals. For concave reference
+shapes, whole-contour containment replaces the centre test, and actual clear
+contours can retire recovery without a separating plane. These are restricted
+certificates, not exact overlap-volume solving; arbitrary interlocking remains
+uncertified. Adding boundary samples changes the equal-node mass distribution
+and can change deformation/contact behavior. It is not a converged continuum model.
 
 Position assistance shares a 0.02 m per-node budget across pairs and passes in
 one 1/480 s step. During deep recovery only, the boundary adapter projects desired
@@ -124,6 +157,22 @@ The local native and Simulator gate covers two free bodies: ordinary impact,
 confined support, shared extreme compression/release and lifecycle. It does not
 certify four-body stacking, contacts between jointed assemblies, combined dynamic
 rigid/soft-pair contacts, mobile cost or arbitrary user geometry. The supported
-car still excludes collisions between its own connected parts. Capacity remains
-32 bodies and 512 gathered rows, not a performance promise. Only macOS is built
+car still excludes collisions between its own connected parts. The body-slot bound remains
+32; node and soft-row budgets are runtime settings, not a performance promise. Only macOS is built
 and run for P4d; Android source lists are updated but the new path is untested there.
+
+## Dynamic-node validation (P4i follow-up)
+
+Local tests cover 17/32/64-node contacts and constraints, 96-node slot reuse,
+513-node definition creation with maxNodes=1024, edge-intersection scratch beyond
+18 entries, and warm cache reuse. 32/64-node ellipses recover after a .02m plate gap.
+The 24-node concave tray recovers its released shape but does **not** meet the .04m
+flattening gate (minimum about .0631m). This limitation is retained as an explicit
+diagnostic; materials and recovery parameters were not tuned. See the independent
+`test/doc/jellycar-soft-body/dynamic-node-results.md` for actual coverage and failures.
+
+This changes experimental private C++ definitions/storage; direct native users of
+these headers must rebuild and size custom-shape weights explicitly. It does not
+change the Solar2D public plugin SDK, existing engine class layouts or virtuals.
+Historical Lua modes still accept only their original 16-node ellipse. Arbitrary
+counts are exposed through `couplingMode='assembly'` only.

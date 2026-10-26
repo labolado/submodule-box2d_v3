@@ -18,7 +18,6 @@ constexpr float Step = 1.f / 480;
 constexpr float Margin = .001f; // 0.16 content units at scale 160.
 constexpr int Sweeps = 8;
 constexpr int MaxBoxes = 4;
-constexpr int MaxRows = MaxBoxes * 20;
 
 struct Box
 {
@@ -26,13 +25,13 @@ struct Box
 	b2ShapeId cachedShape = b2_nullShapeId;
 	b2BodyId body = b2_nullBodyId;
 	View state{};
+	RigidGeometry geometry;
 	int index = -1;
 	float hx = 0, hy = 0, friction = 0;
 	b2Filter filter = b2DefaultFilter();
 	bool enabled = false;
 	bool stateCached = false;
-	std::array<int, 16> nodeFaces{
-		{ -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 } };
+	std::vector<int> nodeFaces;
 	b2WorldTransform cachedTransform{};
 	b2BodyType cachedType = b2_staticBody;
 	float cachedMass = 0, cachedInertia = 0;
@@ -52,6 +51,7 @@ struct Solver
 	int bodyIndex = 0;
 	bool sharedWorld = false;
 	bool retainBoundarySides = false;
+	bool extendedGeometry = false;
 	SoftBody::Body<float>& body()
 	{
 		return soft.bodies[bodyIndex];
@@ -75,7 +75,13 @@ struct Solver
 	std::array<Box, MaxBoxes> boxes{};
 	int boxCount = 0;
 	float friction = .8f;
-	std::array<Row, MaxRows> rows{}, previous{};
+	std::vector<Row> rows, previous;
+	struct Plane
+	{
+		b2Vec2 normal;
+		float gap;
+	};
+	std::vector<Plane> translationPlanes;
 	int rowCount = 0, previousCount = 0;
 	unsigned long long steps = 0, rowSolves = 0, pinSolves = 0, warmHits = 0, cacheResets = 0;
 	std::array<unsigned long long, MaxBoxes> contactSteps{};
@@ -129,8 +135,8 @@ struct Solver
 
 	bool projectGeometry();
 	void captureBoundarySides();
-	float limitCorrection( int node, Core::Vec delta ) const;
-	Core::Vec projectTranslation( Core::Vec desired ) const;
+	float limitCorrection( int node, Core::Vec delta );
+	Core::Vec projectTranslation( Core::Vec desired );
 
 	bool observeRecovery( bool endOfStep = false );
 

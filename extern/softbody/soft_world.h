@@ -1,5 +1,5 @@
 #pragma once
-// Private experimental fixed-node soft-body solver. No Box2D or Lua dependency.
+// Private experimental soft-body solver. No Box2D or Lua dependency.
 #include "soft_contact.h"
 
 #include <vector>
@@ -16,7 +16,7 @@ template <class T> struct World
 	struct Pin
 	{
 		int a, b;
-		std::array<T, 16> wa{}, wb{};
+		std::vector<T> wa = std::vector<T>( 16 ), wb = std::vector<T>( 16 );
 		Vec worldAnchor{}; // b == -1 denotes a fixed world endpoint.
 		bool active = true;
 		T speed = 0, maxTorque = 0, gain = 0;
@@ -26,7 +26,7 @@ template <class T> struct World
 	struct TouchJoint
 	{
 		int body;
-		std::array<T, 16> weights{};
+		std::vector<T> weights = std::vector<T>( 16 );
 		Vec target{};
 		T frequency = T( 3 );
 		T dampingRatio = T( 1 );
@@ -60,6 +60,7 @@ template <class T> struct World
 	Vec gravity{ T( 0 ), T( -20 ) };
 	T dt = T( 1 ) / T( 480 );
 	int iterations = 8, substeps = 8;
+	int maxSoftContactRows = 512;
 	mutable const char* failure = nullptr;
 	double motorWork = 0, boundaryWork = 0, appliedWork = 0, frictionLoss = 0;
 	V external{};
@@ -70,7 +71,11 @@ template <class T> struct World
 	unsigned long long completedSubsteps = 0;
 	bool pairEnabled( int a, int b ) const;
 	bool boundaryEnabled( int body, const Boundary& boundary ) const;
-	Vec anchor( int id, const std::array<T, 16>& weights ) const;
+	Vec anchor( int id, const T* weights ) const;
+	template <class Buffer> Vec anchor( int id, const Buffer& weights ) const
+	{
+		return anchor( id, weights.data() );
+	}
 	Vec pinTarget( const Pin& pin ) const;
 	Vec boxLocal( const Boundary& box, Vec point ) const;
 	Vec boxVertex( const Boundary& box, int corner ) const;

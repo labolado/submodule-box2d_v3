@@ -15,7 +15,7 @@ struct Box2DCouplingDef
 {
 	b2WorldId world = b2_nullWorldId;
 	bool flipY = false, profile = false;
-	// Restricted game experiment: awake single-box dynamic contacts only.
+	// Restricted game experiment: awake single-shape dynamic contacts only.
 	bool enableDynamicContacts = false;
 	int maxAttachments = 64;
 };

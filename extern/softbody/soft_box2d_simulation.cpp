@@ -112,7 +112,7 @@ ObjectId Box2DCoupling::attachBody( b2BodyId body )
 		 b2StoreWorldId( b2Body_GetWorld( body ) ) != b2StoreWorldId( s.def.world ) ||
 		 b2Body_GetShapeCount( body ) != 1 )
 	{
-		s.error = "attachment requires one centred sharp box in this world";
+		s.error = "attachment requires one circle or sharp convex polygon in this world";
 		return {};
 	}
 	b2ShapeId shape;
@@ -120,6 +120,7 @@ ObjectId Box2DCoupling::attachBody( b2BodyId body )
 	Game::Solver candidate( s.state.core );
 	candidate.world = s.def.world;
 	candidate.flipY = s.def.flipY;
+	candidate.extendedGeometry = true;
 	candidate.add( shape );
 	if ( !candidate.prepare() )
 	{
@@ -237,6 +238,7 @@ bool Box2DCoupling::prepare()
 		if ( !solver.parts[index] )
 			continue;
 		auto& contact = solver.parts[index]->contact;
+		contact.extendedGeometry = true;
 		ObjectId body =
 			s.state.id( ObjectKind::Body, int( index ), s.state.core.bodies[index].generation );
 		const auto& filter = s.filters[index];
@@ -260,7 +262,7 @@ bool Box2DCoupling::prepare()
 					continue;
 				if ( count == Game::MaxBoxes )
 				{
-					s.error = "soft coupling supports four contact boxes per body";
+					s.error = "soft coupling supports four contact shapes per body";
 					return false;
 				}
 				targets[count++] = item.shape;

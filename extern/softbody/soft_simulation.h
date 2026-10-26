@@ -8,7 +8,7 @@
 namespace SoftBody
 {
 using Point = std::array<float, 2>;
-using Weights = std::array<float, 16>;
+using Weights = std::vector<float>;
 enum class ObjectKind
 {
 	None,
@@ -26,6 +26,8 @@ struct ObjectId
 struct SimulationDef
 {
 	int maxBodies = 32, maxJoints = 64, maxTouches = 1;
+	// Runtime budgets, not per-shape storage limits. Removed bodies release nodes.
+	int maxNodes = 512, maxSoftContactRows = 512;
 	float timeStep = 1.f / 480;
 	int iterations = 8;
 	Point gravity{ { 0, -20 } };
@@ -36,10 +38,22 @@ enum class BodySupport
 	Free,
 	World
 };
+struct SoftShapeDef
+{
+	// Local metres, y up. Empty nodes retain the existing ellipse preset.
+	// At least 3 nodes, one simple contour using every node exactly once.
+	// Creation must fit the simulation's remaining maxNodes budget.
+	// Empty boundary means input order. Indices are zero based in the native API.
+	// Construction copies the definition; changing it never edits a live body.
+	std::vector<Point> nodes;
+	std::vector<int> boundary;
+};
 struct SoftBodyDef
 {
-	// First supported shape is a 16-node ellipse. This is a shape capability,
-	// not a vehicle role. Additional shapes must have their own validation.
+	SoftShapeDef shape;
+	// Total kg, distributed equally across the active nodes. This is not an
+	// areal-density material; changing sampling changes the mass distribution.
+	// halfWidth/halfHeight apply only to the omitted-shape ellipse preset.
 	float mass = 1, halfWidth = .35f, halfHeight = .35f;
 	Point position{};
 	float frequency = 6, damping = 40, materialScale = 1, friction = 0;
@@ -50,19 +64,23 @@ struct SoftBodyDef
 struct SoftJointDef
 {
 	ObjectId bodyA, bodyB;
-	Weights weightsA{}, weightsB{};
+	// Exactly one weight per input node. Defaults suit the omitted-shape ellipse.
+	Weights weightsA = Weights( 16 ), weightsB = Weights( 16 );
 	float frequency = 12, dampingRatio = 1, motorGain = 8;
 };
 struct SoftTouchDef
 {
 	ObjectId body;
-	Weights weights{};
+	Weights weights = Weights( 16 );
 	Point target{};
 	float frequency = 3, dampingRatio = 1, maxForce = 50;
 };
 struct SoftBodyState
 {
-	std::array<Point, 16> vertices{}, velocities{};
+	std::vector<Point> vertices, velocities;
+	int nodeCount = 0;
+	// Normalized CCW contour indexing vertices in the original input order.
+	std::vector<int> boundary;
 	BodySupport support = BodySupport::Free;
 	Point referencePosition{}; // Creation origin; a fixed target only for World.
 };
@@ -91,6 +109,8 @@ public:
 	bool ready() const;
 	const char* lastError() const;
 	bool isValid( ObjectId id ) const;
+	int availableNodes() const;
+	int getBodyNodeCount( ObjectId body ) const; // Zero for an invalid handle.
 	ObjectId createBody( const SoftBodyDef& def );
 	ObjectId createJoint( const SoftJointDef& def );
 	ObjectId createTouch( const SoftTouchDef& def );

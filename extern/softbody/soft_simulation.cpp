@@ -1,6 +1,7 @@
 #include "soft_simulation_internal.h"
 
 #include <atomic>
+#include <limits>
 #include <new>
 
 namespace SoftBody
@@ -16,8 +17,10 @@ bool point( Point p )
 {
 	return range( p[0], -1e4f, 1e4f ) && range( p[1], -1e4f, 1e4f );
 }
-bool weights( const Weights& value )
+bool weights( const Weights& value, int count )
 {
+	if ( value.size() != size_t( count ) )
+		return false;
 	double sum = 0;
 	for ( float v : value )
 	{
@@ -26,6 +29,88 @@ bool weights( const Weights& value )
 		sum += v;
 	}
 	return std::abs( sum - 1 ) <= 1e-6;
+}
+// Validate once at creation, before allocating a body slot. Preserve public
+// node identities even when boundary winding or traversal order changes.
+bool configureShape( Body<float>& body, const SoftShapeDef& shape, float totalMass )
+{
+	if ( shape.nodes.empty() )
+		return shape.boundary.empty();
+	int count = int( shape.nodes.size() );
+	if ( count < 3 || ( !shape.boundary.empty() && int( shape.boundary.size() ) != count ) )
+		return false;
+	std::vector<int> order( count );
+	std::vector<bool> seen( count );
+	for ( int i = 0; i < count; ++i )
+	{
+		int node = shape.boundary.empty() ? i : shape.boundary[i];
+		if ( node < 0 || node >= count || seen[node] )
+			return false;
+		seen[node] = true;
+		order[i] = node;
+		auto p = shape.nodes[node];
+		if ( !range( p[0], -100, 100 ) || !range( p[1], -100, 100 ) )
+			return false;
+	}
+	auto orientation = []( Point a, Point b, Point c ) {
+		return ( double( b[0] ) - a[0] ) * ( double( c[1] ) - a[1] ) -
+			   ( double( b[1] ) - a[1] ) * ( double( c[0] ) - a[0] );
+	};
+	auto vertex = [&]( int i ) { return shape.nodes[order[i % count]]; };
+	double area = 0;
+	for ( int i = 0; i < count; ++i )
+	{
+		auto a = vertex( i ), b = vertex( i + 1 );
+		if ( std::hypot( double( b[0] ) - a[0], double( b[1] ) - a[1] ) < .001 )
+			return false;
+		area += orientation( vertex( 0 ), a, b );
+		// Adjacent edges may be collinear, but may not fold back over each other.
+		auto c = vertex( i + 2 );
+		if ( std::abs( orientation( a, b, c ) ) < 1e-10 &&
+			 ( double( a[0] ) - b[0] ) * ( double( c[0] ) - b[0] ) +
+					 ( double( a[1] ) - b[1] ) * ( double( c[1] ) - b[1] ) >
+				 0 )
+			return false;
+		for ( int j = i + 2; j < count; ++j )
+		{
+			if ( i == 0 && j == count - 1 )
+				continue;
+			auto c = vertex( j ), d = vertex( j + 1 );
+			if ( std::max( a[0], b[0] ) < std::min( c[0], d[0] ) ||
+				 std::max( c[0], d[0] ) < std::min( a[0], b[0] ) ||
+				 std::max( a[1], b[1] ) < std::min( c[1], d[1] ) ||
+				 std::max( c[1], d[1] ) < std::min( a[1], b[1] ) )
+				continue;
+			double abC = orientation( a, b, c ), abD = orientation( a, b, d );
+			double cdA = orientation( c, d, a ), cdB = orientation( c, d, b );
+			if ( abC * abD <= 0 && cdA * cdB <= 0 )
+				return false; // Includes nonadjacent touching and overlapping edges.
+		}
+	}
+	if ( std::abs( area ) < 2e-6 )
+		return false;
+	if ( area < 0 )
+		std::reverse( order.begin() + 1, order.begin() + count );
+	body.resizeNodes( count );
+	body.sourceNodes = order;
+	for ( int i = 0; i < count; ++i )
+	{
+		body.x[i] = body.rest[i] = vertex( i );
+		body.mass[i] = totalMass / float( count );
+		auto a = vertex( i ), b = vertex( i + 1 );
+		body.lengths[i] = std::hypot( b[0] - a[0], b[1] - a[1] );
+		body.concaveReference =
+			body.concaveReference || orientation( a, b, vertex( i + 2 ) ) < -1e-10;
+	}
+	body.restArea = body.area();
+	return true;
+}
+Weights orderWeights( const Weights& input, const Body<float>& body )
+{
+	Weights result( body.nodeCount );
+	for ( int i = 0; i < body.nodeCount; ++i )
+		result[i] = input[body.sourceNodes[i]];
+	return result;
 }
 } // namespace
 std::uint64_t AllocateSimulationOwner()
@@ -38,8 +123,9 @@ Simulation::Impl::Impl( const SimulationDef& def )
 	, owner( AllocateSimulationOwner() )
 {
 	if ( def.maxBodies < 1 || def.maxBodies > 32 || def.maxJoints < 0 || def.maxJoints > 64 ||
-		 def.maxTouches < 0 || def.maxTouches > 64 || def.timeStep != 1.f / 480 ||
-		 def.iterations != 8 || !point( def.gravity ) )
+		 def.maxTouches < 0 || def.maxTouches > 64 || def.maxNodes < 3 ||
+		 def.maxNodes > std::numeric_limits<int>::max() / 4 - 4 || def.maxSoftContactRows < 1 ||
+		 def.timeStep != 1.f / 480 || def.iterations != 8 || !point( def.gravity ) )
 	{
 		error = "unsupported soft simulation definition";
 		return;
@@ -48,6 +134,7 @@ Simulation::Impl::Impl( const SimulationDef& def )
 	core.substeps = 1;
 	core.iterations = def.iterations;
 	core.gravity = def.gravity;
+	core.maxSoftContactRows = def.maxSoftContactRows;
 	core.bodies.reserve( def.maxBodies );
 	core.pins.reserve( def.maxJoints );
 	core.touchJoints.reserve( def.maxTouches );
@@ -110,6 +197,21 @@ bool Simulation::isValid( ObjectId id ) const
 {
 	return impl_ && impl_->check( id, id.kind );
 }
+int Simulation::availableNodes() const
+{
+	if ( !ready() )
+		return 0;
+	int remaining = impl_->limits.maxNodes;
+	for ( const auto& body : impl_->core.bodies )
+		if ( body.active )
+			remaining -= body.nodeCount;
+	return remaining;
+}
+int Simulation::getBodyNodeCount( ObjectId id ) const
+{
+	return impl_ && impl_->check( id, ObjectKind::Body ) ? impl_->core.bodies[id.index].nodeCount
+														 : 0;
+}
 ObjectId Simulation::createBody( const SoftBodyDef& def )
 {
 	if ( !impl_ || !impl_->editable() )
@@ -135,22 +237,34 @@ ObjectId Simulation::createBody( const SoftBodyDef& def )
 		s.error = "soft body capacity reached";
 		return {};
 	}
+	size_t count = def.shape.nodes.empty() ? 16 : def.shape.nodes.size();
+	if ( count > size_t( availableNodes() ) )
+	{
+		s.error = "soft node capacity reached (maxNodes)";
+		return {};
+	}
 	Body<float> body( 3, def.mass, def.halfWidth, def.halfHeight, 300, def.frequency, def.damping,
 					  0, def.materialScale, .2f );
+	if ( !configureShape( body, def.shape, def.mass ) )
+	{
+		s.error = "invalid soft shape: expected one simple contour with at least 3 nodes";
+		return {};
+	}
 	body.friction = def.friction;
 	body.worldSupported = def.support == BodySupport::World;
 	body.referencePosition = def.position;
-	for ( auto& p : body.x )
+	for ( int i = 0; i < body.nodeCount; ++i )
 	{
+		auto& p = body.x[i];
 		p[0] += def.position[0];
 		p[1] += def.position[1];
 	}
 	if ( slot == int( bodies.size() ) )
-		bodies.push_back( body );
+		bodies.push_back( std::move( body ) );
 	else
 	{
 		body.generation = bodies[slot].generation + 1;
-		bodies[slot] = body;
+		bodies[slot] = std::move( body );
 		auto& exclusions = s.core.exclusions;
 		exclusions.erase( std::remove_if( exclusions.begin(), exclusions.end(),
 										  [slot]( const std::array<int, 2>& p ) {
@@ -167,9 +281,11 @@ ObjectId Simulation::createJoint( const SoftJointDef& def )
 	auto& s = *impl_;
 	auto& joints = s.core.pins;
 	if ( !s.check( def.bodyA, ObjectKind::Body ) || !s.check( def.bodyB, ObjectKind::Body ) ||
-		 def.bodyA.index == def.bodyB.index || !weights( def.weightsA ) ||
-		 !weights( def.weightsB ) || !range( def.frequency, .01f, 60 ) ||
-		 !range( def.dampingRatio, 0, 10 ) || !range( def.motorGain, 0, 1e6f ) )
+		 def.bodyA.index == def.bodyB.index ||
+		 !weights( def.weightsA, s.core.bodies[def.bodyA.index].nodeCount ) ||
+		 !weights( def.weightsB, s.core.bodies[def.bodyB.index].nodeCount ) ||
+		 !range( def.frequency, .01f, 60 ) || !range( def.dampingRatio, 0, 10 ) ||
+		 !range( def.motorGain, 0, 1e6f ) )
 	{
 		s.error = "invalid soft joint definition";
 		return {};
@@ -185,8 +301,8 @@ ObjectId Simulation::createJoint( const SoftJointDef& def )
 	World<float>::Pin pin;
 	pin.a = def.bodyA.index;
 	pin.b = def.bodyB.index;
-	pin.wa = def.weightsA;
-	pin.wb = def.weightsB;
+	pin.wa = orderWeights( def.weightsA, s.core.bodies[pin.a] );
+	pin.wb = orderWeights( def.weightsB, s.core.bodies[pin.b] );
 	pin.gain = def.motorGain;
 	pin.frequency = def.frequency;
 	pin.dampingRatio = def.dampingRatio;
@@ -205,9 +321,10 @@ ObjectId Simulation::createTouch( const SoftTouchDef& def )
 		return {};
 	auto& s = *impl_;
 	auto& touches = s.core.touchJoints;
-	if ( !s.check( def.body, ObjectKind::Body ) || !weights( def.weights ) ||
-		 !point( def.target ) || !range( def.frequency, .01f, 60 ) ||
-		 !range( def.dampingRatio, 0, 10 ) || !range( def.maxForce, 0, 1e5f ) )
+	if ( !s.check( def.body, ObjectKind::Body ) ||
+		 !weights( def.weights, s.core.bodies[def.body.index].nodeCount ) || !point( def.target ) ||
+		 !range( def.frequency, .01f, 60 ) || !range( def.dampingRatio, 0, 10 ) ||
+		 !range( def.maxForce, 0, 1e5f ) )
 	{
 		s.error = "invalid soft touch definition";
 		return {};
@@ -222,7 +339,7 @@ ObjectId Simulation::createTouch( const SoftTouchDef& def )
 	}
 	World<float>::TouchJoint touch;
 	touch.body = def.body.index;
-	touch.weights = def.weights;
+	touch.weights = orderWeights( def.weights, s.core.bodies[touch.body] );
 	touch.target = def.target;
 	touch.frequency = def.frequency;
 	touch.dampingRatio = def.dampingRatio;
@@ -295,7 +412,7 @@ bool Simulation::applyLinearImpulse( ObjectId id, Point impulse )
 		mass += value;
 	auto next = body.v;
 	double work = 0;
-	for ( int i = 0; i < 16; ++i )
+	for ( int i = 0; i < body.nodeCount; ++i )
 		for ( int axis = 0; axis < 2; ++axis )
 		{
 			double before = body.v[i][axis];
@@ -342,8 +459,15 @@ bool Simulation::getBodyState( ObjectId id, SoftBodyState& result ) const
 	if ( !impl_ || !impl_->check( id, ObjectKind::Body ) || impl_->stepping )
 		return false;
 	const auto& body = impl_->core.bodies[id.index];
-	result.vertices = body.x;
-	result.velocities = body.v;
+	result.nodeCount = body.nodeCount;
+	result.vertices.resize( body.nodeCount );
+	result.velocities.resize( body.nodeCount );
+	result.boundary = body.sourceNodes;
+	for ( int i = 0; i < body.nodeCount; ++i )
+	{
+		result.vertices[body.sourceNodes[i]] = body.x[i];
+		result.velocities[body.sourceNodes[i]] = body.v[i];
+	}
 	result.support = body.worldSupported ? BodySupport::World : BodySupport::Free;
 	result.referencePosition = body.referencePosition;
 	return true;
@@ -381,8 +505,8 @@ SimulationState Simulation::getState() const
 	result.selfCross = core.peak.selfCross;
 	for ( const auto& body : core.bodies )
 		if ( body.active )
-			for ( auto p : body.x )
-				for ( float v : p )
+			for ( int i = 0; i < body.nodeCount; ++i )
+				for ( float v : body.x[i] )
 					result.vertices.push_back( v );
 	return result;
 }

@@ -9,6 +9,106 @@ namespace SoftBody
 namespace Game
 {
 
+bool RigidGeometry::read( b2ShapeId shape, bool flipY )
+{
+	if ( b2Shape_GetType( shape ) == b2_circleShape )
+	{
+		kind = Circle;
+		circle = b2Shape_GetCircle( shape );
+		if ( flipY )
+			circle.center.y = -circle.center.y;
+		return circle.radius > 0;
+	}
+	if ( b2Shape_GetType( shape ) != b2_polygonShape )
+		return false;
+	auto source = b2Shape_GetPolygon( shape );
+	if ( source.radius != 0 || source.count < 3 || source.count > B2_MAX_POLYGON_VERTICES )
+		return false;
+	polygon = source;
+	if ( flipY )
+		for ( int i = 0; i < source.count; ++i )
+		{
+			auto v = source.vertices[source.count - 1 - i];
+			auto n = source.normals[( 2 * source.count - 2 - i ) % source.count];
+			polygon.vertices[i] = { v.x, -v.y };
+			polygon.normals[i] = { n.x, -n.y };
+		}
+	hx = hy = 0;
+	for ( int i = 0; i < source.count; ++i )
+	{
+		hx = std::max( hx, std::abs( source.vertices[i].x ) );
+		hy = std::max( hy, std::abs( source.vertices[i].y ) );
+	}
+	unsigned corners = 0;
+	for ( int i = 0; i < source.count; ++i )
+	{
+		auto v = source.vertices[i];
+		if ( std::abs( std::abs( v.x ) - hx ) > 1e-6f || std::abs( std::abs( v.y ) - hy ) > 1e-6f )
+			break;
+		corners |= 1u << ( ( v.x > 0 ? 1 : 0 ) + ( v.y > 0 ? 2 : 0 ) );
+	}
+	kind = source.count == 4 && hx > 0 && hy > 0 && corners == 15 ? Rectangle : Polygon;
+	return true;
+}
+
+bool RigidGeometry::equals( const RigidGeometry& other ) const
+{
+	if ( kind != other.kind )
+		return false;
+	if ( kind == Rectangle )
+		return hx == other.hx && hy == other.hy;
+	if ( kind == Circle )
+		return circle.center.x == other.circle.center.x &&
+			   circle.center.y == other.circle.center.y && circle.radius == other.circle.radius;
+	if ( polygon.count != other.polygon.count )
+		return false;
+	for ( int i = 0; i < polygon.count; ++i )
+		if ( polygon.vertices[i].x != other.polygon.vertices[i].x ||
+			 polygon.vertices[i].y != other.polygon.vertices[i].y ||
+			 polygon.normals[i].x != other.polygon.normals[i].x ||
+			 polygon.normals[i].y != other.polygon.normals[i].y )
+			return false;
+	return true;
+}
+
+int BoxProjection::faceCount() const
+{
+	if ( circular() )
+		return 1;
+	if ( geometry && geometry->kind == RigidGeometry::Polygon )
+		return geometry->polygon.count;
+	return 4;
+}
+b2Vec2 BoxProjection::faceNormal( int face ) const
+{
+	return geometry && geometry->kind == RigidGeometry::Polygon ? geometry->polygon.normals[face]
+																: normal( face );
+}
+b2Vec2 BoxProjection::vertex( int corner ) const
+{
+	return geometry && geometry->kind == RigidGeometry::Polygon
+			   ? geometry->polygon.vertices[corner]
+			   : b2Vec2{ corner & 1 ? hx : -hx, corner & 2 ? hy : -hy };
+}
+b2Vec2 BoxProjection::radialNormal( b2Vec2 p ) const
+{
+	auto offset = b2Sub( p, geometry->circle.center );
+	float length = b2Length( offset );
+	return length > 1e-8f ? b2MulSV( 1 / length, offset ) : b2Vec2{ 1, 0 };
+}
+bool BoxProjection::withinFace( b2Vec2 p, int face ) const
+{
+	if ( circular() )
+		return true;
+	if ( geometry && geometry->kind == RigidGeometry::Polygon )
+	{
+		auto a = vertex( face ), d = b2Sub( vertex( ( face + 1 ) % faceCount() ), a );
+		float length = b2Length( d ), along = b2Dot( b2Sub( p, a ), d ) / length;
+		return along >= -faceMargin && along <= length + faceMargin;
+	}
+	return std::abs( face < 2 ? p.y : p.x ) <= ( face < 2 ? hy : hx ) + faceMargin;
+}
+
 b2Vec2 BoxProjection::normal( int face )
 {
 	const b2Vec2 normals[4] = { { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 } };
@@ -17,6 +117,10 @@ b2Vec2 BoxProjection::normal( int face )
 
 float BoxProjection::separation( b2Vec2 p, int face ) const
 {
+	if ( circular() )
+		return b2Length( b2Sub( p, geometry->circle.center ) ) - geometry->circle.radius;
+	if ( geometry && geometry->kind == RigidGeometry::Polygon )
+		return b2Dot( b2Sub( p, vertex( face ) ), faceNormal( face ) );
 	return b2Dot( p, normal( face ) ) - ( face < 2 ? hx : hy );
 }
 
@@ -27,22 +131,17 @@ b2Vec2 BoxProjection::local( int node ) const
 
 int BoxProjection::retainedFace( int node ) const
 {
-	if ( !nodeFaces || ( *nodeFaces )[node] < 0 )
+	if ( circular() || !nodeFaces || ( *nodeFaces )[node] < 0 )
 		return -1;
 	int face = ( *nodeFaces )[node];
-	auto p = local( node );
-	float tangent = face < 2 ? p.y : p.x;
-	float extent = face < 2 ? hy : hx;
-	// Keep the approached side across a contact skin at adjacent box seams.
-	// Once the point has gone around the finite end, release this half-plane.
-	return std::abs( tangent ) <= extent + faceMargin ? face : -1;
+	return face < faceCount() && withinFace( local( node ), face ) ? face : -1;
 }
 
 bool BoxProjection::clip( b2Vec2 a, b2Vec2 b, int& entry, int& exit ) const
 {
 	float enter = 0, leave = 1;
 	entry = exit = -1;
-	for ( int face = 0; face < 4; ++face )
+	for ( int face = 0; face < faceCount(); ++face )
 	{
 		float start = separation( a, face ), finish = separation( b, face );
 		if ( start >= 0 && finish >= 0 )
@@ -66,7 +165,7 @@ void BoxProjection::move( int edge, float fraction, b2Vec2 direction, float dept
 	if ( !( depth > 0 ) )
 		return;
 	++corrections;
-	int next = ( edge + 1 ) % 16;
+	int next = ( edge + 1 ) % body.nodeCount;
 	float inverse = ( 1 - fraction ) * ( 1 - fraction ) / body.mass[edge] +
 					fraction * fraction / body.mass[next];
 	float factor = 1;
@@ -102,12 +201,17 @@ void BoxProjection::move( int edge, float fraction, b2Vec2 direction, float dept
 
 void BoxProjection::project()
 {
-	for ( int node = 0; node < 16; ++node )
+	if ( circular() )
+	{
+		projectCircle();
+		return;
+	}
+	for ( int node = 0; node < body.nodeCount; ++node )
 	{
 		auto p = local( node );
 		float closest = -1e30f;
 		int face = 0;
-		for ( int i = 0; i < 4; ++i )
+		for ( int i = 0; i < faceCount(); ++i )
 		{
 			float distance = separation( p, i );
 			if ( distance > closest )
@@ -123,16 +227,15 @@ void BoxProjection::project()
 			closest = separation( p, face );
 		}
 		if ( closest < 0 )
-			move( node, 0, b2RotateVector( transform.q, normal( face ) ), -closest );
+			move( node, 0, b2RotateVector( transform.q, faceNormal( face ) ), -closest );
 		if ( invalidated )
 			return;
 	}
 	if ( pointsOnly )
 		return;
-	for ( int corner = 0; corner < 4; ++corner )
+	for ( int corner = 0; corner < faceCount(); ++corner )
 	{
-		auto vertex =
-			b2TransformWorldPoint( transform, { corner & 1 ? hx : -hx, corner & 2 ? hy : -hy } );
+		auto vertex = b2TransformWorldPoint( transform, this->vertex( corner ) );
 		Core::Vec p = { float( vertex.x ), float( vertex.y ) };
 		if ( !SoftBody::inside<float>( p, body ) )
 			continue;
@@ -149,10 +252,10 @@ void BoxProjection::project()
 	}
 	int face = 0;
 	float best = -1e30f;
-	for ( int i = 0; i < 4; ++i )
+	for ( int i = 0; i < faceCount(); ++i )
 	{
 		float minimum = 1e30f;
-		for ( int node = 0; node < 16; ++node )
+		for ( int node = 0; node < body.nodeCount; ++node )
 			minimum = std::min( minimum, separation( local( node ), i ) );
 		if ( minimum > best )
 		{
@@ -160,19 +263,34 @@ void BoxProjection::project()
 			face = i;
 		}
 	}
-	b2Vec2 positions[16];
-	for ( int i = 0; i < 16; ++i )
-		positions[i] = local( i );
-	for ( int edge = 0; edge < 16; ++edge )
+	auto& positions = body.positionScratch;
+	for ( int i = 0; i < body.nodeCount; ++i )
+		positions[i] = { local( i ).x, local( i ).y };
+	for ( int edge = 0; edge < body.nodeCount; ++edge )
 	{
 		int entry, exit;
-		if ( !clip( positions[edge], positions[( edge + 1 ) % 16], entry, exit ) )
+		if ( !clip( { positions[edge][0], positions[edge][1] },
+					{ positions[( edge + 1 ) % body.nodeCount][0],
+					  positions[( edge + 1 ) % body.nodeCount][1] },
+					entry, exit ) )
 			continue;
-		auto a = local( edge ), b = local( ( edge + 1 ) % 16 );
-		if ( clip( a, b, entry, exit ) && entry >= 0 && exit >= 0 && entry / 2 != exit / 2 )
+		auto a = local( edge ), b = local( ( edge + 1 ) % body.nodeCount );
+		bool crossed = clip( a, b, entry, exit );
+		bool rectangle = !geometry || geometry->kind == RigidGeometry::Rectangle;
+		int common = -1;
+		if ( entry >= 0 && exit >= 0 && !rectangle )
+		{
+			if ( ( entry + 1 ) % faceCount() == exit )
+				common = exit;
+			if ( ( exit + 1 ) % faceCount() == entry )
+				common = entry;
+		}
+		if ( crossed && entry >= 0 && exit >= 0 &&
+			 ( rectangle ? entry / 2 != exit / 2 : common >= 0 ) )
 		{
 			int x = entry < 2 ? entry : exit, y = entry >= 2 ? entry : exit;
-			b2Vec2 vertex = { normal( x ).x * hx, normal( y ).y * hy };
+			b2Vec2 vertex = rectangle ? b2Vec2{ normal( x ).x * hx, normal( y ).y * hy }
+									  : this->vertex( common );
 			auto world = b2TransformWorldPoint( transform, vertex );
 			if ( SoftBody::inside<float>( { float( world.x ), float( world.y ) }, body ) )
 			{
@@ -195,38 +313,109 @@ void BoxProjection::project()
 				continue;
 			}
 		}
-		for ( int node : { edge, ( edge + 1 ) % 16 } )
+		for ( int node : { edge, ( edge + 1 ) % body.nodeCount } )
 		{
 			float distance = separation( local( node ), face );
 			if ( distance < 0 )
-				move( node, 0, b2RotateVector( transform.q, normal( face ) ), -distance );
+				move( node, 0, b2RotateVector( transform.q, faceNormal( face ) ), -distance );
 			if ( invalidated )
 				return;
 		}
 	}
 }
 
+void BoxProjection::projectCircle()
+{
+	for ( int node = 0; node < body.nodeCount; ++node )
+	{
+		auto p = local( node );
+		float depth = -separation( p, 0 );
+		if ( depth > 0 )
+			move( node, 0, b2RotateVector( transform.q, radialNormal( p ) ), depth );
+		if ( invalidated )
+			return;
+	}
+	if ( pointsOnly )
+		return;
+	auto center = b2TransformWorldPoint( transform, geometry->circle.center );
+	Core::Vec p = { float( center.x ), float( center.y ) };
+	if ( SoftBody::inside<float>( p, body ) )
+	{
+		auto hit = SoftBody::nearest<float>( p, body );
+		if ( hit.edge < 0 )
+		{
+			error = "degenerate_contact_edge";
+			return;
+		}
+		move( hit.edge, hit.t, { -hit.normal[0], -hit.normal[1] },
+			  geometry->circle.radius + hit.depth );
+		if ( invalidated )
+			return;
+	}
+	// A circle can intersect the middle of a long edge with both nodes outside.
+	for ( int edge = 0; edge < body.nodeCount; ++edge )
+	{
+		auto a = local( edge ), d = b2Sub( local( ( edge + 1 ) % body.nodeCount ), a );
+		float length2 = b2LengthSquared( d );
+		if ( length2 < 1e-12f )
+			continue;
+		float t = std::max(
+			0.f, std::min( 1.f, b2Dot( b2Sub( geometry->circle.center, a ), d ) / length2 ) );
+		if ( t <= 0 || t >= 1 )
+			continue;
+		auto point = b2MulAdd( a, t, d );
+		float depth = -separation( point, 0 );
+		if ( depth > 0 )
+		{
+			auto n = radialNormal( point );
+			if ( b2LengthSquared( b2Sub( point, geometry->circle.center ) ) < 1e-16f )
+				n = b2MulSV( 1 / std::sqrt( length2 ), b2Vec2{ -d.y, d.x } );
+			move( edge, t, b2RotateVector( transform.q, n ), depth );
+		}
+		if ( invalidated )
+			return;
+	}
+}
+
 double BoxProjection::boundaryDepth() const
 {
-	double result = 0;
-	for ( int edge = 0; edge < 16; ++edge )
+	if ( circular() )
 	{
-		auto a = local( edge ), b = local( ( edge + 1 ) % 16 );
-		float start[4], slope[4];
-		for ( int face = 0; face < 4; ++face )
+		double depth = 0;
+		for ( int i = 0; i < body.nodeCount; ++i )
+		{
+			auto a = local( i ), d = b2Sub( local( ( i + 1 ) % body.nodeCount ), a );
+			float length2 = b2LengthSquared( d );
+			float t =
+				length2 > 1e-12f
+					? std::max( 0.f,
+								std::min( 1.f, b2Dot( b2Sub( geometry->circle.center, a ), d ) /
+												   length2 ) )
+					: 0;
+			depth = std::max( depth, double( -separation( b2MulAdd( a, t, d ), 0 ) ) );
+		}
+		// This is boundary overlap only; containment is reported separately by tests.
+		return depth;
+	}
+	double result = 0;
+	for ( int edge = 0; edge < body.nodeCount; ++edge )
+	{
+		auto a = local( edge ), b = local( ( edge + 1 ) % body.nodeCount );
+		float start[B2_MAX_POLYGON_VERTICES], slope[B2_MAX_POLYGON_VERTICES];
+		for ( int face = 0; face < faceCount(); ++face )
 		{
 			start[face] = -separation( a, face );
 			slope[face] = -separation( b, face ) - start[face];
 		}
 		auto depth = [&]( float t ) {
 			float value = 1e30f;
-			for ( int face = 0; face < 4; ++face )
+			for ( int face = 0; face < faceCount(); ++face )
 				value = std::min( value, start[face] + t * slope[face] );
 			return double( value );
 		};
 		result = std::max( result, std::max( depth( 0 ), depth( 1 ) ) );
-		for ( int i = 0; i < 4; ++i )
-			for ( int j = i + 1; j < 4; ++j )
+		for ( int i = 0; i < faceCount(); ++i )
+			for ( int j = i + 1; j < faceCount(); ++j )
 			{
 				float denominator = slope[i] - slope[j];
 				if ( std::abs( denominator ) < 1e-12f )

@@ -11,7 +11,6 @@ class PairContacts
 public:
 	using Core = World<float>;
 	using Vec = Body<float>::Vec;
-	static constexpr int MaxRows = 512;
 	static constexpr int MaxBodies = 32;
 	explicit PairContacts( Core& core );
 	void beginStep();
@@ -50,7 +49,8 @@ private:
 	};
 	Core& core;
 	std::vector<Row> rows, previous;
-	std::vector<std::array<float, 16>> remaining;
+	std::vector<std::vector<float>> remaining;
+	std::vector<float> cuts;
 	std::vector<PairState> states;
 	bool recoveryUsed = false;
 	bool collect();

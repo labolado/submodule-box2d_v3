@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <vector>
 
 namespace SoftBody
 {
@@ -12,8 +13,15 @@ using V = std::array<double, 2>;
 template <class T> struct Body
 {
 	using Vec = std::array<T, 2>;
-	std::array<Vec, 16> x{}, v{}, rest{};
-	std::array<T, 16> mass{}, lengths{};
+	std::vector<Vec> x, v, rest;
+	std::vector<T> mass, lengths;
+	int nodeCount = 16;
+	// Solver nodes follow the normalized boundary; public node identities do not.
+	std::vector<int> sourceNodes;
+	// Sized with the body. Reused by material, diagnostics and box projection.
+	mutable std::vector<Vec> forceScratch, positionScratch;
+	mutable std::vector<double> weightScratch;
+	bool concaveReference = false;
 	mutable const char* failure = nullptr;
 	int kind; // 0: local frames, 1: global frame, 2: pressure tire, 3: recoverable
 	mutable double recoveryCosine = 1, recoverySine = 0;
@@ -32,12 +40,19 @@ template <class T> struct Body
 	Body( int model, T totalMass, T rx, T ry, T edgeStiffness, T hz, T dampingRate, T pressure,
 		  T scale, T overlap );
 	T area() const;
+	void resizeNodes( int count );
 	// Finite corotated quadratic energy. Unlike pressure, this material is
 	// defined for signed/zero area and overlapping nodes. Node identities and
 	// rest coordinates never change; forces, not a rest-pose teleport, unfold it.
-	T recoverableForce( std::array<Vec, 16>& forces ) const;
-	T supportedForce( std::array<Vec, 16>& forces ) const;
-	T force( std::array<Vec, 16>& f ) const;
+	T recoverableForce( Vec* forces ) const;
+	T supportedForce( Vec* forces ) const;
+	T force( Vec* forces ) const;
+	// Keep fixed-size native research fixtures source-compatible. The caller's
+	// buffer must contain at least nodeCount entries.
+	template <class Buffer> T force( Buffer& forces ) const
+	{
+		return force( forces.data() );
+	}
 	T kinetic() const;
 	// Free bodies damp only the residual outside translation/rotation modes.
 	// World-supported bodies damp relative to their stationary reference.

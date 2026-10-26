@@ -40,13 +40,44 @@ float mass( const Body<float>& body )
 Vec centre( const Body<float>& body )
 {
 	Vec p{};
-	for ( int i = 0; i < 16; ++i )
+	for ( int i = 0; i < body.nodeCount; ++i )
 		p = add( p, scale( body.x[i], body.mass[i] ) );
 	return scale( p, 1 / mass( body ) );
 }
 Vec point( const Body<float>& body, int edge, float t )
 {
-	return add( scale( body.x[edge], 1 - t ), scale( body.x[( edge + 1 ) % 16], t ) );
+	return add( scale( body.x[edge], 1 - t ), scale( body.x[( edge + 1 ) % body.nodeCount], t ) );
+}
+// A concave body's centre can lie in empty space. Certify separation using
+// the actual simple contours, not their convex projections or mass centres.
+bool clearContours( const Body<float>& a, const Body<float>& b )
+{
+	for ( int side = 0; side < 2; ++side )
+	{
+		const auto& first = side ? b : a;
+		const auto& second = side ? a : b;
+		for ( int i = 0; i < first.nodeCount; ++i )
+		{
+			auto p = first.x[i];
+			if ( inside<float>( p, second ) )
+				return false;
+			auto hit = nearest<float>( p, second );
+			if ( hit.edge < 0 || hit.depth <= Margin )
+				return false;
+			for ( int j = 0; j < second.nodeCount; ++j )
+				if ( strictCross<float>( p, first.x[( i + 1 ) % first.nodeCount], second.x[j],
+										 second.x[( j + 1 ) % second.nodeCount] ) )
+					return false;
+		}
+	}
+	return true;
+}
+bool contained( const Body<float>& a, const Body<float>& b )
+{
+	for ( int i = 0; i < a.nodeCount; ++i )
+		if ( !inside<float>( a.x[i], b ) )
+			return false;
+	return true;
 }
 } // namespace
 
@@ -56,13 +87,19 @@ PairContacts::PairContacts( Core& world )
 }
 void PairContacts::beginStep()
 {
-	rows.reserve( MaxRows );
-	previous.reserve( MaxRows );
+	rows.reserve( core.maxSoftContactRows );
+	previous.reserve( core.maxSoftContactRows );
 	remaining.reserve( MaxBodies );
 	states.resize( MaxBodies * MaxBodies );
 	remaining.resize( core.bodies.size() );
-	for ( auto& budget : remaining )
-		budget.fill( Correction );
+	size_t maxNodes = 0;
+	for ( size_t i = 0; i < core.bodies.size(); ++i )
+	{
+		size_t count = core.bodies[i].active ? core.bodies[i].nodeCount : 0;
+		remaining[i].assign( count, Correction );
+		maxNodes = std::max( maxNodes, count );
+	}
+	cuts.resize( maxNodes + 2 );
 	recoveryUsed = false;
 }
 bool PairContacts::broadPhase( const Body<float>& a, const Body<float>& b ) const
@@ -70,10 +107,13 @@ bool PairContacts::broadPhase( const Body<float>& a, const Body<float>& b ) cons
 	for ( int axis = 0; axis < 2; ++axis )
 	{
 		float al = a.x[0][axis], ah = al, bl = b.x[0][axis], bh = bl;
-		for ( int i = 1; i < 16; ++i )
+		for ( int i = 1; i < a.nodeCount; ++i )
 		{
 			al = std::min( al, a.x[i][axis] );
 			ah = std::max( ah, a.x[i][axis] );
+		}
+		for ( int i = 1; i < b.nodeCount; ++i )
+		{
 			bl = std::min( bl, b.x[i][axis] );
 			bh = std::max( bh, b.x[i][axis] );
 		}
@@ -84,7 +124,7 @@ bool PairContacts::broadPhase( const Body<float>& a, const Body<float>& b ) cons
 }
 bool PairContacts::append( Row row )
 {
-	if ( rows.size() == MaxRows )
+	if ( rows.size() == size_t( core.maxSoftContactRows ) )
 	{
 		error = "soft_pair_contact_capacity";
 		return false;
@@ -105,9 +145,9 @@ void PairContacts::sample( int a, int b, int edge, float fraction )
 	row.edgeA = edge;
 	row.tA = fraction;
 	bool interior = inside<float>( p, target );
-	for ( int e = 0; e < 16; ++e )
+	for ( int e = 0; e < target.nodeCount; ++e )
 	{
-		auto d = difference( target.x[( e + 1 ) % 16], target.x[e] );
+		auto d = difference( target.x[( e + 1 ) % target.nodeCount], target.x[e] );
 		float length2 = dot( d, d );
 		if ( length2 < 1e-12f )
 			continue;
@@ -135,17 +175,18 @@ void PairContacts::direction( int a, int b )
 {
 	const auto& first = core.bodies[a];
 	const auto& second = core.bodies[b];
-	for ( int e = 0; e < 16 && !error; ++e )
+	for ( int e = 0; e < first.nodeCount && !error; ++e )
 	{
 		sample( a, b, e, 0 );
 		// Interior portions of an edge can cross the other contour even when
 		// neither endpoint is inside. Sample intervals between intersections.
-		float cuts[18] = { 0, 1 };
+		cuts[0] = 0;
+		cuts[1] = 1;
 		int count = 2;
-		auto p = first.x[e], d = difference( first.x[( e + 1 ) % 16], p );
-		for ( int j = 0; j < 16; ++j )
+		auto p = first.x[e], d = difference( first.x[( e + 1 ) % first.nodeCount], p );
+		for ( int j = 0; j < second.nodeCount; ++j )
 		{
-			auto q = second.x[j], v = difference( second.x[( j + 1 ) % 16], q );
+			auto q = second.x[j], v = difference( second.x[( j + 1 ) % second.nodeCount], q );
 			float denominator = cross<float>( d, v );
 			if ( std::abs( denominator ) < 1e-12f )
 				continue;
@@ -156,7 +197,7 @@ void PairContacts::direction( int a, int b )
 		}
 		if ( count == 2 )
 			continue;
-		std::sort( cuts, cuts + count );
+		std::sort( cuts.begin(), cuts.begin() + count );
 		for ( int i = 1; i < count; ++i )
 		{
 			if ( cuts[i] - cuts[i - 1] < 1e-5f )
@@ -172,9 +213,12 @@ float PairContacts::separation( int a, int b, Vec normal ) const
 	const auto& first = core.bodies[a];
 	const auto& second = core.bodies[b];
 	float amin = dot( first.x[0], normal ), bmax = dot( second.x[0], normal );
-	for ( int i = 1; i < 16; ++i )
+	for ( int i = 1; i < first.nodeCount; ++i )
 	{
 		amin = std::min( amin, dot( first.x[i], normal ) );
+	}
+	for ( int i = 1; i < second.nodeCount; ++i )
+	{
 		bmax = std::max( bmax, dot( second.x[i], normal ) );
 	}
 	return amin - bmax;
@@ -232,11 +276,13 @@ bool PairContacts::collect()
 				error = "nonfinite_soft_pair";
 				break;
 			}
+			bool concave = bodyA.concaveReference || bodyB.concaveReference;
+			bool buried = concave ? contained( bodyA, bodyB ) || contained( bodyB, bodyA )
+								  : inside<float>( centre( bodyA ), bodyB ) ||
+										inside<float>( centre( bodyB ), bodyA );
 			bool deep = !first.valid() || !second.valid() ||
 						first.signedArea < .05 * core.bodies[a].restArea ||
-						second.signedArea < .05 * core.bodies[b].restArea ||
-						inside<float>( centre( bodyA ), bodyB ) ||
-						inside<float>( centre( bodyB ), bodyA );
+						second.signedArea < .05 * core.bodies[b].restArea || buried;
 			if ( deep && !state.active )
 			{
 				state.active = true;
@@ -244,7 +290,11 @@ bool PairContacts::collect()
 				++recoveryEntries;
 			}
 			if ( state.active )
-				fallback( a, b, state.normal );
+			{
+				if ( !( concave && first.valid() && second.valid() &&
+						clearContours( bodyA, bodyB ) ) )
+					fallback( a, b, state.normal );
+			}
 			else
 			{
 				this->direction( a, b );
@@ -260,17 +310,17 @@ float PairContacts::inverse( const Row& r ) const
 	if ( r.centres )
 		return 1 / mass( a ) + 1 / mass( b );
 	return ( 1 - r.tA ) * ( 1 - r.tA ) / a.mass[r.edgeA] +
-		   r.tA * r.tA / a.mass[( r.edgeA + 1 ) % 16] +
+		   r.tA * r.tA / a.mass[( r.edgeA + 1 ) % a.nodeCount] +
 		   ( 1 - r.tB ) * ( 1 - r.tB ) / b.mass[r.edgeB] +
-		   r.tB * r.tB / b.mass[( r.edgeB + 1 ) % 16];
+		   r.tB * r.tB / b.mass[( r.edgeB + 1 ) % b.nodeCount];
 }
 PairContacts::Vec PairContacts::velocity( int id, int edge, float t, bool whole ) const
 {
 	const auto& b = core.bodies[id];
 	if ( !whole )
-		return add( scale( b.v[edge], 1 - t ), scale( b.v[( edge + 1 ) % 16], t ) );
+		return add( scale( b.v[edge], 1 - t ), scale( b.v[( edge + 1 ) % b.nodeCount], t ) );
 	Vec v{};
-	for ( int i = 0; i < 16; ++i )
+	for ( int i = 0; i < b.nodeCount; ++i )
 		v = add( v, scale( b.v[i], b.mass[i] ) );
 	return scale( v, 1 / mass( b ) );
 }
@@ -284,9 +334,9 @@ void PairContacts::apply( const Row& r, Vec impulse, bool position )
 			int id = side ? r.b : r.a, edge = side ? r.edgeB : r.edgeA;
 			float t = side ? r.tB : r.tA;
 			const auto& body = core.bodies[id];
-			for ( int j = 0; j < ( r.centres ? 16 : 2 ); ++j )
+			for ( int j = 0; j < ( r.centres ? body.nodeCount : 2 ); ++j )
 			{
-				int node = r.centres ? j : ( edge + j ) % 16;
+				int node = r.centres ? j : ( edge + j ) % body.nodeCount;
 				float w = r.centres ? 1 / mass( body ) : ( j ? t : 1 - t ) / body.mass[node];
 				float distance = w * std::sqrt( dot( impulse, impulse ) );
 				if ( distance > 0 )
@@ -302,9 +352,9 @@ void PairContacts::apply( const Row& r, Vec impulse, bool position )
 		int id = side ? r.b : r.a, edge = side ? r.edgeB : r.edgeA;
 		float t = side ? r.tB : r.tA;
 		auto& body = core.bodies[id];
-		for ( int j = 0; j < ( r.centres ? 16 : 2 ); ++j )
+		for ( int j = 0; j < ( r.centres ? body.nodeCount : 2 ); ++j )
 		{
-			int node = r.centres ? j : ( edge + j ) % 16;
+			int node = r.centres ? j : ( edge + j ) % body.nodeCount;
 			float w = r.centres ? 1 / mass( body ) : ( j ? t : 1 - t ) / body.mass[node];
 			auto delta = scale( impulse, ( side ? -1.f : 1.f ) * factor * w );
 			if ( position )
@@ -375,7 +425,7 @@ void PairContacts::projectRecovery( const Row& row )
 		int id = side ? row.b : row.a;
 		auto delta = scale( motion[side], shares[side] / progress[side] );
 		float distance = std::sqrt( dot( delta, delta ) );
-		for ( int node = 0; node < 16; ++node )
+		for ( int node = 0; node < core.bodies[id].nodeCount; ++node )
 		{
 			core.bodies[id].x[node] = add( core.bodies[id].x[node], delta );
 			remaining[id][node] = std::max( 0.f, remaining[id][node] - distance );
@@ -453,9 +503,11 @@ void PairContacts::finish()
 				continue;
 			// A separating plane certifies disjoint filled regions, including
 			// nearly coincident contours that defeat nearest-boundary depth.
-			bool separated = separation( a, b, state.normal ) >= 0 &&
-							 Game::inspectTopology( core.bodies[a] ).valid() &&
-							 Game::inspectTopology( core.bodies[b] ).valid();
+			bool valid = Game::inspectTopology( core.bodies[a] ).valid() &&
+						 Game::inspectTopology( core.bodies[b] ).valid();
+			bool concave = core.bodies[a].concaveReference || core.bodies[b].concaveReference;
+			bool separated = valid && ( concave ? clearContours( core.bodies[a], core.bodies[b] )
+												: separation( a, b, state.normal ) >= 0 );
 			state.separatedSteps = separated ? state.separatedSteps + 1 : 0;
 			if ( state.separatedSteps >= 8 )
 			{

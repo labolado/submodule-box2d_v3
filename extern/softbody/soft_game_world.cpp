@@ -89,45 +89,71 @@ bool Solver::prepareTargets()
 			error = "game_support_contact_unsupported";
 			return false;
 		}
-		if ( b2Shape_GetType( box.shape ) != b2_polygonShape )
+		RigidGeometry geometry;
+		if ( extendedGeometry )
 		{
-			error = "game_requires_box";
-			return false;
-		}
-		if ( b2Body_GetShapeCount( box.body ) != 1 || b2Shape_GetRestitution( box.shape ) != 0 )
-		{
-			error = "game_requires_single_zero_bounce_box";
-			return false;
-		}
-		auto polygon = b2Shape_GetPolygon( box.shape );
-		if ( polygon.count != 4 || polygon.radius != 0 )
-		{
-			error = "game_requires_sharp_box";
-			return false;
-		}
-		float hx = 0, hy = 0;
-		for ( int j = 0; j < 4; ++j )
-		{
-			hx = std::max( hx, std::abs( polygon.vertices[j].x ) );
-			hy = std::max( hy, std::abs( polygon.vertices[j].y ) );
-		}
-		unsigned corners = 0;
-		for ( int j = 0; j < 4; ++j )
-		{
-			auto p = polygon.vertices[j];
-			if ( std::abs( std::abs( p.x ) - hx ) > 1e-6f ||
-				 std::abs( std::abs( p.y ) - hy ) > 1e-6f )
+			if ( b2Body_GetShapeCount( box.body ) != 1 || b2Shape_GetRestitution( box.shape ) != 0 )
 			{
-				error = "game_requires_centered_box";
+				error = "game_requires_single_zero_bounce_shape";
 				return false;
 			}
-			corners |= 1u << ( ( p.x > 0 ? 1 : 0 ) + ( p.y > 0 ? 2 : 0 ) );
+			if ( !geometry.read( box.shape, flipY ) )
+			{
+				error = "game_requires_circle_or_sharp_convex_polygon";
+				return false;
+			}
 		}
-		if ( !( hx > 0 && hy > 0 ) || corners != 15 )
+		else
 		{
-			error = "invalid_box";
-			return false;
+			if ( b2Shape_GetType( box.shape ) != b2_polygonShape )
+			{
+				error = "game_requires_box";
+				return false;
+			}
+			if ( b2Body_GetShapeCount( box.body ) != 1 || b2Shape_GetRestitution( box.shape ) != 0 )
+			{
+				error = "game_requires_single_zero_bounce_box";
+				return false;
+			}
+			auto polygon = b2Shape_GetPolygon( box.shape );
+			if ( polygon.count != 4 || polygon.radius != 0 )
+			{
+				error = "game_requires_sharp_box";
+				return false;
+			}
+			float hx = 0, hy = 0;
+			for ( int j = 0; j < 4; ++j )
+			{
+				hx = std::max( hx, std::abs( polygon.vertices[j].x ) );
+				hy = std::max( hy, std::abs( polygon.vertices[j].y ) );
+			}
+			unsigned corners = 0;
+			for ( int j = 0; j < 4; ++j )
+			{
+				auto p = polygon.vertices[j];
+				if ( std::abs( std::abs( p.x ) - hx ) > 1e-6f ||
+					 std::abs( std::abs( p.y ) - hy ) > 1e-6f )
+				{
+					error = "game_requires_centered_box";
+					return false;
+				}
+				corners |= 1u << ( ( p.x > 0 ? 1 : 0 ) + ( p.y > 0 ? 2 : 0 ) );
+			}
+			if ( !( hx > 0 && hy > 0 ) || corners != 15 )
+			{
+				error = "invalid_box";
+				return false;
+			}
+			geometry.hx = hx;
+			geometry.hy = hy;
 		}
+		float hx = geometry.hx, hy = geometry.hy;
+		if ( !box.geometry.equals( geometry ) )
+		{
+			clearCache();
+			std::fill( box.nodeFaces.begin(), box.nodeFaces.end(), -1 );
+		}
+		box.geometry = geometry;
 		auto nextFilter = b2Shape_GetFilter( box.shape );
 		float nextFriction = b2Shape_GetFriction( box.shape );
 		bool nextEnabled =
@@ -174,7 +200,7 @@ b2Vec2 Solver::point( const Row& row ) const
 {
 	const auto& body = this->body();
 	const auto& a = body.x[row.edge];
-	const auto& b = body.x[( row.edge + 1 ) % 16];
+	const auto& b = body.x[( row.edge + 1 ) % body.nodeCount];
 	return { ( 1 - row.fraction ) * a[0] + row.fraction * b[0],
 			 ( 1 - row.fraction ) * a[1] + row.fraction * b[1] };
 }
@@ -183,12 +209,12 @@ float Solver::softInverse( const Row& row ) const
 {
 	const auto& mass = body().mass;
 	return ( 1 - row.fraction ) * ( 1 - row.fraction ) / mass[row.edge] +
-		   row.fraction * row.fraction / mass[( row.edge + 1 ) % 16];
+		   row.fraction * row.fraction / mass[( row.edge + 1 ) % body().nodeCount];
 }
 
 void Solver::append( Row row )
 {
-	if ( rowCount == MaxRows )
+	if ( size_t( rowCount ) == rows.size() )
 	{
 		error = "contact_capacity";
 		return;
@@ -216,7 +242,6 @@ void Solver::append( Row row )
 void Solver::gather()
 {
 	rowCount = 0;
-	const b2Vec2 normals[4] = { { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 } };
 	auto& body = this->body();
 	for ( int id = 0; id < boxCount; ++id )
 	{
@@ -225,14 +250,17 @@ void Solver::gather()
 			continue;
 		b2WorldTransform transform = { box.state.origin, box.state.rotation };
 		int start = rowCount;
-		for ( int node = 0; node < 16; ++node )
+		BoxProjection geometry( body, box.state, box.geometry );
+		geometry.nodeFaces = &box.nodeFaces;
+		geometry.faceMargin = Margin;
+		for ( int node = 0; node < body.nodeCount; ++node )
 		{
 			auto p = b2InvTransformWorldPoint( transform, { body.x[node][0], body.x[node][1] } );
 			float distance = -1e30f;
 			int face = 0;
-			for ( int j = 0; j < 4; ++j )
+			for ( int j = 0; j < geometry.faceCount(); ++j )
 			{
-				float d = b2Dot( p, normals[j] ) - ( j < 2 ? box.hx : box.hy );
+				float d = geometry.separation( p, j );
 				if ( d > distance )
 				{
 					distance = d;
@@ -248,9 +276,6 @@ void Solver::gather()
 			}
 			if ( retainBoundarySides )
 			{
-				BoxProjection geometry( body, box.state, box.hx, box.hy );
-				geometry.nodeFaces = &box.nodeFaces;
-				geometry.faceMargin = Margin;
 				int retained = geometry.retainedFace( node );
 				if ( retained >= 0 )
 				{
@@ -264,18 +289,68 @@ void Solver::gather()
 			row.box = id;
 			row.edge = node;
 			row.feature = face;
-			row.normal = b2RotateVector( transform.q, normals[face] );
-			row.localAnchor = b2MulAdd( p, -distance, normals[face] );
+			auto normal =
+				geometry.circular() ? geometry.radialNormal( p ) : geometry.faceNormal( face );
+			row.normal = b2RotateVector( transform.q, normal );
+			row.localAnchor = b2MulAdd( p, -distance, normal );
 			append( row );
 		}
-		for ( int corner = 0; corner < 4; ++corner )
+		if ( geometry.circular() )
+		{
+			// Interior edge contacts complement node contacts without duplicate endpoints.
+			if ( !recovery.active )
+			{
+				auto center = b2TransformWorldPoint( transform, box.geometry.circle.center );
+				bool contained =
+					SoftBody::inside<float>( { float( center.x ), float( center.y ) }, body );
+				auto nearest =
+					contained
+						? SoftBody::nearest<float>( { float( center.x ), float( center.y ) }, body )
+						: Hit<float>{};
+				for ( int edge = 0; edge < body.nodeCount; ++edge )
+				{
+					auto a = geometry.local( edge ),
+						 d = b2Sub( geometry.local( ( edge + 1 ) % body.nodeCount ), a );
+					float length2 = b2LengthSquared( d );
+					if ( length2 < 1e-12f )
+						continue;
+					float t = std::max(
+						0.f, std::min( 1.f, b2Dot( b2Sub( box.geometry.circle.center, a ), d ) /
+												length2 ) );
+					if ( t <= 0 || t >= 1 )
+						continue;
+					auto p = b2MulAdd( a, t, d );
+					float distance = geometry.separation( p, 0 );
+					bool interior = contained && edge == nearest.edge;
+					if ( !interior && distance > Margin )
+						continue;
+					auto n = geometry.radialNormal( p );
+					if ( interior ||
+						 b2LengthSquared( b2Sub( p, box.geometry.circle.center ) ) < 1e-16f )
+						n = b2MulSV( 1 / std::sqrt( length2 ), b2Vec2{ -d.y, d.x } );
+					Row row;
+					row.box = id;
+					row.edge = edge;
+					row.feature = 1;
+					row.fraction = t;
+					row.normal = b2RotateVector( transform.q, n );
+					row.localAnchor =
+						b2MulAdd( box.geometry.circle.center, box.geometry.circle.radius, n );
+					append( row );
+				}
+			}
+			if ( rowCount != start )
+				++contactSteps[id];
+			continue;
+		}
+		for ( int corner = 0; corner < geometry.faceCount(); ++corner )
 		{
 			// A folded contour is not an oriented solid. Its material
 			// nodes still collide with real box faces; never ask inside
 			// or nearest-edge queries to invent an interior in this mode.
 			if ( recovery.active )
 				break;
-			b2Vec2 local = { corner & 1 ? box.hx : -box.hx, corner & 2 ? box.hy : -box.hy };
+			b2Vec2 local = geometry.vertex( corner );
 			auto vertex = b2TransformWorldPoint( transform, local );
 			Core::Vec p = { float( vertex.x ), float( vertex.y ) };
 			bool inside = SoftBody::inside<float>( p, body );
@@ -290,7 +365,7 @@ void Solver::gather()
 			Row row;
 			row.box = id;
 			row.edge = hit.edge;
-			row.feature = 4 + corner;
+			row.feature = geometry.faceCount() + corner;
 			row.fraction = hit.t;
 			row.localAnchor = local;
 			row.normal = { -hit.normal[0], -hit.normal[1] };
@@ -298,7 +373,7 @@ void Solver::gather()
 				// The point may be just outside after split projection.
 				// Use the oriented material edge, not the sign of its
 				// nearly-zero distance to the box corner.
-				auto a = body.x[hit.edge], b = body.x[( hit.edge + 1 ) % 16];
+				auto a = body.x[hit.edge], b = body.x[( hit.edge + 1 ) % body.nodeCount];
 				float length = std::hypot( b[0] - a[0], b[1] - a[1] );
 				row.normal = { -( b[1] - a[1] ) / length, ( b[0] - a[0] ) / length };
 			}
@@ -323,7 +398,7 @@ bool Solver::projectGeometry()
 			auto& box = boxes[id];
 			if ( !box.enabled )
 				continue;
-			BoxProjection geometry( body(), box.state, box.hx, box.hy );
+			BoxProjection geometry( body(), box.state, box.geometry );
 			if ( retainBoundarySides )
 			{
 				geometry.nodeFaces = &box.nodeFaces;
@@ -362,27 +437,32 @@ void Solver::captureBoundarySides()
 		auto& box = boxes[j];
 		if ( !box.enabled )
 		{
-			box.nodeFaces.fill( -1 );
+			std::fill( box.nodeFaces.begin(), box.nodeFaces.end(), -1 );
 			continue;
 		}
-		BoxProjection geometry( body(), box.state, box.hx, box.hy );
+		BoxProjection geometry( body(), box.state, box.geometry );
 		geometry.nodeFaces = &box.nodeFaces;
 		geometry.faceMargin = Margin;
+		if ( geometry.circular() )
+		{
+			std::fill( box.nodeFaces.begin(), box.nodeFaces.end(), -1 );
+			continue;
+		}
 		auto center = soft.center( bodyIndex );
 		auto centerLocal = b2InvTransformWorldPoint( geometry.transform, { center[0], center[1] } );
 		int centerFace = 0;
-		for ( int i = 1; i < 4; ++i )
+		for ( int i = 1; i < geometry.faceCount(); ++i )
 			if ( geometry.separation( centerLocal, i ) >
 				 geometry.separation( centerLocal, centerFace ) )
 				centerFace = i;
-		for ( int node = 0; node < 16; ++node )
+		for ( int node = 0; node < body().nodeCount; ++node )
 		{
 			auto p = geometry.local( node );
 			int face = geometry.retainedFace( node );
 			if ( face >= 0 && geometry.separation( p, face ) <= Margin )
 				continue;
 			face = 0;
-			for ( int i = 1; i < 4; ++i )
+			for ( int i = 1; i < geometry.faceCount(); ++i )
 				if ( geometry.separation( p, i ) > geometry.separation( p, face ) )
 					face = i;
 			// A newly registered body may already overlap a box. Its exterior
@@ -396,66 +476,77 @@ void Solver::captureBoundarySides()
 	}
 }
 
-float Solver::limitCorrection( int node, Core::Vec delta ) const
+float Solver::limitCorrection( int node, Core::Vec delta )
 {
 	float fraction = 1;
 	for ( int j = 0; j < boxCount; ++j )
 	{
 		const auto& box = boxes[j];
-		if ( !box.enabled || box.nodeFaces[node] < 0 )
+		if ( !box.enabled )
 			continue;
-		int face = box.nodeFaces[node];
-		b2WorldTransform transform{ box.state.origin, box.state.rotation };
-		auto p = b2InvTransformWorldPoint( transform, { body().x[node][0], body().x[node][1] } );
-		auto d = b2InvRotateVector( transform.q, { delta[0], delta[1] } );
-		float tangent = face < 2 ? p.y : p.x;
-		float extent = face < 2 ? box.hy : box.hx;
-		if ( std::abs( tangent ) > extent + Margin )
+		BoxProjection geometry( body(), box.state, box.geometry );
+		geometry.faceMargin = Margin;
+		int face = geometry.circular() ? 0 : box.nodeFaces[node];
+		if ( face < 0 )
 			continue;
-		auto normal = BoxProjection::normal( face );
+		auto p = geometry.local( node );
+		if ( !geometry.withinFace( p, face ) )
+			continue;
+		auto d = b2InvRotateVector( geometry.transform.q, { delta[0], delta[1] } );
+		auto normal =
+			geometry.circular() ? geometry.radialNormal( p ) : geometry.faceNormal( face );
 		float toward = b2Dot( d, normal );
 		if ( toward >= 0 )
 			continue;
-		float gap = b2Dot( p, normal ) - ( face < 2 ? box.hx : box.hy );
-		fraction = std::min( fraction, std::max( 0.f, gap / -toward ) );
+		fraction = std::min( fraction, std::max( 0.f, geometry.separation( p, face ) / -toward ) );
 	}
 	return fraction;
 }
 
-Core::Vec Solver::projectTranslation( Core::Vec desired ) const
+Core::Vec Solver::projectTranslation( Core::Vec desired )
 {
-	// Euclidean projection onto at most four faces per attached box. Origin
-	// is feasible: pre-existing penetration is handled by rigid projection.
-	struct Plane
-	{
-		b2Vec2 normal;
-		float gap;
-	};
-	Plane planes[4 * MaxBoxes];
+	// Project onto exterior support planes. Circle normals are local to each
+	// material point, so they are recomputed rather than retained as face IDs.
+	auto& planes = translationPlanes;
 	int count = 0;
 	for ( int j = 0; j < boxCount; ++j )
 	{
 		const auto& box = boxes[j];
 		if ( !box.enabled )
 			continue;
-		b2WorldTransform transform{ box.state.origin, box.state.rotation };
-		for ( int face = 0; face < 4; ++face )
+		BoxProjection geometry( body(), box.state, box.geometry );
+		geometry.faceMargin = Margin;
+		if ( geometry.circular() )
+		{
+			for ( int node = 0; node < body().nodeCount; ++node )
+			{
+				auto p = geometry.local( node );
+				float gap = std::max( 0.f, geometry.separation( p, 0 ) );
+				// Projection onto a convex set containing zero cannot increase
+				// the target norm; more distant planes cannot affect this result.
+				if ( gap > std::hypot( desired[0], desired[1] ) + Margin )
+					continue;
+				planes[count++] = {
+					b2RotateVector( geometry.transform.q, geometry.radialNormal( p ) ),
+					std::max( 0.f, geometry.separation( p, 0 ) ) };
+			}
+			continue;
+		}
+		for ( int face = 0; face < geometry.faceCount(); ++face )
 		{
 			float gap = 1e30f;
-			for ( int node = 0; node < 16; ++node )
+			for ( int node = 0; node < body().nodeCount; ++node )
 			{
 				if ( box.nodeFaces[node] != face )
 					continue;
-				auto p =
-					b2InvTransformWorldPoint( transform, { body().x[node][0], body().x[node][1] } );
-				if ( std::abs( face < 2 ? p.y : p.x ) > ( face < 2 ? box.hy : box.hx ) + Margin )
+				auto p = geometry.local( node );
+				if ( !geometry.withinFace( p, face ) )
 					continue;
-				gap = std::min( gap, std::max( 0.f, b2Dot( p, BoxProjection::normal( face ) ) -
-														( face < 2 ? box.hx : box.hy ) ) );
+				gap = std::min( gap, std::max( 0.f, geometry.separation( p, face ) ) );
 			}
 			if ( gap < 1e30f )
-				planes[count++] = { b2RotateVector( transform.q, BoxProjection::normal( face ) ),
-									gap };
+				planes[count++] = {
+					b2RotateVector( geometry.transform.q, geometry.faceNormal( face ) ), gap };
 		}
 	}
 	b2Vec2 target{ desired[0], desired[1] }, best{};
@@ -508,8 +599,8 @@ double Solver::anchorCoupling( const Row& row ) const
 		return 0;
 	const auto& body = this->body();
 	return pin.weights[row.edge] * double( 1 - row.fraction ) / body.mass[row.edge] +
-		   pin.weights[( row.edge + 1 ) % 16] * double( row.fraction ) /
-			   body.mass[( row.edge + 1 ) % 16];
+		   pin.weights[( row.edge + 1 ) % body.nodeCount] * double( row.fraction ) /
+			   body.mass[( row.edge + 1 ) % body.nodeCount];
 }
 
 b2Vec2 Solver::compensatingImpulse( const Row& row, b2Vec2 impulse ) const
@@ -530,7 +621,7 @@ bool Solver::preparePinResponse( void* step )
 	auto anchor = b2TransformWorldPoint( { rigid.origin, rigid.rotation }, localPinAnchor() );
 	double rx = anchor.x - rigid.center.x, ry = anchor.y - rigid.center.y;
 	double inverse = rigid.inverseMass;
-	for ( int i = 0; i < 16; ++i )
+	for ( int i = 0; i < body().nodeCount; ++i )
 		inverse += double( pin.weights[i] ) * pin.weights[i] / body().mass[i];
 	double xx = inverse + rigid.inverseInertia * ry * ry;
 	double xy = -rigid.inverseInertia * rx * ry;
@@ -567,9 +658,9 @@ float Solver::relativeSpeed( const Row& row, b2Vec2 direction ) const
 	const auto& rigid = boxes[row.box].state;
 	auto p = point( row );
 	float vx = ( 1 - row.fraction ) * body.v[row.edge][0] +
-			   row.fraction * body.v[( row.edge + 1 ) % 16][0];
+			   row.fraction * body.v[( row.edge + 1 ) % body.nodeCount][0];
 	float vy = ( 1 - row.fraction ) * body.v[row.edge][1] +
-			   row.fraction * body.v[( row.edge + 1 ) % 16][1];
+			   row.fraction * body.v[( row.edge + 1 ) % body.nodeCount][1];
 	return b2Dot( { vx - rigid.velocity.x + rigid.angularVelocity * float( p.y - rigid.center.y ),
 					vy - rigid.velocity.y - rigid.angularVelocity * float( p.x - rigid.center.x ) },
 				  direction );
@@ -583,7 +674,7 @@ void Solver::apply( const Row& row, b2Vec2 impulse )
 	double px = 0, py = 0;
 	for ( int side = 0; side < 2; ++side )
 	{
-		int node = ( row.edge + side ) % 16;
+		int node = ( row.edge + side ) % body.nodeCount;
 		float weight = side ? row.fraction : 1 - row.fraction;
 		float vx = body.v[node][0], vy = body.v[node][1];
 		body.v[node][0] += weight * impulse.x / body.mass[node];
@@ -619,7 +710,7 @@ void Solver::apply( const Row& row, b2Vec2 impulse )
 		auto anchor =
 			b2TransformWorldPoint( { support.origin, support.rotation }, localPinAnchor() );
 		b2Vec2 r = { float( anchor.x - support.center.x ), float( anchor.y - support.center.y ) };
-		for ( int i = 0; i < 16; ++i )
+		for ( int i = 0; i < body.nodeCount; ++i )
 		{
 			body.v[i][0] += pin.weights[i] * correction.x / body.mass[i];
 			body.v[i][1] += pin.weights[i] * correction.y / body.mass[i];
@@ -677,7 +768,7 @@ bool Solver::attachment( void* step, bool bias )
 	auto anchor = b2TransformWorldPoint( { rigid.origin, rigid.rotation }, localPinAnchor() );
 	b2Vec2 r = { float( anchor.x - rigid.center.x ), float( anchor.y - rigid.center.y ) };
 	double inverse = rigid.inverseMass, x = 0, y = 0, vx = 0, vy = 0;
-	for ( int i = 0; i < 16; ++i )
+	for ( int i = 0; i < body.nodeCount; ++i )
 	{
 		double weight = pin.weights[i];
 		inverse += weight * weight / body.mass[i];
@@ -698,7 +789,7 @@ bool Solver::attachment( void* step, bool bias )
 		return false;
 	b2Vec2 impulse = { float( -( kyy * cx - kxy * cy ) / determinant ),
 					   float( -( kxx * cy - kxy * cx ) / determinant ) };
-	for ( int i = 0; i < 16; ++i )
+	for ( int i = 0; i < body.nodeCount; ++i )
 	{
 		body.v[i][0] += pin.weights[i] * impulse.x / body.mass[i];
 		body.v[i][1] += pin.weights[i] * impulse.y / body.mass[i];
@@ -740,7 +831,7 @@ void Solver::stage( void* step, int phase, void* context )
 			solver.error = "attachment_state";
 		return;
 	}
-	for ( int i = 0; i < 16; ++i )
+	for ( int i = 0; i < solver.body().nodeCount; ++i )
 		for ( int axis = 0; axis < 2; ++axis )
 			solver.body().x[i][axis] += Step * solver.body().v[i][axis];
 	if ( !solver.observeRecovery() )
@@ -792,7 +883,7 @@ void Solver::stage( void* step, int phase, void* context )
 		{
 			// Only boundary segments have a defined overlap while folded;
 			// this metric is not an interior penetration certificate.
-			BoxProjection geometry( solver.body(), box.state, box.hx, box.hy );
+			BoxProjection geometry( solver.body(), box.state, box.geometry );
 			depth = geometry.boundaryDepth();
 		}
 		else
@@ -817,7 +908,7 @@ bool Solver::advance()
 		return false;
 	if ( !observeRecovery() )
 		return false;
-	recovery.remaining.fill( recovery.maxCorrection );
+	recovery.remaining.assign( body().nodeCount, recovery.maxCorrection );
 	if ( recovery.active )
 		clearCache();
 	if ( error || !prepare() )
@@ -854,7 +945,7 @@ bool Solver::advance()
 		observeRecovery( true );
 	if ( lastDepth > 1e-6 )
 		++overlapSteps;
-	for ( int i = 0; i < 16; ++i )
+	for ( int i = 0; i < body().nodeCount; ++i )
 		for ( int axis = 0; axis < 2; ++axis )
 			if ( !std::isfinite( body().x[i][axis] ) || !std::isfinite( body().v[i][axis] ) )
 				error = "nonfinite_state";
@@ -938,6 +1029,17 @@ bool Solver::validate()
 		return false;
 	}
 	const auto& body = this->body();
+	// A circle contributes node and edge rows; a polygon contributes node and vertex rows.
+	// Allocate during preflight, before entering Box2D; retain across steps.
+	size_t capacity =
+		size_t( MaxBoxes ) * ( 2 * size_t( body.nodeCount ) + B2_MAX_POLYGON_VERTICES );
+	rows.resize( capacity );
+	previous.resize( capacity );
+	translationPlanes.resize( size_t( MaxBoxes ) *
+							  ( size_t( body.nodeCount ) + B2_MAX_POLYGON_VERTICES ) );
+	recovery.remaining.resize( body.nodeCount );
+	for ( auto& box : boxes )
+		box.nodeFaces.resize( body.nodeCount, -1 );
 	if ( body.forceInput[0] != 0 || body.forceInput[1] != 0 || body.torqueInput != 0 )
 	{
 		error = "unsupported_game_load";
@@ -948,7 +1050,7 @@ bool Solver::validate()
 		error = "invalid_game_friction";
 		return false;
 	}
-	for ( int i = 0; i < 16; ++i )
+	for ( int i = 0; i < body.nodeCount; ++i )
 	{
 		if ( !( body.mass[i] > 0 ) || !std::isfinite( body.mass[i] ) )
 		{
@@ -960,8 +1062,9 @@ bool Solver::validate()
 	for ( const auto& touch : soft.touchJoints )
 		if ( !sharedWorld && touch.active )
 		{
-			if ( ++touches > 1 || touch.body != 0 || !std::isfinite( touch.target[0] ) ||
-				 !std::isfinite( touch.target[1] ) ||
+			if ( ++touches > 1 || touch.body != 0 ||
+				 touch.weights.size() != size_t( body.nodeCount ) ||
+				 !std::isfinite( touch.target[0] ) || !std::isfinite( touch.target[1] ) ||
 				 !( touch.frequency >= .01f && touch.frequency <= 60 ) ||
 				 !( touch.dampingRatio >= 0 && touch.dampingRatio <= 10 ) ||
 				 !( touch.maxForce >= 0 && touch.maxForce <= 1e5f ) )
@@ -997,8 +1100,9 @@ bool Solver::validate()
 			}
 			total += weight;
 		}
-		if ( pin.softBody != 0 || std::abs( total - 1 ) > 1e-6 ||
-			 !std::isfinite( pin.localAnchor.x ) || !std::isfinite( pin.localAnchor.y ) )
+		if ( pin.softBody != 0 || pin.weights.size() != size_t( body.nodeCount ) ||
+			 std::abs( total - 1 ) > 1e-6 || !std::isfinite( pin.localAnchor.x ) ||
+			 !std::isfinite( pin.localAnchor.y ) )
 		{
 			error = "invalid_game_pin";
 			return false;

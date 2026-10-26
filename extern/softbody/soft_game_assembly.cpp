@@ -13,8 +13,10 @@ namespace Game
 #endif
 namespace
 {
-bool validWeights( const std::array<float, 16>& weights )
+bool validWeights( const std::vector<float>& weights, int count )
 {
+	if ( weights.size() != size_t( count ) )
+		return false;
 	double sum = 0;
 	for ( float weight : weights )
 	{
@@ -86,7 +88,8 @@ bool Assembly::prepare()
 			continue;
 		if ( pin.a < 0 || pin.a >= int( parts.size() ) || pin.b < 0 ||
 			 pin.b >= int( parts.size() ) || pin.a == pin.b || !parts[pin.a] || !parts[pin.b] ||
-			 !validWeights( pin.wa ) || !validWeights( pin.wb ) ||
+			 !validWeights( pin.wa, soft.bodies[pin.a].nodeCount ) ||
+			 !validWeights( pin.wb, soft.bodies[pin.b].nodeCount ) ||
 			 !( pin.frequency >= .01f && pin.frequency <= 60 ) ||
 			 !( pin.dampingRatio >= 0 && pin.dampingRatio <= 10 ) || !std::isfinite( pin.speed ) ||
 			 !( pin.maxTorque >= 0 && pin.maxTorque <= 1e6f ) ||
@@ -101,7 +104,8 @@ bool Assembly::prepare()
 		if ( touch.active )
 		{
 			if ( ++touches > 64 || touch.body < 0 || touch.body >= int( parts.size() ) ||
-				 !parts[touch.body] || !validWeights( touch.weights ) ||
+				 !parts[touch.body] ||
+				 !validWeights( touch.weights, soft.bodies[touch.body].nodeCount ) ||
 				 !std::isfinite( touch.target[0] ) || !std::isfinite( touch.target[1] ) ||
 				 !( touch.frequency >= .01f && touch.frequency <= 60 ) ||
 				 !( touch.dampingRatio >= 0 && touch.dampingRatio <= 10 ) ||
@@ -174,9 +178,9 @@ void Assembly::prepareLinks()
 		auto& b = soft.bodies[pin.b];
 		link.inverseMass = 0;
 		link.impulse = { 0, 0 };
-		for ( int i = 0; i < 16; ++i )
-			link.inverseMass +=
-				pin.wa[i] * pin.wa[i] / a.mass[i] + pin.wb[i] * pin.wb[i] / b.mass[i];
+		for ( int i = 0; i < std::max( a.nodeCount, b.nodeCount ); ++i )
+			link.inverseMass += ( i < a.nodeCount ? pin.wa[i] * pin.wa[i] / a.mass[i] : 0 ) +
+								( i < b.nodeCount ? pin.wb[i] * pin.wb[i] / b.mass[i] : 0 );
 		float omega = 2 * 3.14159265358979323846f * pin.frequency;
 		float denominator = 2 * pin.dampingRatio * omega + Step * omega * omega;
 		// Implicit spring compliance: gamma=1/(h*(d+h*k)), where k=m*w*w.
@@ -200,19 +204,24 @@ void Assembly::solveLinks()
 		auto& a = soft.bodies[pin.a];
 		auto& b = soft.bodies[pin.b];
 		b2Vec2 relative{};
-		for ( int i = 0; i < 16; ++i )
+		for ( int i = 0; i < std::max( a.nodeCount, b.nodeCount ); ++i )
 		{
-			relative.x += pin.wb[i] * b.v[i][0] - pin.wa[i] * a.v[i][0];
-			relative.y += pin.wb[i] * b.v[i][1] - pin.wa[i] * a.v[i][1];
+			relative.x += ( i < b.nodeCount ? pin.wb[i] * b.v[i][0] : 0 ) -
+						  ( i < a.nodeCount ? pin.wa[i] * a.v[i][0] : 0 );
+			relative.y += ( i < b.nodeCount ? pin.wb[i] * b.v[i][1] : 0 ) -
+						  ( i < a.nodeCount ? pin.wa[i] * a.v[i][1] : 0 );
 		}
 		auto impulse =
 			b2MulSV( -1 / ( link.inverseMass + link.gamma ),
 					 b2Add( b2Add( relative, link.bias ), b2MulSV( link.gamma, link.impulse ) ) );
 		link.impulse = b2Add( link.impulse, impulse );
-		for ( int i = 0; i < 16; ++i )
+		for ( int i = 0; i < a.nodeCount; ++i )
 		{
 			a.v[i][0] -= pin.wa[i] * impulse.x / a.mass[i];
 			a.v[i][1] -= pin.wa[i] * impulse.y / a.mass[i];
+		}
+		for ( int i = 0; i < b.nodeCount; ++i )
+		{
 			b.v[i][0] += pin.wb[i] * impulse.x / b.mass[i];
 			b.v[i][1] += pin.wb[i] * impulse.y / b.mass[i];
 		}
@@ -276,7 +285,7 @@ bool Assembly::pairGeometry( void* step )
 				}
 			}
 			contact.captureBoundarySides();
-			for ( int i = 0; i < 16; ++i )
+			for ( int i = 0; i < body.nodeCount; ++i )
 				for ( int axis = 0; axis < 2; ++axis )
 					body.x[i][axis] += Step * body.v[i][axis];
 		}
@@ -372,7 +381,7 @@ void Assembly::stage( void* step, int phase, void* context )
 				{
 					auto& contact = part->contact;
 					auto& body = part->contact.body();
-					for ( int i = 0; i < 16; ++i )
+					for ( int i = 0; i < body.nodeCount; ++i )
 						for ( int axis = 0; axis < 2; ++axis )
 							body.x[i][axis] += Step * body.v[i][axis];
 					if ( !contact.observeRecovery() )
@@ -450,7 +459,7 @@ void Assembly::stage( void* step, int phase, void* context )
 					if ( contact.boxes[i].enabled )
 					{
 						auto& box = contact.boxes[i];
-						BoxProjection geometry( part->contact.body(), box.state, box.hx, box.hy );
+						BoxProjection geometry( part->contact.body(), box.state, box.geometry );
 						contact.lastDepth = std::max( contact.lastDepth, geometry.boundaryDepth() );
 					}
 			}
@@ -466,7 +475,8 @@ bool Assembly::advance()
 		if ( part )
 		{
 			auto& contact = part->contact;
-			contact.recovery.remaining.fill( contact.recovery.maxCorrection );
+			contact.recovery.remaining.assign( contact.body().nodeCount,
+											   contact.recovery.maxCorrection );
 			if ( contact.recovery.active )
 				contact.clearCache();
 		}

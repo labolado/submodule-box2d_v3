@@ -3,6 +3,9 @@
 Current recoverable assembly consumers use [the native operation API](API.md):
 `Simulation` plus `Box2DCoupling`. Car layout and controls stay in application Lua.
 macOS and Android compile this path; other engine platforms are not yet integrated.
+Assembly coupling accepts one circle or sharp convex polygon fixture per rigid
+body, including local offsets. Compound-fixture seams remain a separate stage.
+See the API for the explicit dynamic-contact option and remaining restrictions.
 The older raw `World` interfaces described below are retained for historical
 experimental modes, not the supported boundary for new assembly consumers.
 
@@ -31,7 +34,7 @@ exists, `softbody_box2d` is also available. Both disable FP contraction and C++
 exceptions on Clang/GCC. The current macOS and Android engine projects compile the core and coupling sources.
 Other platform engine projects still need these compilation units and validation.
 
-- `soft_body.h/.cpp`: fixed 16-node local-frame and pressure materials, deformation damping.
+- `soft_body.h/.cpp`: dynamic node storage and recoverable material; historical local-frame/pressure ellipse presets, deformation damping.
 - `soft_contact.h/.cpp`: point/edge contact and sweep diagnostics (not general CCD).
 - `soft_world.h/.cpp`: body storage, mass-weighted pins, equal/opposite motors, force-limited touch springs, planes,
   static solid quadrants, contact iterations and per-substep diagnostics.
