@@ -29,6 +29,22 @@ struct RigidGeometry
 	bool equals( const RigidGeometry& other ) const;
 };
 
+// Exposed polygon-union boundary in a single rigid body's local coordinates.
+// Each segment retains its source fixture for material and cache identity.
+struct BoundaryPolygon
+{
+	b2Polygon polygon;
+	int shape;
+};
+struct BoundarySegment
+{
+	b2Vec2 a, b, normal;
+	int shape, feature;
+	bool cornerA = true, cornerB = true;
+};
+void buildCompoundBoundary( const std::vector<BoundaryPolygon>& polygons,
+							std::vector<BoundarySegment>& boundary );
+
 // Geometry-only extension of our C1 projection (historical name retained). Keep it separate from
 // the accumulated velocity constraints: moving a node must refresh subsequent
 // corner/edge queries, without adding depth / dt to physical velocity.

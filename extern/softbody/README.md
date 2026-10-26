@@ -3,8 +3,10 @@
 Current recoverable assembly consumers use [the native operation API](API.md):
 `Simulation` plus `Box2DCoupling`. Car layout and controls stay in application Lua.
 macOS and Android compile this path; other engine platforms are not yet integrated.
-Assembly coupling accepts one circle or sharp convex polygon fixture per rigid
-body, including local offsets. Compound-fixture seams remain a separate stage.
+Assembly coupling accepts one circle or multiple sharp convex polygon fixtures
+per rigid body, including local offsets. Polygon compounds share rigid reaction
+state and use their exposed union boundary; assembly allows sixteen contact
+shapes per soft body. Mixed-circle compounds remain unsupported.
 See the API for the explicit dynamic-contact option and remaining restrictions.
 The older raw `World` interfaces described below are retained for historical
 experimental modes, not the supported boundary for new assembly consumers.

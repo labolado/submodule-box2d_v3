@@ -246,7 +246,7 @@ bool Assembly::refreshDynamic( Solver& contact, void* step )
 	for ( int i = 0; i < contact.boxCount; ++i )
 	{
 		auto& box = contact.boxes[i];
-		if ( box.enabled && box.state.inverseMass > 0 &&
+		if ( box.enabled && box.stateSlot == i && box.state.inverseMass > 0 &&
 			 !contact.read( step, box.body, box.state, box.index ) )
 		{
 			error = "assembly_dynamic_state";
@@ -263,7 +263,7 @@ void Assembly::publishDynamic( Solver& contact, void* step )
 	for ( int i = 0; i < contact.boxCount; ++i )
 	{
 		const auto& box = contact.boxes[i];
-		if ( box.enabled && box.state.inverseMass > 0 )
+		if ( box.enabled && box.stateSlot == i && box.state.inverseMass > 0 )
 			contact.write( step, box.index, box.state );
 	}
 }

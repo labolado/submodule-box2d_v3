@@ -71,6 +71,93 @@ bool RigidGeometry::equals( const RigidGeometry& other ) const
 	return true;
 }
 
+void buildCompoundBoundary( const std::vector<BoundaryPolygon>& polygons,
+							std::vector<BoundarySegment>& boundary )
+{
+	boundary.clear();
+	// Split each source edge at occluder half-plane intersections. Clipping a
+	// tiny outward offset removes shared internal edges, not touching exteriors.
+	constexpr float epsilon = 1e-6f;
+	for ( const auto& source : polygons )
+		for ( int face = 0; face < source.polygon.count; ++face )
+		{
+			auto a = source.polygon.vertices[face];
+			auto b = source.polygon.vertices[( face + 1 ) % source.polygon.count];
+			auto n = source.polygon.normals[face], d = b2Sub( b, a );
+			std::vector<std::pair<float, float>> visible{ { 0, 1 } };
+			for ( const auto& other : polygons )
+			{
+				if ( other.shape == source.shape )
+					continue;
+				float lo = 0, hi = 1;
+				for ( int j = 0; j < other.polygon.count; ++j )
+				{
+					auto normal = other.polygon.normals[j];
+					float start = b2Dot( b2Sub( a, other.polygon.vertices[j] ), normal );
+					float slope = b2Dot( d, normal );
+					// Coincident exterior faces have one deterministic source fixture.
+					bool samePlane = std::abs( start ) < epsilon && b2Dot( n, normal ) > .99999f;
+					float offset = samePlane && other.shape < source.shape
+									   ? -epsilon
+									   : 4 * epsilon * b2Dot( n, normal );
+					start += offset;
+					if ( std::abs( slope ) < epsilon )
+					{
+						if ( start > 0 )
+						{
+							hi = -1;
+							break;
+						}
+					}
+					else if ( slope > 0 )
+						hi = std::min( hi, -start / slope );
+					else
+						lo = std::max( lo, -start / slope );
+				}
+				if ( hi <= lo )
+					continue;
+				std::vector<std::pair<float, float>> next;
+				for ( auto interval : visible )
+				{
+					if ( hi <= interval.first || lo >= interval.second )
+						next.push_back( interval );
+					else
+					{
+						if ( lo > interval.first )
+							next.push_back( { interval.first, lo } );
+						if ( hi < interval.second )
+							next.push_back( { hi, interval.second } );
+					}
+				}
+				visible.swap( next );
+			}
+			int piece = 0;
+			for ( auto interval : visible )
+			{
+				if ( ( interval.second - interval.first ) * b2Length( d ) < 8 * epsilon )
+					continue;
+				BoundarySegment segment;
+				segment.a = b2MulAdd( a, interval.first, d );
+				segment.b = b2MulAdd( a, interval.second, d );
+				segment.normal = n;
+				segment.shape = source.shape;
+				segment.feature = face * 64 + piece++;
+				boundary.push_back( segment );
+			}
+		}
+	// A seam endpoint in a straight exposed surface is not a physical corner.
+	for ( auto& segment : boundary )
+		for ( const auto& other : boundary )
+		{
+			if ( &segment == &other || b2Dot( segment.normal, other.normal ) < .99999f )
+				continue;
+			if ( b2LengthSquared( b2Sub( segment.a, other.b ) ) < 1e-9f )
+				segment.cornerA = false;
+			if ( b2LengthSquared( b2Sub( segment.b, other.a ) ) < 1e-9f )
+				segment.cornerB = false;
+		}
+}
+
 int BoxProjection::faceCount() const
 {
 	if ( circular() )

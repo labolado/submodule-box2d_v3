@@ -17,7 +17,8 @@ using View = Bridge::StateView;
 constexpr float Step = 1.f / 480;
 constexpr float Margin = .001f; // 0.16 content units at scale 160.
 constexpr int Sweeps = 8;
-constexpr int MaxBoxes = 4;
+constexpr int MaxBoxes = 4;			  // Historical centered-box modes.
+constexpr int MaxCompoundShapes = 16; // Assembly registration budget per soft body.
 
 struct Box
 {
@@ -27,6 +28,9 @@ struct Box
 	View state{};
 	RigidGeometry geometry;
 	int index = -1;
+	int stateSlot = 0; // First enabled fixture of the same rigid body.
+	bool compound = false;
+	std::vector<BoundarySegment> boundary; // Populated only on the state owner.
 	float hx = 0, hy = 0, friction = 0;
 	b2Filter filter = b2DefaultFilter();
 	bool enabled = false;
@@ -72,8 +76,9 @@ struct Solver
 	Recovery recovery;
 	void* activeStep = nullptr; // Valid only during this call's phase 2.
 	double pinInverseXX = 0, pinInverseXY = 0, pinInverseYY = 0;
-	std::array<Box, MaxBoxes> boxes{};
+	std::array<Box, MaxCompoundShapes> boxes{};
 	int boxCount = 0;
+	bool boundaryDirty = true;
 	float friction = .8f;
 	std::vector<Row> rows, previous;
 	struct Plane
@@ -84,7 +89,7 @@ struct Solver
 	std::vector<Plane> translationPlanes;
 	int rowCount = 0, previousCount = 0;
 	unsigned long long steps = 0, rowSolves = 0, pinSolves = 0, warmHits = 0, cacheResets = 0;
-	std::array<unsigned long long, MaxBoxes> contactSteps{};
+	std::array<unsigned long long, MaxCompoundShapes> contactSteps{};
 	unsigned long geometryCorrections = 0;
 	double maxDepth = 0, lastDepth = 0, maxGap = 0, normalTotal = 0, tangentTotal = 0;
 	unsigned long long overlapSteps = 0;
@@ -124,6 +129,19 @@ struct Solver
 	bool prepare();
 
 	bool prepareTargets();
+	void prepareCompounds();
+	View& rigidState( int shape )
+	{
+		return boxes[boxes[shape].stateSlot].state;
+	}
+	const View& rigidState( int shape ) const
+	{
+		return boxes[boxes[shape].stateSlot].state;
+	}
+	bool insideCompound( int owner, b2Vec2 p ) const;
+	bool nearestCompound( int owner, b2Vec2 p, b2Vec2& q, int& segment ) const;
+	void gatherCompound( int owner );
+	bool projectCompound( int owner );
 
 	b2Vec2 point( const Row& row ) const;
 

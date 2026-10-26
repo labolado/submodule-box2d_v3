@@ -79,19 +79,33 @@ entry. Counters report entered rigid steps and successfully completed soft steps
 - Soft-soft contacts are off by default: all active pairs must explicitly
   disable collision. `SimulationDef.enableSoftContacts = true` enables the
   experimental path below; it does not change joint collision exclusions.
-- Static/kinematic, single circle or sharp convex polygon fixture (3–8 vertices),
-  zero restitution. Local offsets/rotations are supported; circles use analytic
-  distances. Centered boxes retain their original feature order and arithmetic.
-  Up to four registered contact shapes per soft body, at most 64 registrations.
-  Pair exclusions allow different soft bodies to use different registered shapes.
-- Compound fixtures, capsules, segments/chains and rounded polygons are rejected.
-  Fixture friction, filter, sensor and enabled state are respected. Supported
-  geometry edits clear cached contacts; shape replacement/count changes require
-  detach/reattach. `boxContacts` in the Lua snapshot now counts all supported
-  rigid shape rows; its historical name is preserved.
-- `Box2DCouplingDef.enableDynamicContacts` separately opts into awake, unlocked,
-  single-shape dynamic contacts. Jointed mechanisms, general CCD, arbitrary topology,
-  world/rigid pins and direct force loading are not certified in this path.
+- Static/kinematic bodies accept a single circle or 1–16 sharp convex polygon
+  fixtures (3–8 vertices each), with zero restitution. Local offsets/rotations
+  are supported. Multi-fixture circles/mixed circle-polygon bodies, capsules,
+  segments/chains and rounded polygons remain rejected. Single circles retain
+  analytic distances; centered single boxes retain their historical arithmetic.
+- Up to sixteen registered contact shapes per soft body after attachment
+  exclusions, at most 64 body registrations. This is a preflight capacity limit,
+  not a certified mobile budget. Per-soft-body filtering determines which
+  fixtures contribute to the polygon union; sensors never hide solid faces.
+- Compound polygon exteriors are clipped in rigid-local coordinates. Interior
+  faces and collinear seam endpoints do not produce contact walls. Segments keep
+  fixture friction and stable source features; coincident exterior segments use
+  one deterministic fixture in registration order (overlapping different
+  materials do not get averaged). Bodies keep their full Box2D mass/inertia.
+- Each rigid body has one authoritative velocity view per soft contact batch;
+  its fixtures accumulate into that view and publish once. Across soft bodies,
+  the existing native step state remains authoritative. No rigid solver changes.
+- Supported fixture geometry, filters, mass/type and enabled changes invalidate
+  impulses as needed. Adding/removing/replacing polygon fixtures is discovered
+  at preflight without reattaching. Removing all fixtures leaves an empty valid
+  registration. Destroying the rigid body requires detaching its registration.
+  Unsupported changes fail before stepping and can be repaired. Mutation during
+  a native step is forbidden. Lua `boxContacts` retains its historical name.
+- `Box2DCouplingDef.enableDynamicContacts` separately opts into awake, unlocked
+  dynamic contacts, including the polygon compounds above. Jointed mechanisms,
+  general CCD, arbitrary topology, world/rigid pins and direct force loading are
+  not certified in this path.
 - Historical standalone, static, attachment and single-body game modes retain
   their internal interfaces and geometry restrictions for regression. The new
   geometry is enabled only by `Box2DCoupling` (Lua `couplingMode='assembly'`).

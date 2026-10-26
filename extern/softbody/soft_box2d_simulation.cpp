@@ -20,7 +20,7 @@ struct Box2DCoupling::Impl
 	struct Attachment
 	{
 		b2BodyId body = b2_nullBodyId;
-		b2ShapeId shape = b2_nullShapeId;
+		std::vector<b2ShapeId> shapes;
 		bool active = true;
 		std::uint64_t generation = 1;
 		std::vector<ObjectId> excluded;
@@ -110,18 +110,27 @@ ObjectId Box2DCoupling::attachBody( b2BodyId body )
 	auto& s = *impl_;
 	if ( !b2Body_IsValid( body ) ||
 		 b2StoreWorldId( b2Body_GetWorld( body ) ) != b2StoreWorldId( s.def.world ) ||
-		 b2Body_GetShapeCount( body ) != 1 )
+		 b2Body_GetShapeCount( body ) < 1 ||
+		 b2Body_GetShapeCount( body ) > Game::MaxCompoundShapes )
 	{
-		s.error = "attachment requires one circle or sharp convex polygon in this world";
+		s.error = "attachment requires 1-16 supported shapes in this world";
 		return {};
 	}
-	b2ShapeId shape;
-	b2Body_GetShapes( body, &shape, 1 );
+	b2ShapeId shapes[Game::MaxCompoundShapes];
+	int count = b2Body_GetShapes( body, shapes, Game::MaxCompoundShapes );
 	Game::Solver candidate( s.state.core );
 	candidate.world = s.def.world;
 	candidate.flipY = s.def.flipY;
 	candidate.extendedGeometry = true;
-	candidate.add( shape );
+	for ( int i = 0; i < count; ++i )
+	{
+		if ( count > 1 && b2Shape_GetType( shapes[i] ) != b2_polygonShape )
+		{
+			s.error = "compound requires sharp polygons";
+			return {};
+		}
+		candidate.add( shapes[i] );
+	}
 	if ( !candidate.prepare() )
 	{
 		s.error = candidate.error;
@@ -143,7 +152,7 @@ ObjectId Box2DCoupling::attachBody( b2BodyId body )
 	}
 	Impl::Attachment item;
 	item.body = body;
-	item.shape = shape;
+	item.shapes.assign( shapes, shapes + count );
 	if ( slot == int( s.attachments.size() ) )
 		s.attachments.push_back( item );
 	else
@@ -225,14 +234,36 @@ bool Box2DCoupling::prepare()
 	s.state.core.gravity = { gravity.x, s.def.flipY ? -gravity.y : gravity.y };
 	if ( !solver.syncParts() )
 		return false;
-	for ( const auto& item : s.attachments )
+	for ( auto& item : s.attachments )
 		if ( item.active )
-			if ( !b2Body_IsValid( item.body ) || !b2Shape_IsValid( item.shape ) ||
-				 b2Body_GetShapeCount( item.body ) != 1 )
+		{
+			if ( !b2Body_IsValid( item.body ) )
 			{
-				s.error = "coupled fixtures changed; detach and reattach the body";
+				s.error = "coupled body was destroyed; detach it";
 				return false;
 			}
+			int count = b2Body_GetShapeCount( item.body );
+			if ( count > Game::MaxCompoundShapes )
+			{
+				s.error = "soft coupling supports sixteen shapes per soft body";
+				return false;
+			}
+			b2ShapeId shapes[Game::MaxCompoundShapes];
+			b2Body_GetShapes( item.body, shapes, Game::MaxCompoundShapes );
+			for ( int i = 0; i < count; ++i )
+			{
+				Game::RigidGeometry geometry;
+				if ( b2Shape_GetRestitution( shapes[i] ) != 0 ||
+					 !geometry.read( shapes[i], s.def.flipY ) ||
+					 ( count > 1 && geometry.kind == Game::RigidGeometry::Circle ) )
+				{
+					s.error = "compound requires sharp zero-bounce polygons; single circles are "
+							  "supported";
+					return false;
+				}
+			}
+			item.shapes.assign( shapes, shapes + count );
+		}
 	for ( size_t index = 0; index < solver.parts.size(); ++index )
 	{
 		if ( !solver.parts[index] )
@@ -246,7 +277,7 @@ bool Box2DCoupling::prepare()
 		if ( same( filter.body, body ) )
 			contact.filter = { filter.value.categoryBits, filter.value.maskBits,
 							   filter.value.groupIndex };
-		b2ShapeId targets[Game::MaxBoxes];
+		b2ShapeId targets[Game::MaxCompoundShapes];
 		int count = 0;
 		for ( const auto& item : s.attachments )
 			if ( item.active )
@@ -260,12 +291,13 @@ bool Box2DCoupling::prepare()
 					}
 				if ( excluded )
 					continue;
-				if ( count == Game::MaxBoxes )
+				if ( count + int( item.shapes.size() ) > Game::MaxCompoundShapes )
 				{
-					s.error = "soft coupling supports four contact shapes per body";
+					s.error = "soft coupling supports sixteen contact shapes per soft body";
 					return false;
 				}
-				targets[count++] = item.shape;
+				for ( auto shape : item.shapes )
+					targets[count++] = shape;
 			}
 		bool changed = count != contact.boxCount;
 		for ( int i = 0; i < count && !changed; ++i )
