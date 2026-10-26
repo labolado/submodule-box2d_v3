@@ -343,8 +343,41 @@ void Solver::gatherCompound( int owner )
 		++contactSteps[row.box];
 	}
 	if ( recovery.active )
+	{
+		// Folded material has no oriented interior, but each finite segment can
+		// still cross a real solid. Constrain those crossings as well as nodes.
+		for ( int node = 0; node < body.nodeCount; ++node )
+		{
+			auto a = b2InvTransformWorldPoint( transform, { body.x[node][0], body.x[node][1] } );
+			auto next = body.x[( node + 1 ) % body.nodeCount];
+			auto b = b2InvTransformWorldPoint( transform, { next[0], next[1] } );
+			for ( int shape = 0; shape < boxCount; ++shape )
+			{
+				if ( !boxes[shape].enabled || boxes[shape].stateSlot != owner )
+					continue;
+				float lo, hi;
+				if ( !clipCompoundSegment( boxes[shape].geometry.polygon, a, b, lo, hi ) )
+					continue;
+				float fraction = ( lo + hi ) * .5f;
+				auto p = b2Lerp( a, b, fraction );
+				b2Vec2 q;
+				int segment;
+				if ( !nearestCompound( owner, p, q, segment ) )
+					continue;
+				const auto& surface = box.boundary[segment];
+				Row row;
+				row.box = surface.shape;
+				row.edge = node;
+				row.fraction = fraction;
+				row.feature = 4096 + surface.feature;
+				row.localAnchor = q;
+				row.normal = b2RotateVector( transform.q, surface.normal );
+				append( row );
+				++contactSteps[row.box];
+			}
+		}
 		return;
-
+	}
 	for ( const auto& edge : box.boundary )
 		for ( int side = 0; side < 2; ++side )
 		{
@@ -418,27 +451,24 @@ bool Solver::projectCompound( int owner )
 									 hit.depth );
 			}
 	}
-	if ( !recovery.active )
-	{
-		// Detect a long soft edge crossing an entire component even when neither
-		// material endpoint nor a rigid corner lies in the other solid.
-		for ( int node = 0; node < body().nodeCount && !projection.invalidated; ++node )
-			for ( int j = 0; j < boxCount && !projection.invalidated; ++j )
+	// Detect a long soft edge crossing an entire component even when neither
+	// material endpoint nor a rigid corner lies in the other solid.
+	for ( int node = 0; node < body().nodeCount && !projection.invalidated; ++node )
+		for ( int j = 0; j < boxCount && !projection.invalidated; ++j )
+		{
+			if ( !boxes[j].enabled || boxes[j].stateSlot != owner )
+				continue;
+			auto a = projection.local( node ),
+				 d = b2Sub( projection.local( ( node + 1 ) % body().nodeCount ), a );
+			float lo, hi;
+			bool crossed =
+				clipCompoundSegment( boxes[j].geometry.polygon, a, b2Add( a, d ), lo, hi );
+			if ( crossed )
 			{
-				if ( !boxes[j].enabled || boxes[j].stateSlot != owner )
-					continue;
-				auto a = projection.local( node ),
-					 d = b2Sub( projection.local( ( node + 1 ) % body().nodeCount ), a );
-				float lo, hi;
-				bool crossed =
-					clipCompoundSegment( boxes[j].geometry.polygon, a, b2Add( a, d ), lo, hi );
-				if ( crossed )
-				{
-					float t = ( lo + hi ) * .5f;
-					movePoint( node, t, b2MulAdd( a, t, d ) );
-				}
+				float t = ( lo + hi ) * .5f;
+				movePoint( node, t, b2MulAdd( a, t, d ) );
 			}
-	}
+		}
 
 	geometryCorrections += projection.corrections;
 	return observeRecovery();
