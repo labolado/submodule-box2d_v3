@@ -75,6 +75,15 @@ struct SoftTouchDef
 	Point target{};
 	float frequency = 3, dampingRatio = 1, maxForce = 50;
 };
+// A compliant positional pin to an immovable world point. Rotation stays free;
+// its optional motor drives the body's angular velocity relative to the world.
+struct SoftWorldJointDef
+{
+	ObjectId body;
+	Weights weights = Weights( 16 );
+	Point anchor{};
+	float frequency = 12, dampingRatio = 1, motorGain = 8;
+};
 struct SoftBodyState
 {
 	std::vector<Point> vertices, velocities;
@@ -113,6 +122,7 @@ public:
 	int getBodyNodeCount( ObjectId body ) const; // Zero for an invalid handle.
 	ObjectId createBody( const SoftBodyDef& def );
 	ObjectId createJoint( const SoftJointDef& def );
+	ObjectId createWorldJoint( const SoftWorldJointDef& def );
 	ObjectId createTouch( const SoftTouchDef& def );
 	bool remove( ObjectId id );
 	bool setMotor( ObjectId joint, float speed, float maxTorque );

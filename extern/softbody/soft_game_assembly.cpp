@@ -86,10 +86,13 @@ bool Assembly::prepare()
 		const auto& pin = soft.pins[id];
 		if ( !pin.active )
 			continue;
-		if ( pin.a < 0 || pin.a >= int( parts.size() ) || pin.b < 0 ||
-			 pin.b >= int( parts.size() ) || pin.a == pin.b || !parts[pin.a] || !parts[pin.b] ||
-			 !validWeights( pin.wa, soft.bodies[pin.a].nodeCount ) ||
-			 !validWeights( pin.wb, soft.bodies[pin.b].nodeCount ) ||
+		bool worldPin = pin.b == -1;
+		bool validTarget =
+			worldPin ? std::isfinite( pin.worldAnchor[0] ) && std::isfinite( pin.worldAnchor[1] )
+					 : pin.b >= 0 && pin.b < int( parts.size() ) && parts[pin.b] &&
+						   validWeights( pin.wb, soft.bodies[pin.b].nodeCount );
+		if ( pin.a < 0 || pin.a >= int( parts.size() ) || !validTarget || pin.a == pin.b ||
+			 !parts[pin.a] || !validWeights( pin.wa, soft.bodies[pin.a].nodeCount ) ||
 			 !( pin.frequency >= .01f && pin.frequency <= 60 ) ||
 			 !( pin.dampingRatio >= 0 && pin.dampingRatio <= 10 ) || !std::isfinite( pin.speed ) ||
 			 !( pin.maxTorque >= 0 && pin.maxTorque <= 1e6f ) ||
@@ -155,6 +158,15 @@ void Assembly::motors()
 	for ( const auto& pin : soft.pins )
 		if ( pin.active && pin.maxTorque > 0 )
 		{
+			if ( pin.b == -1 )
+			{
+				// A fixed world absorbs the reaction torque. Preserve the old API's
+				// positive=counterclockwise convention in soft metres/y-up space.
+				double torque = pin.gain * ( double( pin.speed ) - soft.omega( pin.a ) );
+				torques[pin.a] += std::max( -double( pin.maxTorque ),
+											std::min( double( pin.maxTorque ), torque ) );
+				continue;
+			}
 			double relative = soft.omega( pin.b ) - soft.omega( pin.a );
 			double torque =
 				std::max( -double( pin.maxTorque ),
@@ -184,6 +196,21 @@ void Assembly::prepareLinks()
 			continue;
 		auto& link = links[id];
 		auto& a = soft.bodies[pin.a];
+		if ( pin.b == -1 )
+		{
+			link.inverseMass = 0;
+			link.impulse = { 0, 0 };
+			for ( int i = 0; i < a.nodeCount; ++i )
+				link.inverseMass += pin.wa[i] * pin.wa[i] / a.mass[i];
+			float omega = 2 * 3.14159265358979323846f * pin.frequency;
+			float denominator = 2 * pin.dampingRatio * omega + Step * omega * omega;
+			link.gamma = link.inverseMass / ( Step * denominator );
+			float biasRate = omega * omega / denominator;
+			auto x = soft.anchor( pin.a, pin.wa );
+			link.bias = { biasRate * ( pin.worldAnchor[0] - x[0] ),
+						  biasRate * ( pin.worldAnchor[1] - x[1] ) };
+			continue;
+		}
 		auto& b = soft.bodies[pin.b];
 		link.inverseMass = 0;
 		link.impulse = { 0, 0 };
@@ -211,6 +238,25 @@ void Assembly::solveLinks()
 			continue;
 		auto& link = links[id];
 		auto& a = soft.bodies[pin.a];
+		if ( pin.b == -1 )
+		{
+			b2Vec2 relative{};
+			for ( int i = 0; i < a.nodeCount; ++i )
+			{
+				relative.x -= pin.wa[i] * a.v[i][0];
+				relative.y -= pin.wa[i] * a.v[i][1];
+			}
+			auto impulse = b2MulSV(
+				-1 / ( link.inverseMass + link.gamma ),
+				b2Add( b2Add( relative, link.bias ), b2MulSV( link.gamma, link.impulse ) ) );
+			link.impulse = b2Add( link.impulse, impulse );
+			for ( int i = 0; i < a.nodeCount; ++i )
+			{
+				a.v[i][0] -= pin.wa[i] * impulse.x / a.mass[i];
+				a.v[i][1] -= pin.wa[i] * impulse.y / a.mass[i];
+			}
+			continue;
+		}
 		auto& b = soft.bodies[pin.b];
 		b2Vec2 relative{};
 		for ( int i = 0; i < std::max( a.nodeCount, b.nodeCount ); ++i )

@@ -42,6 +42,31 @@ velocity of B with respect to A. Frequency is Hz; dampingRatio is dimensionless;
 material `damping` retains the existing deformation-velocity damping coefficient.
 Mass is total mass, distributed uniformly over nodes. There is no density API yet.
 
+## Fixed-world pins
+
+`Simulation::createWorldJoint(SoftWorldJointDef)` accepts a body, its node weights,
+an immutable world anchor, frequency/dampingRatio and motorGain. Lua assembly uses
+`world:createWorldPinJoint{body=body, weights=weights, x=x, y=y, frequency=12,
+dampingRatio=1, motorGain=8}`. Coordinates remain metres/y-up, independent of the
+display camera. The returned joint has `setMotor(speed, maxTorque)` and
+`removeSelf()` like a soft/soft pin. Speed is rad/s; positive rotates the body
+counterclockwise relative to the fixed world, whereas a soft/soft motor drives B
+relative to A. Torque is Nm.
+
+This is a compliant positional constraint, not an infinitely rigid pin or an
+orientation lock. Its reaction is external to the simulated bodies. Motor torque
+is limited once per complete step; disabling torque allows coasting, not immediate
+stopping. There are no angle limits or moving-world-target setters. Use touch for
+interactive targets; a moving rigid anchor needs the separate future coupling API.
+Collapsed bodies retain the existing finite-inertia guard; no rigid teleport is used.
+
+World and soft/soft pins share `maxJoints`, slot generations and removal rules.
+Body removal invalidates dependent pins. Weights follow public source-node IDs,
+including reordered contours. Existing soft/soft arithmetic is unchanged.
+The local roller fixture validates centre-distributed pins. Single-node gravity
+bearing remains a diagnostic failure (93.6mm transient gap versus its80mm gate);
+accepted parameter syntax is not a promise of tight anchoring for every weight set.
+
 ## Lifetime and errors
 
 `ObjectId` contains owner, kind, slot and generation. It is a process-local handle,
@@ -103,9 +128,10 @@ entry. Counters report entered rigid steps and successfully completed soft steps
   Unsupported changes fail before stepping and can be repaired. Mutation during
   a native step is forbidden. Lua `boxContacts` retains its historical name.
 - `Box2DCouplingDef.enableDynamicContacts` separately opts into awake, unlocked
-  dynamic contacts, including the polygon compounds above. Jointed mechanisms,
-  general CCD, arbitrary topology, world/rigid pins and direct force loading are
-  not certified in this path.
+  dynamic contacts, including the polygon compounds above. A bounded joint-driven
+  rigid press and centre world-pinned soft rollers have local fixtures; general
+  jointed mechanisms, CCD, arbitrary topology, soft/rigid pins and direct force
+  loading are not certified in this path.
 - Historical standalone, static, attachment and single-body game modes retain
   their internal interfaces and geometry restrictions for regression. The new
   geometry is enabled only by `Box2DCoupling` (Lua `couplingMode='assembly'`).

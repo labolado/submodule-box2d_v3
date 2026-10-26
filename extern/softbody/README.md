@@ -8,6 +8,9 @@ per rigid body, including local offsets. Polygon compounds share rigid reaction
 state and use their exposed union boundary; assembly allows sixteen contact
 shapes per soft body. Mixed-circle compounds remain unsupported.
 See the API for the explicit dynamic-contact option and remaining restrictions.
+Assembly also supports compliant fixed-world pins with bounded motors; centre
+roller fixtures are locally validated, while single-node bearing retains a
+documented large-gap failure. Soft/rigid pin migration remains separate.
 The older raw `World` interfaces described below are retained for historical
 experimental modes, not the supported boundary for new assembly consumers.
 

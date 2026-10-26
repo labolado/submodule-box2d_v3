@@ -315,6 +315,45 @@ ObjectId Simulation::createJoint( const SoftJointDef& def )
 	}
 	return s.id( ObjectKind::Joint, slot, joints[slot].generation );
 }
+ObjectId Simulation::createWorldJoint( const SoftWorldJointDef& def )
+{
+	if ( !impl_ || !impl_->editable() )
+		return {};
+	auto& s = *impl_;
+	if ( !s.check( def.body, ObjectKind::Body ) ||
+		 !weights( def.weights, s.core.bodies[def.body.index].nodeCount ) || !point( def.anchor ) ||
+		 !range( def.frequency, .01f, 60 ) || !range( def.dampingRatio, 0, 10 ) ||
+		 !range( def.motorGain, 0, 1e6f ) )
+	{
+		s.error = "invalid soft world joint definition";
+		return {};
+	}
+	auto& joints = s.core.pins;
+	int slot = 0;
+	while ( slot < int( joints.size() ) && joints[slot].active )
+		++slot;
+	if ( slot >= s.limits.maxJoints )
+	{
+		s.error = "soft joint capacity reached";
+		return {};
+	}
+	World<float>::Pin pin;
+	pin.a = def.body.index;
+	pin.b = -1;
+	pin.wa = orderWeights( def.weights, s.core.bodies[pin.a] );
+	pin.worldAnchor = def.anchor;
+	pin.frequency = def.frequency;
+	pin.dampingRatio = def.dampingRatio;
+	pin.gain = def.motorGain;
+	if ( slot == int( joints.size() ) )
+		joints.push_back( pin );
+	else
+	{
+		pin.generation = joints[slot].generation + 1;
+		joints[slot] = pin;
+	}
+	return s.id( ObjectKind::Joint, slot, joints[slot].generation );
+}
 ObjectId Simulation::createTouch( const SoftTouchDef& def )
 {
 	if ( !impl_ || !impl_->editable() )
