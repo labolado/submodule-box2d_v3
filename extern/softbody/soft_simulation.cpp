@@ -120,6 +120,7 @@ ObjectId Simulation::createBody( const SoftBodyDef& def )
 		 !range( def.halfHeight, .01f, 100 ) || !point( def.position ) ||
 		 !range( def.frequency, .001f, 1000 ) || !range( def.damping, 0, 1e5f ) ||
 		 !range( def.materialScale, .001f, 1e4f ) || !range( def.friction, 0, 10 ) ||
+		 ( def.support != BodySupport::Free && def.support != BodySupport::World ) ||
 		 2 * 3.14159265358979323846 * def.frequency * std::sqrt( def.materialScale ) * s.core.dt >
 			 1 )
 	{
@@ -137,6 +138,8 @@ ObjectId Simulation::createBody( const SoftBodyDef& def )
 	Body<float> body( 3, def.mass, def.halfWidth, def.halfHeight, 300, def.frequency, def.damping,
 					  0, def.materialScale, .2f );
 	body.friction = def.friction;
+	body.worldSupported = def.support == BodySupport::World;
+	body.referencePosition = def.position;
 	for ( auto& p : body.x )
 	{
 		p[0] += def.position[0];
@@ -341,6 +344,8 @@ bool Simulation::getBodyState( ObjectId id, SoftBodyState& result ) const
 	const auto& body = impl_->core.bodies[id.index];
 	result.vertices = body.x;
 	result.velocities = body.v;
+	result.support = body.worldSupported ? BodySupport::World : BodySupport::Free;
+	result.referencePosition = body.referencePosition;
 	return true;
 }
 bool Simulation::getTouchState( ObjectId id, SoftTouchState& result ) const

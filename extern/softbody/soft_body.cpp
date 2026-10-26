@@ -37,8 +37,29 @@ template<class T> T Body<T>::area() const
     return a/T(2);
 }
 
+template <class T> T Body<T>::supportedForce( std::array<Vec, 16>& forces ) const
+{
+	// Distributed world support uses the same material stiffness. The target
+	// never follows contact corrections or a folded/inverted configuration.
+	double omega = 2 * 3.14159265358979323846 * double( frequency );
+	double energy = 0;
+	for ( int node = 0; node < 16; ++node )
+	{
+		double stiffness = omega * omega * mass[node] * materialScale;
+		for ( int axis = 0; axis < 2; ++axis )
+		{
+			double error = double( x[node][axis] ) - referencePosition[axis] - rest[node][axis];
+			forces[node][axis] = T( -stiffness * error );
+			energy += .5 * stiffness * error * error;
+		}
+	}
+	return T( energy );
+}
+
 template<class T> T Body<T>::recoverableForce(std::array<Vec,16>& forces) const
 {
+	if ( worldSupported )
+		return supportedForce( forces );
     double totalMass=0;
     V center{}, restCenter{};
     for(int node=0;node<16;++node)
@@ -167,6 +188,15 @@ template<class T> T Body<T>::kinetic() const
 
 template<class T> void Body<T>::dampDeformation(T dt)
 {
+	if ( worldSupported )
+	{
+		// A stationary reference also absorbs rigid translation and rotation.
+		double decay = std::exp( -double( damping ) * double( dt ) );
+		for ( auto& velocity : v )
+			for ( auto& component : velocity )
+				component = T( double( component ) * decay );
+		return;
+	}
     double total=0, inertia=0, angular=0;
     V center{}, velocity{};
     for (int i=0;i<16;++i)

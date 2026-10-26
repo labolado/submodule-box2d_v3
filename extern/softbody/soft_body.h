@@ -23,6 +23,8 @@ template <class T> struct Body
 	T friction = T( 0 ); // Soft/soft Coulomb friction; boundaries have their own coefficient.
 	unsigned long long generation = 1;
 	bool active = true;
+	bool worldSupported = false;
+	Vec referencePosition{};
 	Vec forceInput{};
 	T torqueInput = 0;
 	T stiffness, frequency, damping, frameOverlap;
@@ -34,10 +36,12 @@ template <class T> struct Body
 	// defined for signed/zero area and overlapping nodes. Node identities and
 	// rest coordinates never change; forces, not a rest-pose teleport, unfold it.
 	T recoverableForce( std::array<Vec, 16>& forces ) const;
+	T supportedForce( std::array<Vec, 16>& forces ) const;
 	T force( std::array<Vec, 16>& f ) const;
 	T kinetic() const;
-	// Mass-orthogonal projection onto translation and rotation at fixed positions.
-	// Only the residual velocity decays; reductions use double for float state.
+	// Free bodies damp only the residual outside translation/rotation modes.
+	// World-supported bodies damp relative to their stationary reference.
+	// Reductions use double for float state.
 	void dampDeformation( T dt );
 	void damp( T dt );
 };

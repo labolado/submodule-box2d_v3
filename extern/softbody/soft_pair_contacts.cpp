@@ -349,6 +349,10 @@ void PairContacts::projectRecovery( const Row& row )
 	for ( int side = 0; side < 2; ++side )
 	{
 		int id = side ? row.b : row.a;
+		// World support permits local deformation, but recovery must not move
+		// its whole reference frame. The other side receives the spare budget.
+		if ( core.bodies[id].worldSupported )
+			continue;
 		float budget = *std::min_element( remaining[id].begin(), remaining[id].end() );
 		Vec direction = scale( row.normal, side ? -1.f : 1.f );
 		motion[side] = scale( direction, budget );

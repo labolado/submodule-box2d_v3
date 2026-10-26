@@ -31,6 +31,11 @@ struct SimulationDef
 	Point gravity{ { 0, -20 } };
 	bool enableSoftContacts = false;
 };
+enum class BodySupport
+{
+	Free,
+	World
+};
 struct SoftBodyDef
 {
 	// First supported shape is a 16-node ellipse. This is a shape capability,
@@ -38,6 +43,9 @@ struct SoftBodyDef
 	float mass = 1, halfWidth = .35f, halfHeight = .35f;
 	Point position{};
 	float frequency = 6, damping = 40, materialScale = 1, friction = 0;
+	// World support fixes the elastic reference, not the nodes or the centre.
+	// Its reaction is external; mass and local contact response stay finite.
+	BodySupport support = BodySupport::Free;
 };
 struct SoftJointDef
 {
@@ -55,6 +63,8 @@ struct SoftTouchDef
 struct SoftBodyState
 {
 	std::array<Point, 16> vertices{}, velocities{};
+	BodySupport support = BodySupport::Free;
+	Point referencePosition{}; // Creation origin; a fixed target only for World.
 };
 struct SoftTouchState
 {
