@@ -39,6 +39,7 @@ struct Assembly
 	b2WorldId boundWorld = b2_nullWorldId;
 	bool flipY = false, boundFlipY = false;
 	bool enableDynamicContacts = false;
+	bool earlyContacts = false; // Computed from enabled dynamic registrations at preflight.
 	bool enableSoftContacts = false;
 	const char* error = nullptr;
 	unsigned long long entered = 0, completed = 0;
@@ -62,6 +63,8 @@ struct Assembly
 	bool refreshDynamic( Solver& contact, void* step );
 	void publishDynamic( Solver& contact, void* step );
 	bool pairGeometry( void* step );
+	bool gatherContacts( void* step );
+	bool solveContacts( void* step );
 	static void stage( void* step, int phase, void* context );
 };
 } // namespace Game

@@ -115,6 +115,11 @@ bool Assembly::prepare()
 				return false;
 			}
 		}
+	// A dynamic target must receive soft impulses before Box2D's biased
+	// constraints and position integration. Late impulses let a stiff soft
+	// contact fight the rigid support without a same-step position response.
+	// Static/kinematic-only assemblies retain their established ordering.
+	earlyContacts = false;
 	for ( int id = 0; id < int( parts.size() ); ++id )
 	{
 		if ( !parts[id] )
@@ -129,6 +134,10 @@ bool Assembly::prepare()
 			error = contact.error;
 			return false;
 		}
+		for ( int i = 0; i < contact.boxCount; ++i )
+			if ( enableDynamicContacts && contact.boxes[i].enabled &&
+				 b2Body_GetType( contact.boxes[i].body ) == b2_dynamicBody )
+				earlyContacts = true;
 		for ( int i = 0; i < contact.boxCount; ++i )
 			if ( !enableDynamicContacts &&
 				 b2Body_GetType( contact.boxes[i].body ) == b2_dynamicBody )
@@ -289,7 +298,8 @@ bool Assembly::pairGeometry( void* step )
 				for ( int axis = 0; axis < 2; ++axis )
 					body.x[i][axis] += Step * body.v[i][axis];
 		}
-	pairs.beginStep();
+	if ( !earlyContacts )
+		pairs.beginStep();
 	// Fixed passes share the per-node correction budgets. End with rigid
 	// projection to retain the existing wall/press containment policy.
 	for ( int pass = 0; pass < 2; ++pass )
@@ -306,12 +316,18 @@ bool Assembly::pairGeometry( void* step )
 				return false;
 			}
 	}
-	if ( !pairs.gather() )
+	return earlyContacts || gatherContacts( step );
+}
+
+bool Assembly::gatherContacts( void* step )
+{
+	if ( enableSoftContacts && !pairs.gather() )
 	{
 		error = pairs.error;
 		return false;
 	}
-	pairs.warmStart();
+	if ( enableSoftContacts )
+		pairs.warmStart();
 	for ( auto& part : parts )
 		if ( part )
 		{
@@ -333,6 +349,34 @@ bool Assembly::pairGeometry( void* step )
 			}
 			publishDynamic( contact, step );
 		}
+	return true;
+}
+
+bool Assembly::solveContacts( void* step )
+{
+	Profile::Scope timing( profile, Profile::ContactSolve );
+	for ( int sweep = 0; sweep < Sweeps; ++sweep )
+	{
+		if ( enableSoftContacts )
+			pairs.solve();
+		for ( auto& part : parts )
+			if ( part )
+			{
+				auto& contact = part->contact;
+				if ( !refreshDynamic( contact, step ) )
+					return false;
+				for ( int i = 0; i < contact.rowCount && !contact.error; ++i )
+					contact.solve( contact.rows[i] );
+				if ( contact.error )
+				{
+					error = contact.error;
+					return false;
+				}
+				publishDynamic( contact, step );
+			}
+		solveLinks();
+	}
+
 	return true;
 }
 
@@ -363,9 +407,39 @@ void Assembly::stage( void* step, int phase, void* context )
 	}
 	if ( phase == 1 )
 	{
-		Profile::Scope timing( owner.profile, Profile::InitialLinks );
-		owner.prepareLinks();
-		owner.solveLinks();
+		{
+			Profile::Scope timing( owner.profile, Profile::InitialLinks );
+			owner.prepareLinks();
+			owner.solveLinks();
+		}
+		if ( owner.earlyContacts )
+		{
+			{
+				Profile::Scope timing( owner.profile, Profile::ContactGeometry );
+				for ( auto& part : owner.parts )
+					if ( part )
+					{
+						auto& contact = part->contact;
+						for ( int i = 0; i < contact.boxCount; ++i )
+						{
+							auto& shape = contact.boxes[i];
+							if ( shape.enabled && b2Body_GetType( shape.body ) != b2_staticBody &&
+								 !contact.read( step, shape.body, shape.state, shape.index ) )
+							{
+								owner.error = "assembly_contact_state";
+								return;
+							}
+						}
+						contact.captureBoundarySides();
+					}
+				if ( owner.enableSoftContacts )
+					owner.pairs.beginStep();
+				if ( !owner.gatherContacts( step ) )
+					return;
+			}
+			if ( !owner.solveContacts( step ) )
+				return;
+		}
 		return;
 	}
 	{
@@ -404,46 +478,28 @@ void Assembly::stage( void* step, int phase, void* context )
 						owner.error = contact.error;
 						return;
 					}
-					contact.gather();
-					if ( contact.error )
+					if ( !owner.earlyContacts )
 					{
-						owner.error = contact.error;
-						return;
+						contact.gather();
+						if ( contact.error )
+						{
+							owner.error = contact.error;
+							return;
+						}
+						for ( int i = 0; i < contact.rowCount; ++i )
+						{
+							auto& row = contact.rows[i];
+							b2Vec2 tangent = { -row.normal.y, row.normal.x };
+							contact.apply( row, b2Add( b2MulSV( row.normalImpulse, row.normal ),
+													   b2MulSV( row.tangentImpulse, tangent ) ) );
+						}
+						owner.publishDynamic( contact, step );
 					}
-					for ( int i = 0; i < contact.rowCount; ++i )
-					{
-						auto& row = contact.rows[i];
-						b2Vec2 tangent = { -row.normal.y, row.normal.x };
-						contact.apply( row, b2Add( b2MulSV( row.normalImpulse, row.normal ),
-												   b2MulSV( row.tangentImpulse, tangent ) ) );
-					}
-					owner.publishDynamic( contact, step );
 				}
 	}
-	{
-		Profile::Scope timing( owner.profile, Profile::ContactSolve );
-		for ( int sweep = 0; sweep < Sweeps; ++sweep )
-		{
-			if ( owner.enableSoftContacts )
-				owner.pairs.solve();
-			for ( auto& part : owner.parts )
-				if ( part )
-				{
-					auto& contact = part->contact;
-					if ( !owner.refreshDynamic( contact, step ) )
-						return;
-					for ( int i = 0; i < contact.rowCount && !contact.error; ++i )
-						contact.solve( contact.rows[i] );
-					if ( contact.error )
-					{
-						owner.error = contact.error;
-						return;
-					}
-					owner.publishDynamic( contact, step );
-				}
-			owner.solveLinks();
-		}
-	}
+	if ( !owner.earlyContacts && !owner.solveContacts( step ) )
+		return;
+
 	{
 		Profile::Scope timing( owner.profile, Profile::Observe );
 		if ( owner.enableSoftContacts )

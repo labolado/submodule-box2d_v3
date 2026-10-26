@@ -102,6 +102,14 @@ curved pressing/release. This does not certify arbitrary initial containment,
 interlocked geometry, continuous collision detection or mobile cost. Native
 positions/forces retain metre, kilogram, second and y-up units.
 
+Assemblies with an enabled dynamic rigid target solve contact impulses at the
+existing pre-rigid-constraint stage. Box2D then handles its own contacts/joints
+and integrates rigid positions; soft geometry projection still follows that
+integration. The same impulses are not applied a second time in the late stage.
+Static/kinematic-only assemblies retain their previous ordering. This fixes the
+observed stiff-contact feedback when dragging a rigid circle against soft bodies
+trapped near static terrain; it does not create a unified rigid/soft solver or CCD.
+
 `getProfile()` is disabled by default. Inclusive buckets retain their prior
 meaning; `adapter` is now populated by the native coupling layer. Do not add
 nested timing buckets. Local CMake and macOS/Android engine lists compile the two
