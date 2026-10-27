@@ -3,6 +3,9 @@
 Current recoverable assembly consumers use [the native operation API](API.md):
 `Simulation` plus `Box2DCoupling`. Car layout and controls stay in application Lua.
 macOS and Android compile this path; other engine platforms are not yet integrated.
+Assembly bodies may opt into internal spring connections between contour nodes;
+see the API's units, creation budget and recoverable stiffness policy. This
+extension has local validation only; Android cost/visual acceptance is pending.
 Assembly coupling accepts one circle or multiple sharp convex polygon fixtures
 per rigid body, including local offsets. Polygon compounds share rigid reaction
 state and use their exposed union boundary; assembly allows sixteen contact

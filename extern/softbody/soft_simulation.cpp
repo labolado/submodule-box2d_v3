@@ -3,6 +3,7 @@
 #include <atomic>
 #include <limits>
 #include <new>
+#include <set>
 
 namespace SoftBody
 {
@@ -105,6 +106,48 @@ bool configureShape( Body<float>& body, const SoftShapeDef& shape, float totalMa
 	body.restArea = body.area();
 	return true;
 }
+bool configureSprings( Body<float>& body, const std::vector<SoftSpringDef>& springs, float dt )
+{
+	if ( springs.empty() )
+		return true;
+	std::vector<int> solverNodes( body.nodeCount );
+	std::vector<double> stiffness( body.nodeCount );
+	std::set<std::pair<int, int>> pairs;
+	for ( int i = 0; i < body.nodeCount; ++i )
+		solverNodes[body.sourceNodes[i]] = i;
+	body.internalSprings.reserve( springs.size() );
+	for ( const auto& spring : springs )
+	{
+		int a = spring.nodeA, b = spring.nodeB;
+		if ( a < 0 || b < 0 || a >= body.nodeCount || b >= body.nodeCount || a == b ||
+			 !range( spring.stiffness, .001f, 1e8f ) || !range( spring.dampingRatio, 0, 10 ) ||
+			 !pairs.insert( { std::min( a, b ), std::max( a, b ) } ).second )
+			return false;
+		a = solverNodes[a];
+		b = solverNodes[b];
+		double length = std::hypot( double( body.rest[b][0] ) - body.rest[a][0],
+									double( body.rest[b][1] ) - body.rest[a][1] );
+		if ( length < .001 )
+			return false;
+		double epsilon = length * 1e-4;
+		double effectiveMass = 1. / ( 1. / body.mass[a] + 1. / body.mass[b] );
+		body.internalSprings.push_back(
+			{ a, b, spring.stiffness,
+			  2 * spring.dampingRatio * std::sqrt( spring.stiffness * effectiveMass ),
+			  std::hypot( length, epsilon ), epsilon } );
+		stiffness[a] += spring.stiffness;
+		stiffness[b] += spring.stiffness;
+	}
+	double omega = 2 * 3.14159265358979323846 * body.frequency;
+	for ( int i = 0; i < body.nodeCount; ++i )
+		// Conservative rest-state stiffness budget, including all incident edges.
+		// This does not promise stability under arbitrary collapse or contact.
+		if ( double( dt ) * dt *
+				 ( omega * omega * body.materialScale + 2 * stiffness[i] / body.mass[i] ) >
+			 1 )
+			return false;
+	return true;
+}
 Weights orderWeights( const Weights& input, const Body<float>& body )
 {
 	Weights result( body.nodeCount );
@@ -125,6 +168,8 @@ Simulation::Impl::Impl( const SimulationDef& def )
 	if ( def.maxBodies < 1 || def.maxBodies > 32 || def.maxJoints < 0 || def.maxJoints > 64 ||
 		 def.maxTouches < 0 || def.maxTouches > 64 || def.maxNodes < 3 ||
 		 def.maxNodes > std::numeric_limits<int>::max() / 4 - 4 || def.maxSoftContactRows < 1 ||
+		 def.maxInternalSprings < 0 ||
+		 def.maxInternalSprings > std::numeric_limits<int>::max() / 64 ||
 		 def.timeStep != 1.f / 480 || def.iterations != 8 || !point( def.gravity ) )
 	{
 		error = "unsupported soft simulation definition";
@@ -207,6 +252,16 @@ int Simulation::availableNodes() const
 			remaining -= body.nodeCount;
 	return remaining;
 }
+int Simulation::availableInternalSprings() const
+{
+	if ( !impl_ || !impl_->valid )
+		return 0;
+	int remaining = impl_->limits.maxInternalSprings;
+	for ( const auto& body : impl_->core.bodies )
+		if ( body.active )
+			remaining -= int( body.internalSprings.size() );
+	return remaining;
+}
 int Simulation::getBodyNodeCount( ObjectId id ) const
 {
 	return impl_ && impl_->check( id, ObjectKind::Body ) ? impl_->core.bodies[id.index].nodeCount
@@ -243,11 +298,21 @@ ObjectId Simulation::createBody( const SoftBodyDef& def )
 		s.error = "soft node capacity reached (maxNodes)";
 		return {};
 	}
+	if ( def.internalSprings.size() > size_t( availableInternalSprings() ) )
+	{
+		s.error = "soft internal spring capacity reached (maxInternalSprings)";
+		return {};
+	}
 	Body<float> body( 3, def.mass, def.halfWidth, def.halfHeight, 300, def.frequency, def.damping,
 					  0, def.materialScale, .2f );
 	if ( !configureShape( body, def.shape, def.mass ) )
 	{
 		s.error = "invalid soft shape: expected one simple contour with at least 3 nodes";
+		return {};
+	}
+	if ( !configureSprings( body, def.internalSprings, s.core.dt ) )
+	{
+		s.error = "invalid internal springs or fixed-step stiffness budget exceeded";
 		return {};
 	}
 	body.friction = def.friction;
@@ -499,6 +564,9 @@ bool Simulation::getBodyState( ObjectId id, SoftBodyState& result ) const
 		return false;
 	const auto& body = impl_->core.bodies[id.index];
 	result.nodeCount = body.nodeCount;
+	result.internalSpringScale = body.internalSpringScale;
+	result.internalSpringWork = body.internalSpringWork;
+	result.internalSpringRecoverySteps = body.internalSpringRecoverySteps;
 	result.vertices.resize( body.nodeCount );
 	result.velocities.resize( body.nodeCount );
 	result.boundary = body.sourceNodes;

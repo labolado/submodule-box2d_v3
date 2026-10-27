@@ -15,6 +15,15 @@ template <class T> struct Body
 	using Vec = std::array<T, 2>;
 	std::vector<Vec> x, v, rest;
 	std::vector<T> mass, lengths;
+	struct InternalSpring
+	{
+		int a, b;
+		double stiffness, damping, restLength, epsilon;
+	};
+	std::vector<InternalSpring> internalSprings;
+	double internalSpringScale = 1, internalSpringWork = 0;
+	int internalSpringHealthySteps = 8;
+	unsigned long long internalSpringRecoverySteps = 0;
 	int nodeCount = 16;
 	// Solver nodes follow the normalized boundary; public node identities do not.
 	std::vector<int> sourceNodes;
@@ -46,6 +55,9 @@ template <class T> struct Body
 	// rest coordinates never change; forces, not a rest-pose teleport, unfold it.
 	T recoverableForce( Vec* forces ) const;
 	T supportedForce( Vec* forces ) const;
+	T internalSpringForce( Vec* forces, double scale = 1 ) const;
+	void updateInternalSpringRecovery( T dt );
+	void dampInternalSprings( T dt );
 	T force( Vec* forces ) const;
 	// Keep fixed-size native research fixtures source-compatible. The caller's
 	// buffer must contain at least nodeCount entries.

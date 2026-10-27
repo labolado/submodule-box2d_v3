@@ -254,6 +254,11 @@ template <class T> void World<T>::advanceMaterialVelocity()
 			if ( b.kind == 3 )
 			{
 				b.dampDeformation( dt );
+				if ( !b.internalSprings.empty() )
+				{
+					b.updateInternalSpringRecovery( dt );
+					b.dampInternalSprings( dt );
+				}
 				if ( b.failure )
 				{
 					failure = b.failure;

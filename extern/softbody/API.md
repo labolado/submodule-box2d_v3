@@ -42,6 +42,54 @@ velocity of B with respect to A. Frequency is Hz; dampingRatio is dimensionless;
 material `damping` retains the existing deformation-velocity damping coefficient.
 Mass is total mass, distributed uniformly over nodes. There is no density API yet.
 
+## Optional internal springs
+
+`SoftBodyDef.internalSprings` is a copied list of `SoftSpringDef` connections
+between existing input nodes (zero-based native IDs, one-based Lua IDs). Lua uses
+`body = world:createBody { ..., internalSprings = {
+{nodeA=1, nodeB=9, stiffness=600, dampingRatio=0.3} } }` in assembly mode.
+The list belongs to the body definition, not `shape`. Omission/empty lists keep
+the previous material arithmetic. No mass points, collision edges, pins or mesh
+triangles are created; crossing spring lines do not create a shared node.
+Connections can include boundary neighbours. Internal mass points and runtime
+topology/rest-length editing are not supported.
+
+Stiffness is N/m (default300, accepted0.001..1e8); dampingRatio is dimensionless
+(default0.3, accepted0..10). Reference length comes from the initial shape and
+must be at least1mm. Input range acceptance does not certify stability: creation
+also rejects duplicates, self edges and invalid endpoints, and checks each node's
+total incident stiffness against the fixed1/480s rest-state budget
+`h^2 * ((2*pi*frequency)^2*materialScale + 2*sum(k)/nodeMass) <= 1`.
+This is not a bound for arbitrary compression/contact. The world budget
+`maxInternalSprings` defaults to2048; removal releases capacity.
+
+The added elastic energy is `0.5*k*(sqrt(|xb-xa|^2+epsilon^2)-restLength)^2`,
+where epsilon is1e-4 times reference separation and restLength uses the same
+regularization. Its negative gradient gives equal/opposite central forces, zero
+at rest and finite at coincident endpoints. Pairwise axial damping uses
+`c=2*zeta*sqrt(k/(1/ma+1/mb))` and an exponential velocity decay; it cannot add
+pair kinetic energy and leaves rigid translation/rotation unchanged.
+
+An inverted/self-crossed boundary, nonpositive area or boundary edge below1um
+temporarily disables the structure network. The existing recoverable material
+unfolds it; after8 healthy complete steps, structural strength ramps at
+`frequency` per second back to1. The damping coefficient follows sqrt(strength).
+This is an active **recovery material policy**, not a globally passive spring
+network: stiffness changes can add or remove elastic energy. Positions, reference
+shape and contacts are not reset. `SoftBodyState` / `body:getState()` report:
+
+- `internalSpringScale`: current structural strength,0..1.
+- `internalSpringWork`: signed cumulative stored-energy change due only to that
+  schedule,J. This is separate from `appliedWork`; neither is a full coupled ledger.
+- `internalSpringRecoverySteps`: complete steps spent below full strength.
+
+Force/damping traversal is O(edges); the opted-in boundary validity check is
+O(nodes^2) per material step. Mobile cost is not yet validated. Local evidence is
+a free18-node bridge with23 springs, real rigid press/release, inversion/collapse
+material checks and unchanged no-network car regressions. Extreme press speeds
+and loaded negative-control overlap remain documented limitations. These tests
+do not certify every network, general CCD or arbitrary highly stiff materials.
+
 ## Fixed-world pins
 
 `Simulation::createWorldJoint(SoftWorldJointDef)` accepts a body, its node weights,

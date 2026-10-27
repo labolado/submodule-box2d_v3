@@ -1,5 +1,7 @@
 #include "soft_body.h"
 
+#include "soft_contact.h"
+
 namespace SoftBody
 {
 #if defined( __clang__ )
@@ -136,12 +138,99 @@ template <class T> T Body<T>::recoverableForce( Vec* forces ) const
 	return T( energy );
 }
 
+template <class T> void Body<T>::updateInternalSpringRecovery( T dt )
+{
+	bool valid = area() > 0;
+	for ( int i = 0; i < nodeCount && valid; ++i )
+	{
+		auto a = x[i], b = x[( i + 1 ) % nodeCount];
+		valid = std::hypot( double( a[0] ) - b[0], double( a[1] ) - b[1] ) > 1e-6;
+		for ( int j = i + 2; j < nodeCount && valid; ++j )
+			if ( !( i == 0 && j == nodeCount - 1 ) )
+				valid = !strictCross<T>( a, b, x[j], x[( j + 1 ) % nodeCount] );
+	}
+	double before = internalSpringScale;
+	if ( !valid )
+	{
+		internalSpringScale = 0;
+		internalSpringHealthySteps = 0;
+	}
+	else if ( internalSpringHealthySteps < 8 )
+		++internalSpringHealthySteps;
+	else
+		internalSpringScale = std::min( 1., internalSpringScale + double( dt ) * frequency );
+	if ( internalSpringScale < 1 )
+		++internalSpringRecoverySteps;
+	if ( before != internalSpringScale )
+		// Recovery changes structural stiffness, hence stored elastic energy.
+		// Record that signed work; do not hide it in gravity or external input.
+		internalSpringWork += ( internalSpringScale - before ) * internalSpringForce( nullptr );
+}
+
+template <class T> T Body<T>::internalSpringForce( Vec* forces, double scale ) const
+{
+	double energy = 0;
+	for ( const auto& spring : internalSprings )
+	{
+		V d{ double( x[spring.b][0] ) - x[spring.a][0], double( x[spring.b][1] ) - x[spring.a][1] };
+		// Smooth distance has a finite gradient even when endpoints coincide.
+		// At exact coincidence this edge supplies no preferred direction; the
+		// recoverable material, not a rest-direction impulse, unfolds the body.
+		double length = std::sqrt( d[0] * d[0] + d[1] * d[1] + spring.epsilon * spring.epsilon );
+		double extension = length - spring.restLength;
+		double factor = scale * spring.stiffness * extension / length;
+		energy += .5 * scale * spring.stiffness * extension * extension;
+		for ( int axis = 0; forces && axis < 2; ++axis )
+		{
+			T force = T( factor * d[axis] );
+			forces[spring.a][axis] += force;
+			forces[spring.b][axis] -= force;
+		}
+	}
+	return T( energy );
+}
+
+template <class T> void Body<T>::dampInternalSprings( T dt )
+{
+	if ( internalSpringScale == 0 )
+		return;
+	for ( const auto& spring : internalSprings )
+	{
+		if ( spring.damping == 0 )
+			continue;
+		V d{ double( x[spring.b][0] ) - x[spring.a][0], double( x[spring.b][1] ) - x[spring.a][1] };
+		double length = std::hypot( d[0], d[1] );
+		if ( length <= spring.epsilon )
+			continue;
+		for ( auto& component : d )
+			component /= length;
+		double inverseMass = 1. / mass[spring.a] + 1. / mass[spring.b];
+		double speed = ( double( v[spring.b][0] ) - v[spring.a][0] ) * d[0] +
+					   ( double( v[spring.b][1] ) - v[spring.a][1] ) * d[1];
+		// Exact pairwise axial decay at the current positions. Equal/opposite,
+		// central impulses preserve momentum and cannot add kinetic energy.
+		double impulse =
+			-std::expm1( -spring.damping * std::sqrt( internalSpringScale ) * inverseMass * dt ) *
+			speed / inverseMass;
+		for ( int axis = 0; axis < 2; ++axis )
+		{
+			v[spring.a][axis] = T( v[spring.a][axis] + impulse * d[axis] / mass[spring.a] );
+			v[spring.b][axis] = T( v[spring.b][axis] - impulse * d[axis] / mass[spring.b] );
+		}
+	}
+}
+
 template <class T> T Body<T>::force( Vec* f ) const
 {
 	std::fill_n( f, nodeCount, Vec{} );
 	T energy = 0;
 	if ( kind == 3 )
-		return recoverableForce( f );
+	{
+		energy = recoverableForce( f );
+		if ( !internalSprings.empty() )
+			energy += internalSpringForce( f, internalSpringScale );
+		return energy;
+	}
 	for ( int i = 0; i < nodeCount; ++i )
 	{
 		int j = ( i + 1 ) % nodeCount;

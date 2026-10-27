@@ -29,6 +29,7 @@ struct SimulationDef
 	int maxBodies = 32, maxJoints = 64, maxTouches = 1;
 	// Runtime budgets, not per-shape storage limits. Removed bodies release nodes.
 	int maxNodes = 512, maxSoftContactRows = 512;
+	int maxInternalSprings = 2048;
 	float timeStep = 1.f / 480;
 	int iterations = 8;
 	Point gravity{ { 0, -20 } };
@@ -49,9 +50,18 @@ struct SoftShapeDef
 	std::vector<Point> nodes;
 	std::vector<int> boundary;
 };
+struct SoftSpringDef
+{
+	// Input node identities, not normalized boundary indices. Rest length comes
+	// from the reference shape. No additional mass or collision edge is created.
+	int nodeA = 0, nodeB = 1;
+	float stiffness = 300; // N/m
+	float dampingRatio = .3f;
+};
 struct SoftBodyDef
 {
 	SoftShapeDef shape;
+	std::vector<SoftSpringDef> internalSprings;
 	// Total kg, distributed equally across the active nodes. This is not an
 	// areal-density material; changing sampling changes the mass distribution.
 	// halfWidth/halfHeight apply only to the omitted-shape ellipse preset.
@@ -87,6 +97,10 @@ struct SoftWorldJointDef
 };
 struct SoftBodyState
 {
+	// Structural recovery yields to shape recovery while topology is invalid.
+	// Signed work is the change in stored energy from that stiffness schedule.
+	double internalSpringScale = 1, internalSpringWork = 0;
+	unsigned long long internalSpringRecoverySteps = 0;
 	std::vector<Point> vertices, velocities;
 	int nodeCount = 0;
 	// Normalized CCW contour indexing vertices in the original input order.
@@ -120,6 +134,7 @@ public:
 	const char* lastError() const;
 	bool isValid( ObjectId id ) const;
 	int availableNodes() const;
+	int availableInternalSprings() const;
 	int getBodyNodeCount( ObjectId body ) const; // Zero for an invalid handle.
 	ObjectId createBody( const SoftBodyDef& def );
 	ObjectId createJoint( const SoftJointDef& def );
