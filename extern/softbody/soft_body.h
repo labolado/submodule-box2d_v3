@@ -24,6 +24,15 @@ template <class T> struct Body
 	double internalSpringScale = 1, internalSpringWork = 0;
 	int internalSpringHealthySteps = 8;
 	unsigned long long internalSpringRecoverySteps = 0;
+	struct Pressure
+	{
+		double maxPressure = 0; // Zero disables the optional recoverable-body module.
+		double target = 0, level = 0, rate = 500, maxAcceleration = 200;
+		double scale = 1, applied = 0, work = 0;
+		int healthySteps = 8;
+		unsigned long long recoverySteps = 0, limitedSteps = 0;
+		std::vector<Vec> forces; // Allocated only for an enabled pressure module.
+	} pressure;
 	int nodeCount = 16;
 	// Solver nodes follow the normalized boundary; public node identities do not.
 	std::vector<int> sourceNodes;
@@ -58,6 +67,11 @@ template <class T> struct Body
 	T internalSpringForce( Vec* forces, double scale = 1 ) const;
 	void updateInternalSpringRecovery( T dt );
 	void dampInternalSprings( T dt );
+	bool pressureBoundaryValid() const;
+	// Uniform gauge pressure times the signed-area gradient. The returned
+	// pressure includes the global acceleration cap, preserving net force/torque.
+	double pressureForce( Vec* forces ) const;
+	void updatePressure( T dt ); // Updates the bounded force; never moves nodes.
 	T force( Vec* forces ) const;
 	// Keep fixed-size native research fixtures source-compatible. The caller's
 	// buffer must contain at least nodeCount entries.

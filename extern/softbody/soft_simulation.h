@@ -71,6 +71,13 @@ struct SoftBodyDef
 	// World support fixes the elastic reference, not the nodes or the centre.
 	// Its reaction is external; mass and local contact response stay finite.
 	BodySupport support = BodySupport::Free;
+	struct Pressure
+	{
+		bool enabled = false;
+		// Nominal pressure at the creation area, in N/m (two-dimensional).
+		// Starts empty; target is approached at rate N/m/s, without adding mass.
+		float target = 0, maxPressure = 1000, rate = 500, maxAcceleration = 200;
+	} pressure;
 };
 struct SoftJointDef
 {
@@ -97,6 +104,9 @@ struct SoftWorldJointDef
 };
 struct SoftBodyState
 {
+	double pressureTarget = 0, pressureLevel = 0, pressureApplied = 0, pressureScale = 1;
+	double pressureWork = 0; // Discrete pressure force work; included in appliedWork.
+	unsigned long long pressureRecoverySteps = 0, pressureLimitedSteps = 0;
 	// Structural recovery yields to shape recovery while topology is invalid.
 	// Signed work is the change in stored energy from that stiffness schedule.
 	double internalSpringScale = 1, internalSpringWork = 0;
@@ -146,6 +156,8 @@ public:
 	// Total impulse in kg*m/s, distributed by node mass. Translation only:
 	// shape, position and angular momentum about the centre are unchanged.
 	bool applyLinearImpulse( ObjectId body, Point impulse );
+	// Requires pressure opt-in at creation; changes the target, never the nodes.
+	bool setPressureTarget( ObjectId body, float pressure );
 	bool setCollisionEnabled( ObjectId a, ObjectId b, bool enabled );
 	bool getBodyState( ObjectId body, SoftBodyState& state ) const;
 	bool getTouchState( ObjectId touch, SoftTouchState& state ) const;

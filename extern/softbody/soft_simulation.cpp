@@ -315,6 +315,23 @@ ObjectId Simulation::createBody( const SoftBodyDef& def )
 		s.error = "invalid internal springs or fixed-step stiffness budget exceeded";
 		return {};
 	}
+	const auto& pressure = def.pressure;
+	if ( !range( pressure.maxPressure, .001f, 1e6f ) ||
+		 !range( pressure.target, 0, pressure.maxPressure ) ||
+		 !range( pressure.rate, .001f, 1e6f ) || !range( pressure.maxAcceleration, .001f, 1000 ) ||
+		 ( !pressure.enabled && pressure.target != 0 ) )
+	{
+		s.error = "invalid soft pressure definition";
+		return {};
+	}
+	if ( pressure.enabled )
+	{
+		body.pressure.maxPressure = pressure.maxPressure;
+		body.pressure.target = pressure.target;
+		body.pressure.rate = pressure.rate;
+		body.pressure.maxAcceleration = pressure.maxAcceleration;
+		body.pressure.forces.resize( body.nodeCount );
+	}
 	body.friction = def.friction;
 	body.worldSupported = def.support == BodySupport::World;
 	body.referencePosition = def.position;
@@ -535,6 +552,24 @@ bool Simulation::applyLinearImpulse( ObjectId id, Point impulse )
 	impl_->core.appliedWork += work;
 	return true;
 }
+bool Simulation::setPressureTarget( ObjectId id, float value )
+{
+	if ( !impl_ || !impl_->editable() )
+		return false;
+	if ( !impl_->check( id, ObjectKind::Body ) )
+	{
+		impl_->error = "invalid soft pressure body";
+		return false;
+	}
+	auto& pressure = impl_->core.bodies[id.index].pressure;
+	if ( pressure.maxPressure == 0 || !range( value, 0, float( pressure.maxPressure ) ) )
+	{
+		impl_->error = "pressure requires opt-in and a target within maxPressure";
+		return false;
+	}
+	pressure.target = value;
+	return true;
+}
 bool Simulation::setCollisionEnabled( ObjectId a, ObjectId b, bool enabled )
 {
 	if ( !impl_ || !impl_->editable() )
@@ -567,6 +602,13 @@ bool Simulation::getBodyState( ObjectId id, SoftBodyState& result ) const
 	result.internalSpringScale = body.internalSpringScale;
 	result.internalSpringWork = body.internalSpringWork;
 	result.internalSpringRecoverySteps = body.internalSpringRecoverySteps;
+	result.pressureTarget = body.pressure.target;
+	result.pressureLevel = body.pressure.level;
+	result.pressureApplied = body.pressure.applied;
+	result.pressureScale = body.pressure.scale;
+	result.pressureWork = body.pressure.work;
+	result.pressureRecoverySteps = body.pressure.recoverySteps;
+	result.pressureLimitedSteps = body.pressure.limitedSteps;
 	result.vertices.resize( body.nodeCount );
 	result.velocities.resize( body.nodeCount );
 	result.boundary = body.sourceNodes;

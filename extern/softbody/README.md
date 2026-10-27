@@ -6,6 +6,11 @@ macOS and Android compile this path; other engine platforms are not yet integrat
 Assembly bodies may opt into internal spring connections between contour nodes;
 see the API's units, creation budget and recoverable stiffness policy. This
 extension has local validation only; Android cost/visual acceptance is pending.
+Bodies may also opt into regulated virtual pressure with `pressure` at creation
+and `setPressureTarget` at runtime. Gas pressure changes physical geometry while
+preserving mass and node identity; limits and collapse recovery are documented
+in the API. It is distinct from the historical pressure material and from
+shape-preserving reference-size scaling. Local validation only.
 Assembly coupling accepts one circle or multiple sharp convex polygon fixtures
 per rigid body, including local offsets. Polygon compounds share rigid reaction
 state and use their exposed union boundary; assembly allows sixteen closed

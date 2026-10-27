@@ -90,6 +90,80 @@ material checks and unchanged no-network car regressions. Extreme press speeds
 and loaded negative-control overlap remain documented limitations. These tests
 do not certify every network, general CCD or arbitrary highly stiff materials.
 
+## Optional regulated pressure
+
+`SoftBodyDef.pressure.enabled` opts a recoverable body into virtual gas pressure.
+Lua opts in with a body-level table, for example:
+
+```lua
+local body = world:createBody{
+    material='recoverable', mass=1, halfWidth=.4, halfHeight=.4,
+    frequency=6, damping=40,
+    pressure={target=0, maxPressure=400, rate=50, maxAcceleration=200},
+}
+body:setPressureTarget(100)
+body:setPressureTarget(0) -- vent, then let the recovery material restore its shape
+```
+
+Omission keeps the old arithmetic and disallows `setPressureTarget`, including
+a zero target. An empty Lua pressure table enables the defaults. Native uses
+`Simulation::setPressureTarget(id, target)`. Invalid/removed/foreign handles,
+nonfinite/out-of-range values and mutation inside a step are rejected atomically.
+There is no runtime editing of the limits. Targets do not move nodes or reset
+velocities, joints or the reference shape. The module starts empty even when
+the creation target is nonzero.
+
+The target/level represent nominal two-dimensional gauge pressure at the
+creation area, **N/m**, not Pa. The virtual gas amount is proportional to
+`level * creationArea`. Level approaches target at `rate` N/m/s of simulated
+time. Actual outward pressure is
+`scale * min(maxPressure, level * creationArea / currentArea)`, further capped
+uniformly so no node's **pressure-only** acceleration exceeds `maxAcceleration`.
+There is no suction below zero, ambient-pressure field or simulated gas mass.
+The recoverable material and optional structure springs provide restoring forces.
+
+| Definition | Default | Accepted range |
+|---|---:|---:|
+| target | 0 | 0..maxPressure N/m |
+| maxPressure | 1000 | 0.001..1e6 N/m |
+| rate | 500 | 0.001..1e6 N/m/s |
+| maxAcceleration | 200 | 0.001..1000 m/s² |
+
+Pressure is the signed-area gradient times one scalar shared by all nodes.
+Thus its net force/torque cancel in exact arithmetic, including under the global
+acceleration cap. It cannot directly propel the centre of mass; it can lift a
+contacting load or deform/expand a tyre. Existing external gravity, contacts,
+recovery, motors and touch forces are **not** acceleration-limited by this option.
+Total node mass stays fixed; inertia changes naturally with node positions.
+Sampling, contour identity and material joint weights remain unchanged.
+
+At <=5% of creation area, inverted/self-crossed/nonadjacent-touching contours,
+or a boundary edge <=1um, pressure is suspended. The finite recoverable material
+continues. Eight consecutive healthy steps above10% area are required before
+pressure scale ramps back at `frequency` per second. No rest-pose teleport or
+collision disabling is performed. These are bounded recovery rules, not a
+thermodynamic simulation or arbitrary-contact stability guarantee.
+
+Body snapshots add `pressureTarget`, `pressureLevel`, `pressureApplied` (last
+material-step effective pressure), `pressureScale` (0..1), `pressureWork`,
+`pressureRecoverySteps` and `pressureLimitedSteps`. Limited steps count pressure
+ceiling/acceleration limiting, not the separate recovery gate. `pressureWork`
+is signed discrete force work, using pressure force and the average velocity of
+the combined material/gravity/pressure velocity update. It is included in world
+`appliedWork`; **do not add it again**. It excludes contact position corrections
+and is not pump energy, gas internal energy or a full energy conservation ledger.
+World `energy` still contains the previous elastic/kinetic/gravity terms, not a
+gas potential. Separate force kicks must not be used for this attribution: they
+produce fictitious nonzero work at force equilibrium.
+
+Pressure force accumulation is O(nodes); opted-in topology checking is O(nodes²)
+per material step. Default-off bodies skip it. Local tests cover force balance,
+rate/cap/identity/lifecycle, real load lifting, flatten/recover, concave24-node
+structure networks and a car with inflatable tyres. Android cost and human
+acceptance are pending. The old `kind=2`/`preload` pressure material is unchanged.
+Shape-preserving reference-size changes are a separate, unimplemented feature;
+pressure can round a noncircular body and must not be presented as uniform scaling.
+
 ## Static chain terrain
 
 Assembly `Box2DCoupling::attachBody` / Lua `world:attachPhysicsBody` accepts a

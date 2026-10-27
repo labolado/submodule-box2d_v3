@@ -272,9 +272,28 @@ template <class T> void World<T>::advanceMaterialVelocity()
 				failure = b.failure;
 				return;
 			}
-			for ( int i = 0; i < b.nodeCount; ++i )
-				for ( int k = 0; k < 2; ++k )
-					b.v[i][k] += dt * ( f[i][k] / b.mass[i] + gravity[k] );
+			if ( b.kind == 3 && b.pressure.maxPressure > 0 )
+			{
+				b.updatePressure( dt );
+				double work = 0;
+				for ( int i = 0; i < b.nodeCount; ++i )
+					for ( int k = 0; k < 2; ++k )
+					{
+						double before = b.v[i][k];
+						T pressureForce = b.pressure.forces[i][k];
+						b.v[i][k] += dt * ( ( f[i][k] + pressureForce ) / b.mass[i] + gravity[k] );
+						// Attribute work using the average velocity of the COMBINED
+						// material/gravity/pressure update. Separate kicks would report
+						// fictitious pressure work even at exact force equilibrium.
+						work += .5 * ( before + b.v[i][k] ) * dt * pressureForce;
+					}
+				b.pressure.work += work;
+				appliedWork += work;
+			}
+			else
+				for ( int i = 0; i < b.nodeCount; ++i )
+					for ( int k = 0; k < 2; ++k )
+						b.v[i][k] += dt * ( f[i][k] / b.mass[i] + gravity[k] );
 		}
 }
 

@@ -220,6 +220,100 @@ template <class T> void Body<T>::dampInternalSprings( T dt )
 	}
 }
 
+template <class T> bool Body<T>::pressureBoundaryValid() const
+{
+	if ( !( area() > .05 * restArea ) )
+		return false;
+	auto orient = []( Vec a, Vec b, Vec c ) {
+		return ( double( b[0] ) - a[0] ) * ( double( c[1] ) - a[1] ) -
+			   ( double( b[1] ) - a[1] ) * ( double( c[0] ) - a[0] );
+	};
+	auto onSegment = []( Vec a, Vec b, Vec p ) {
+		return p[0] >= std::min( a[0], b[0] ) && p[0] <= std::max( a[0], b[0] ) &&
+			   p[1] >= std::min( a[1], b[1] ) && p[1] <= std::max( a[1], b[1] );
+	};
+	for ( int i = 0; i < nodeCount; ++i )
+	{
+		auto a = x[i], b = x[( i + 1 ) % nodeCount];
+		if ( std::hypot( double( a[0] ) - b[0], double( a[1] ) - b[1] ) <= 1e-6 )
+			return false;
+		for ( int j = i + 2; j < nodeCount; ++j )
+		{
+			if ( i == 0 && j == nodeCount - 1 )
+				continue;
+			auto c = x[j], d = x[( j + 1 ) % nodeCount];
+			double abC = orient( a, b, c ), abD = orient( a, b, d );
+			double cdA = orient( c, d, a ), cdB = orient( c, d, b );
+			if ( ( abC * abD < 0 && cdA * cdB < 0 ) ||
+				 ( std::abs( abC ) < 1e-12 && onSegment( a, b, c ) ) ||
+				 ( std::abs( abD ) < 1e-12 && onSegment( a, b, d ) ) ||
+				 ( std::abs( cdA ) < 1e-12 && onSegment( c, d, a ) ) ||
+				 ( std::abs( cdB ) < 1e-12 && onSegment( c, d, b ) ) )
+				return false;
+		}
+	}
+	return true;
+}
+
+template <class T> double Body<T>::pressureForce( Vec* forces ) const
+{
+	std::fill_n( forces, nodeCount, Vec{} );
+	if ( pressure.maxPressure == 0 || pressure.scale == 0 || pressure.level == 0 )
+		return 0;
+	double a = area();
+	if ( !( a > .05 * restArea ) )
+		return 0;
+	// A fixed amount of virtual gas has p*A = level*creationArea. No vacuum
+	// suction: the recoverable material supplies the restoring membrane force.
+	double applied =
+		pressure.scale * std::min( pressure.maxPressure, pressure.level * restArea / a );
+	double inverseMassGradient = 0;
+	for ( int i = 0; i < nodeCount; ++i )
+	{
+		auto prev = x[( i + nodeCount - 1 ) % nodeCount], next = x[( i + 1 ) % nodeCount];
+		double gx = .5 * ( double( next[1] ) - prev[1] );
+		double gy = .5 * ( double( prev[0] ) - next[0] );
+		inverseMassGradient = std::max( inverseMassGradient, std::hypot( gx, gy ) / mass[i] );
+	}
+	if ( inverseMassGradient > 0 )
+		applied = std::min( applied, pressure.maxAcceleration / inverseMassGradient );
+	for ( int i = 0; i < nodeCount; ++i )
+	{
+		auto prev = x[( i + nodeCount - 1 ) % nodeCount], next = x[( i + 1 ) % nodeCount];
+		forces[i] = { T( .5 * applied * ( double( next[1] ) - prev[1] ) ),
+					  T( .5 * applied * ( double( prev[0] ) - next[0] ) ) };
+	}
+	return applied;
+}
+
+template <class T> void Body<T>::updatePressure( T dt )
+{
+	if ( pressure.maxPressure == 0 )
+		return;
+	pressure.level += std::max( -pressure.rate * dt,
+								std::min( pressure.rate * dt, pressure.target - pressure.level ) );
+	if ( !pressureBoundaryValid() )
+	{
+		pressure.scale = 0;
+		pressure.healthySteps = 0;
+	}
+	else if ( pressure.healthySteps < 8 )
+	{
+		// Hysteresis: a nearly flat body must recover beyond 10% area before
+		// collecting eight consecutive healthy steps. No position reset.
+		pressure.healthySteps = area() > .1 * restArea ? pressure.healthySteps + 1 : 0;
+	}
+	else
+		pressure.scale = std::min( 1., pressure.scale + double( dt ) * frequency );
+	if ( pressure.scale < 1 )
+		++pressure.recoverySteps;
+	pressure.forces.resize( nodeCount );
+	pressure.applied = pressureForce( pressure.forces.data() );
+	if ( pressure.scale > 0 && pressure.level > 0 &&
+		 pressure.applied < pressure.scale * pressure.level * restArea / area() )
+		++pressure.limitedSteps;
+}
+
 template <class T> T Body<T>::force( Vec* f ) const
 {
 	std::fill_n( f, nodeCount, Vec{} );
