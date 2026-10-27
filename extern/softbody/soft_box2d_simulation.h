@@ -18,6 +18,24 @@ struct Box2DCouplingDef
 	// Restricted game experiment: awake dynamic contacts; polygon compounds share one rigid state.
 	bool enableDynamicContacts = false;
 	int maxAttachments = 64;
+	int maxRigidJoints = 64;
+};
+// Positional spring with optional relative-speed motor. Local anchors use soft metres/y-up, even
+// when flipY is enabled. Connections never implicitly change collision filtering.
+struct SoftRigidJointDef
+{
+	ObjectId body, rigid;
+	Weights weights = Weights( 16 );
+	Point localAnchor{};
+	float frequency = 30, dampingRatio = 1, motorGain = 8;
+};
+struct SoftRigidJointState
+{
+	bool enabled = false;
+	double errorM = 0;
+	Point impulse{};						// On the soft side, in the last completed step, kg*m/s.
+	double relativeSpeed = 0;				// Soft minus rigid, rad/s in y-up coordinates.
+	double motorImpulse = 0, motorWork = 0; // Last-step angular impulse and actuator work.
 };
 struct CouplingState
 {
@@ -70,6 +88,10 @@ public:
 	ObjectId attachBody( b2BodyId body );
 	bool isValid( ObjectId attachment ) const;
 	bool detach( ObjectId attachment );
+	ObjectId createRigidJoint( const SoftRigidJointDef& def );
+	bool removeRigidJoint( ObjectId joint );
+	bool setRigidMotor( ObjectId joint, float speed, float maxTorque );
+	bool getRigidJointState( ObjectId joint, SoftRigidJointState& state ) const;
 	bool setCollisionEnabled( ObjectId attachment, ObjectId body, bool enabled );
 	bool setFilter( ObjectId body, RigidFilter filter );
 	bool prepare();

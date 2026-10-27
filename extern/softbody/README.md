@@ -200,3 +200,10 @@ solver configuration. `nativeWorld` includes soft callbacks (including the stati
 world fallback), and `advance` includes `nativeWorld`. Do not add nested buckets.
 `adapter` is populated by the native `Box2DCoupling` layer. Unsupported clock targets
 can use the normal disabled path. This internal header is not a public plugin API.
+
+Assembly soft/rigid positional pins now use `Box2DCoupling::createRigidJoint`
+(Lua `createRigidPinJoint`). They share current step velocities with contacts and
+apply reaction before Box2D constraints. See API.md for coordinate, lifetime,
+finite compliance and separate maxRigidJoints budget. The optional relative-speed
+motor uses setRigidMotor / Lua setMotor; it has no angle lock. Wheels and chassis
+are still defined in Lua, not special native body types.

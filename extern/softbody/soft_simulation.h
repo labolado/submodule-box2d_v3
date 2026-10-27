@@ -15,7 +15,8 @@ enum class ObjectKind
 	Body,
 	Joint,
 	Touch,
-	Attachment
+	Attachment,
+	RigidJoint
 };
 struct ObjectId
 {

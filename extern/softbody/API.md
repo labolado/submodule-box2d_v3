@@ -57,7 +57,7 @@ This is a compliant positional constraint, not an infinitely rigid pin or an
 orientation lock. Its reaction is external to the simulated bodies. Motor torque
 is limited once per complete step; disabling torque allows coasting, not immediate
 stopping. There are no angle limits or moving-world-target setters. Use touch for
-interactive targets; a moving rigid anchor needs the separate future coupling API.
+interactive targets; a moving rigid anchor uses the separate coupling pin API below.
 Collapsed bodies retain the existing finite-inertia guard; no rigid teleport is used.
 
 World and soft/soft pins share `maxJoints`, slot generations and removal rules.
@@ -66,6 +66,102 @@ including reordered contours. Existing soft/soft arithmetic is unchanged.
 The local roller fixture validates centre-distributed pins. Single-node gravity
 bearing remains a diagnostic failure (93.6mm transient gap versus its80mm gate);
 accepted parameter syntax is not a promise of tight anchoring for every weight set.
+
+## Soft-rigid pins (assembly)
+
+`Box2DCoupling::createRigidJoint(SoftRigidJointDef)` connects one weighted soft
+anchor to an attached Box2D body. Lua exposes:
+
+```lua
+local attachment = world:attachPhysicsBody(rigidBody)
+attachment:setCollisionEnabled(softBody, false) -- explicit application choice
+local pin = world:createRigidPinJoint {
+    body = softBody, rigid = attachment, weights = nodeWeights,
+    localAnchorX = 0, localAnchorY = 0, -- metres, rigid-local y UP
+    frequency = 30, dampingRatio = 1, motorGain = 8,
+}
+local state = pin:getState() -- enabled, errorM, impulseX, impulseY on soft side
+pin:removeSelf()
+```
+
+Initial anchors must coincide within 1mm. Frequency is 1..60Hz, damping ratio
+0..10. Weights use public input-node identities, including custom contours.
+This is a compliant positional spring, not an orientation lock. An optional
+relative-speed motor is described below; default torque is zero. There are no
+angle limits, target setters, breaking force or hard-attachment mode. An off-centre
+anchor follows a rigid pivot arm; a passive centred point does not transmit axle rotation.
+Static and prescribed kinematic targets absorb reaction externally. Dynamic
+bodies receive the opposite linear impulse and the correct moment about their
+mass centre. Shifted mass centres and reflected local coordinates are supported.
+
+The full 2x2 effective inverse mass is
+`K = (sum(weights[i]^2/mass[i]) + inverseRigidMass) I + inverseInertia perp(r) perp(r)^T`.
+With `omega=2*pi*frequency`, compliance is `K/(h*(2*zeta*omega+h*omega^2))`.
+Accumulated impulses reset each complete step. Pins solve with the assembly's
+contacts before rigid constraints and integration, reading/writing the current
+rigid state on every visit. Shared pins/contacts cannot overwrite one another's
+reaction. No Box2D position edits, hidden rigid bodies or new core hooks are used.
+The no-pin path retains its previous ordering and arithmetic.
+
+`Box2DCouplingDef.maxRigidJoints` / Lua `maxRigidJoints` is a separate 0..64 budget
+(default64); it does not consume the soft/world `maxJoints` slots. The coupling
+owns `ObjectKind::RigidJoint` handles; query/remove them through the coupling,
+not `Simulation`. Slot reuse increments generations. Removing the soft body or
+registration invalidates dependent pins. Destroying the rigid body invalidates
+the pin immediately; detach the dead registration before the next step, as for
+ordinary contacts. The pin keeps the Lua world alive, not the rigid display object.
+Disabled rigid targets skip the pin and report zero impulse; re-enabling a widely
+separated target is not a recovery guarantee. Sleeping or motion-locked dynamic
+and kinematic targets are rejected by the existing bridge; keep them awake.
+Contact filters and exclusions do not disable the pin. Registration geometry
+limits below still apply, including zero restitution. No collision is implicitly
+excluded by creating a connection.
+
+`getState()` reports current geometric gap and last-step soft impulse (kg*m/s).
+World energy does not include these springs' stored energy or external support
+work; it is not a complete coupled energy ledger. A failed entered step is still
+non-transactional. Tight anchoring is not guaranteed: the frozen 0.3kg welded
+support / 3kg soft body / single-node load reaches about25.9mm transient gap at
+30Hz, although its 50mm diagnostic gate passes. Visual/mobile acceptance remains
+separate from native load/reaction/lifecycle checks.
+
+## Soft-rigid relative-speed motor
+
+`Box2DCoupling::setRigidMotor(joint, speed, maxTorque)` / Lua
+`pin:setMotor(speed, maxTorque)` drives **soft angular velocity minus rigid angular
+velocity**. Units are rad/s and Nm, positive counterclockwise in soft y-up space.
+For a tyre rolling right on horizontal terrain, use a negative target speed.
+The optional creation field `motorGain` defaults to8 (Nm per rad/s), range0..1e6.
+Speed must be finite within±1e4rad/s; torque0..1e6Nm. These are input guard limits,
+not validated game parameters. The local car fixture uses±6rad/s and10Nm.
+
+No motor runs until maxTorque>0 and gain>0. `setMotor(0,0)` coasts;
+`setMotor(0,positiveTorque)` brakes relative rotation, not absolute world motion.
+Changing the motor never changes positional stiffness or collision exclusions.
+No instantaneous angle lock or wheel-specific logic is added to the solver.
+
+Once per complete step, after soft material/touch velocity and before Box2D warm
+start/constraints, the motor computes `K=1/Isoft+inverseIrigid` and
+`J = clamp(h*gain*(target-relative)/(1+h*gain*K), -h*maxTorque, h*maxTorque)`.
+This implicit response prevents the isolated motor from overshooting a target at
+small inertia. External contacts/materials can still change speed later in the step.
+Soft nodes receive a distributed angular impulse; a dynamic rigid target receives
+`-J`. The current rigid velocity is refreshed/published for each motor, including
+multiple wheels on one chassis. A zero-inertia collapsed soft body skips both
+sides until material recovery creates a lever arm. Static/kinematic endpoints
+absorb the reaction externally. No Box2D core hook or rigid-position correction.
+
+`pin:getState()` adds `relativeSpeed` (current, after all phases), `motorImpulse`
+(last step on the soft side, Nm*s) and `motorWork` (last-step actuator work,J).
+The latter is `J*relativeBefore+0.5*J^2*K`; it includes the opposite dynamic reaction
+and is relative work against prescribed endpoints. It does not include pin spring,
+contact/friction, gravity, other joints, or a complete coupled energy ledger.
+The older world `motorWork` remains the soft-side kinetic contribution.
+
+The fixed 3kg rigid chassis / two1kg soft tyres has local forward/reverse,8° incline,
+coast and bounded press/recovery tests. Maximum measured terrain overlap on the
+slope is6.44mm; press pin gap reaches10.39mm. This does not certify extreme crushing,
+CCD, arbitrary mass ratios, suspension equivalence or mobile performance.
 
 ## Lifetime and errors
 
@@ -130,8 +226,8 @@ entry. Counters report entered rigid steps and successfully completed soft steps
 - `Box2DCouplingDef.enableDynamicContacts` separately opts into awake, unlocked
   dynamic contacts, including the polygon compounds above. A bounded joint-driven
   rigid press and centre world-pinned soft rollers have local fixtures; general
-  jointed mechanisms, CCD, arbitrary topology, soft/rigid pins and direct force
-  loading are not certified in this path.
+  jointed mechanisms, CCD, arbitrary topology and direct force loading are not
+  certified. Soft/rigid positional pins have the bounded checks described above.
 - Historical standalone, static, attachment and single-body game modes retain
   their internal interfaces and geometry restrictions for regression. The new
   geometry is enabled only by `Box2DCoupling` (Lua `couplingMode='assembly'`).
@@ -146,7 +242,8 @@ Assemblies with an enabled dynamic rigid target solve contact impulses at the
 existing pre-rigid-constraint stage. Box2D then handles its own contacts/joints
 and integrates rigid positions; soft geometry projection still follows that
 integration. The same impulses are not applied a second time in the late stage.
-Static/kinematic-only assemblies retain their previous ordering. This fixes the
+Assemblies without an enabled soft/rigid pin and without dynamic contacts retain
+their previous ordering. This fixes the
 observed stiff-contact feedback when dragging a rigid circle against soft bodies
 trapped near static terrain; it does not create a unified rigid/soft solver or CCD.
 

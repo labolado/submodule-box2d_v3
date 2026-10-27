@@ -31,10 +31,25 @@ struct Assembly
 		b2Vec2 impulse{}, bias{};
 		float inverseMass = 0, gamma = 0;
 	};
+	struct RigidLink
+	{
+		bool active = false, enabled = false;
+		int body = -1, index = -1;
+		b2BodyId rigid = b2_nullBodyId;
+		std::vector<float> weights;
+		b2Vec2 localAnchor{}, arm{}, impulse{}, bias{};
+		float frequency = 30, dampingRatio = 1;
+		float motorGain = 8, motorSpeed = 0, maxMotorTorque = 0;
+		double motorImpulse = 0, motorWork = 0;
+		// Full effective mass and compliance, including off-centre rotation.
+		b2Mat22 mass{}, gamma{};
+		View state{};
+	};
 	Core& soft;
 	PairContacts pairs;
 	std::vector<std::unique_ptr<Part>> parts;
 	std::vector<Link> links;
+	std::vector<RigidLink> rigidLinks;
 	b2WorldId world = b2_nullWorldId;
 	b2WorldId boundWorld = b2_nullWorldId;
 	bool flipY = false, boundFlipY = false;
@@ -58,8 +73,11 @@ struct Assembly
 	bool prepare();
 	bool advance();
 	void motors();
+	bool rigidMotors( void* step );
 	void prepareLinks();
 	void solveLinks();
+	bool prepareRigidLinks( void* step );
+	bool solveRigidLinks( void* step );
 	bool refreshDynamic( Solver& contact, void* step );
 	void publishDynamic( Solver& contact, void* step );
 	bool pairGeometry( void* step );

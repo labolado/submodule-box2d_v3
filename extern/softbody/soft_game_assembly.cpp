@@ -123,6 +123,40 @@ bool Assembly::prepare()
 	// contact fight the rigid support without a same-step position response.
 	// Static/kinematic-only assemblies retain their established ordering.
 	earlyContacts = false;
+	for ( auto& link : rigidLinks )
+	{
+		link.enabled = false;
+		if ( !link.active )
+			continue;
+		if ( link.body < 0 || link.body >= int( parts.size() ) || !parts[link.body] ||
+			 !validWeights( link.weights, soft.bodies[link.body].nodeCount ) ||
+			 !b2Body_IsValid( link.rigid ) )
+		{
+			error = "invalid_assembly_rigid_connection";
+			return false;
+		}
+		if ( !b2Body_IsEnabled( link.rigid ) )
+			continue;
+		auto& contact = parts[link.body]->contact;
+		contact.flipY = flipY;
+		if ( b2Body_GetType( link.rigid ) == b2_staticBody )
+		{
+			auto transform = b2Body_GetTransform( link.rigid );
+			link.state = View{ b2Body_GetWorldCenter( link.rigid ), transform.q, { 0, 0 }, 0, 0, 0,
+							   b2Body_GetLocalCenter( link.rigid ) };
+			link.state.origin = transform.p;
+			contact.reflect( link.state );
+			link.index = -1;
+		}
+		else if ( const char* reason = Bridge::validateStepBody( world, link.rigid ) )
+		{
+			error = reason;
+			return false;
+		}
+		link.enabled = true;
+		// The rigid joints/contacts must see the pin's reaction before integration.
+		earlyContacts = true;
+	}
 	for ( int id = 0; id < int( parts.size() ); ++id )
 	{
 		if ( !parts[id] )
@@ -185,6 +219,60 @@ void Assembly::motors()
 		if ( parts[id] )
 			after += soft.kinetic( id );
 	soft.motorWork += after - before;
+}
+
+bool Assembly::rigidMotors( void* step )
+{
+	for ( auto& link : rigidLinks )
+	{
+		link.motorImpulse = link.motorWork = 0;
+		if ( !link.enabled || link.maxMotorTorque == 0 || link.motorGain == 0 )
+			continue;
+		auto& contact = parts[link.body]->contact;
+		if ( b2Body_GetType( link.rigid ) != b2_staticBody &&
+			 !contact.read( step, link.rigid, link.state, link.index ) )
+		{
+			error = "assembly_rigid_motor_state";
+			return false;
+		}
+		const auto& body = soft.bodies[link.body];
+		auto center = soft.center( link.body );
+		double inertia = 0;
+		for ( int i = 0; i < body.nodeCount; ++i )
+		{
+			double x = double( body.x[i][0] ) - center[0];
+			double y = double( body.x[i][1] ) - center[1];
+			inertia += body.mass[i] * ( x * x + y * y );
+		}
+		// Match Core::torque's collapsed-body guard on BOTH ends: a body
+		// with no lever arm must not leave an unmatched rigid reaction.
+		if ( inertia < 1e-12 )
+			continue;
+		double inverse = 1 / inertia + link.state.inverseInertia;
+		double relative = soft.omega( link.body ) - link.state.angularVelocity;
+		// Implicit proportional speed servo. The denominator accounts for
+		// both angular responses and avoids overshoot at small inertia.
+		double gain = double( Step ) * link.motorGain;
+		double impulse = gain * ( link.motorSpeed - relative ) / ( 1 + gain * inverse );
+		double cap = double( Step ) * link.maxMotorTorque;
+		impulse = std::max( -cap, std::min( cap, impulse ) );
+		if ( !std::isfinite( impulse ) )
+		{
+			error = "nonfinite_assembly_rigid_motor";
+			return false;
+		}
+		double before = soft.kinetic( link.body );
+		soft.torque( link.body, impulse / Step );
+		soft.motorWork += soft.kinetic( link.body ) - before;
+		link.state.angularVelocity -= float( impulse * link.state.inverseInertia );
+		if ( link.index >= 0 )
+			contact.write( step, link.index, link.state );
+		link.motorImpulse = impulse;
+		// Relative actuator work; a prescribed rigid target can supply or
+		// absorb work externally. This is not the whole world's energy.
+		link.motorWork = impulse * relative + .5 * impulse * impulse * inverse;
+	}
+	return true;
 }
 
 void Assembly::prepareLinks()
@@ -281,6 +369,87 @@ void Assembly::solveLinks()
 			b.v[i][1] += pin.wb[i] * impulse.y / b.mass[i];
 		}
 	}
+}
+
+bool Assembly::prepareRigidLinks( void* step )
+{
+	for ( auto& link : rigidLinks )
+	{
+		link.impulse = { 0, 0 };
+		if ( !link.enabled )
+			continue;
+		auto& contact = parts[link.body]->contact;
+		if ( b2Body_GetType( link.rigid ) != b2_staticBody &&
+			 !contact.read( step, link.rigid, link.state, link.index ) )
+		{
+			error = "assembly_rigid_pin_state";
+			return false;
+		}
+		const auto& state = link.state;
+		link.arm = b2RotateVector( state.rotation, b2Sub( link.localAnchor, state.localCenter ) );
+		float inverse = state.inverseMass;
+		const auto& body = soft.bodies[link.body];
+		for ( int i = 0; i < body.nodeCount; ++i )
+			inverse += link.weights[i] * link.weights[i] / body.mass[i];
+		float xx = inverse + state.inverseInertia * link.arm.y * link.arm.y;
+		float xy = -state.inverseInertia * link.arm.x * link.arm.y;
+		float yy = inverse + state.inverseInertia * link.arm.x * link.arm.x;
+		float omega = 2 * 3.14159265358979323846f * link.frequency;
+		float denominator = 2 * link.dampingRatio * omega + Step * omega * omega;
+		float compliance = 1 / ( Step * denominator );
+		link.gamma = { { compliance * xx, compliance * xy }, { compliance * xy, compliance * yy } };
+		link.mass = b2GetInverse22( { { xx + link.gamma.cx.x, xy + link.gamma.cx.y },
+									  { xy + link.gamma.cy.x, yy + link.gamma.cy.y } } );
+		auto anchor = soft.anchor( link.body, link.weights );
+		auto target =
+			b2OffsetPos( state.origin, b2RotateVector( state.rotation, link.localAnchor ) );
+		link.bias = { float( anchor[0] - target.x ), float( anchor[1] - target.y ) };
+		link.bias = b2MulSV( omega * omega / denominator, link.bias );
+	}
+	return true;
+}
+
+bool Assembly::solveRigidLinks( void* step )
+{
+	for ( auto& link : rigidLinks )
+	{
+		if ( !link.enabled )
+			continue;
+		auto& contact = parts[link.body]->contact;
+		// Read every visit: another pin or a contact may share this rigid body.
+		if ( link.index >= 0 && !contact.read( step, link.rigid, link.state, link.index ) )
+		{
+			error = "assembly_rigid_pin_state";
+			return false;
+		}
+		auto& state = link.state;
+		auto& body = soft.bodies[link.body];
+		b2Vec2 relative =
+			b2Neg( b2Add( state.velocity, b2CrossSV( state.angularVelocity, link.arm ) ) );
+		for ( int i = 0; i < body.nodeCount; ++i )
+		{
+			relative.x += link.weights[i] * body.v[i][0];
+			relative.y += link.weights[i] * body.v[i][1];
+		}
+		auto impulse = b2Neg( b2MulMV( link.mass, b2Add( b2Add( relative, link.bias ),
+														 b2MulMV( link.gamma, link.impulse ) ) ) );
+		if ( !std::isfinite( impulse.x ) || !std::isfinite( impulse.y ) )
+		{
+			error = "nonfinite_assembly_rigid_pin_impulse";
+			return false;
+		}
+		link.impulse = b2Add( link.impulse, impulse );
+		for ( int i = 0; i < body.nodeCount; ++i )
+		{
+			body.v[i][0] += link.weights[i] * impulse.x / body.mass[i];
+			body.v[i][1] += link.weights[i] * impulse.y / body.mass[i];
+		}
+		state.velocity = b2MulSub( state.velocity, state.inverseMass, impulse );
+		state.angularVelocity -= state.inverseInertia * b2Cross( link.arm, impulse );
+		if ( link.index >= 0 )
+			contact.write( step, link.index, state );
+	}
+	return true;
 }
 
 bool Assembly::refreshDynamic( Solver& contact, void* step )
@@ -421,6 +590,8 @@ bool Assembly::solveContacts( void* step )
 				publishDynamic( contact, step );
 			}
 		solveLinks();
+		if ( !solveRigidLinks( step ) )
+			return false;
 	}
 
 	return true;
@@ -449,6 +620,8 @@ void Assembly::stage( void* step, int phase, void* context )
 			if ( touch.active )
 				owner.soft.solveTouchJoint( touch );
 		owner.motors();
+		if ( !owner.rigidMotors( step ) )
+			return;
 		return;
 	}
 	if ( phase == 1 )
@@ -457,6 +630,8 @@ void Assembly::stage( void* step, int phase, void* context )
 			Profile::Scope timing( owner.profile, Profile::InitialLinks );
 			owner.prepareLinks();
 			owner.solveLinks();
+			if ( !owner.prepareRigidLinks( step ) || !owner.solveRigidLinks( step ) )
+				return;
 		}
 		if ( owner.earlyContacts )
 		{
@@ -590,6 +765,9 @@ bool Assembly::advance()
 		Profile::Scope nativeTiming( profile, Profile::NativeWorld );
 		b2World_StepWithSoftStages( world, Step, 1, nullptr, nullptr, stage, this );
 		bool staticOnly = true;
+		for ( const auto& link : rigidLinks )
+			if ( link.enabled && b2Body_GetType( link.rigid ) != b2_staticBody )
+				staticOnly = false;
 		for ( const auto& part : parts )
 			if ( part )
 				for ( int i = 0; i < part->contact.boxCount; ++i )

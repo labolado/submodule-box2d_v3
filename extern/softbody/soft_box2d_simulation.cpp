@@ -30,12 +30,18 @@ struct Box2DCoupling::Impl
 		ObjectId body;
 		RigidFilter value;
 	};
+	struct Joint
+	{
+		ObjectId body, attachment;
+		std::uint64_t generation = 1;
+	};
 	Simulation& simulation;
 	Simulation::Impl& state;
 	Box2DCouplingDef def;
 	const std::uint64_t owner = AllocateSimulationOwner();
 	Game::Assembly solver;
 	std::vector<Attachment> attachments;
+	std::vector<Joint> joints;
 	std::array<Filter, 32> filters{};
 	const char* error = nullptr;
 	bool valid = false;
@@ -47,6 +53,7 @@ struct Box2DCoupling::Impl
 	{
 		if ( !state.valid || state.coupled || !b2World_IsValid( def.world ) ||
 			 b2World_IsLocked( def.world ) || def.maxAttachments < 1 || def.maxAttachments > 64 ||
+			 def.maxRigidJoints < 0 || def.maxRigidJoints > Game::Assembly::MaxLinks ||
 			 ( def.profile && !Game::Profile::supported() ) )
 		{
 			error = "invalid soft Box2D coupling definition";
@@ -59,13 +66,15 @@ struct Box2DCoupling::Impl
 		solver.enableSoftContacts = state.limits.enableSoftContacts;
 		solver.profile.enabled = def.profile;
 		attachments.reserve( def.maxAttachments );
+		joints.reserve( def.maxRigidJoints );
+		solver.rigidLinks.reserve( def.maxRigidJoints );
 		valid = true;
 	}
 	bool editable()
 	{
 		if ( !valid )
 			return false;
-		if ( state.stepping )
+		if ( state.stepping || ( b2World_IsValid( def.world ) && b2World_IsLocked( def.world ) ) )
 		{
 			error = "soft coupling is executing a native step";
 			return false;
@@ -78,6 +87,24 @@ struct Box2DCoupling::Impl
 		return id.owner == owner && id.kind == ObjectKind::Attachment && id.index >= 0 &&
 			   size_t( id.index ) < attachments.size() && attachments[id.index].active &&
 			   attachments[id.index].generation == id.generation;
+	}
+	bool jointAlive( int i ) const
+	{
+		const auto& joint = joints[i];
+		return solver.rigidLinks[i].active && state.check( joint.body, ObjectKind::Body ) &&
+			   owns( joint.attachment ) &&
+			   b2Body_IsValid( attachments[joint.attachment.index].body );
+	}
+	bool ownsJoint( ObjectId id ) const
+	{
+		return id.owner == owner && id.kind == ObjectKind::RigidJoint && id.index >= 0 &&
+			   size_t( id.index ) < joints.size() && joints[id.index].generation == id.generation;
+	}
+	void pruneJoints()
+	{
+		for ( int i = 0; i < int( joints.size() ); ++i )
+			if ( !jointAlive( i ) )
+				solver.rigidLinks[i].active = solver.rigidLinks[i].enabled = false;
 	}
 };
 Box2DCoupling::Box2DCoupling( Simulation& simulation, const Box2DCouplingDef& def )
@@ -166,6 +193,8 @@ ObjectId Box2DCoupling::attachBody( b2BodyId body )
 }
 bool Box2DCoupling::isValid( ObjectId id ) const
 {
+	if ( impl_ && impl_->ownsJoint( id ) )
+		return impl_->jointAlive( id.index );
 	return impl_ && impl_->owns( id ) && b2Body_IsValid( impl_->attachments[id.index].body );
 }
 bool Box2DCoupling::detach( ObjectId id )
@@ -178,6 +207,145 @@ bool Box2DCoupling::detach( ObjectId id )
 		return false;
 	}
 	impl_->attachments[id.index].active = false;
+	impl_->pruneJoints();
+	return true;
+}
+ObjectId Box2DCoupling::createRigidJoint( const SoftRigidJointDef& def )
+{
+	if ( !impl_ || !impl_->editable() )
+		return {};
+	auto& s = *impl_;
+	if ( !s.state.check( def.body, ObjectKind::Body ) || !isValid( def.rigid ) ||
+		 def.rigid.kind != ObjectKind::Attachment ||
+		 !( def.frequency >= 1 && def.frequency <= 60 ) ||
+		 !( def.dampingRatio >= 0 && def.dampingRatio <= 10 ) ||
+		 !( def.motorGain >= 0 && def.motorGain <= 1e6f ) || !std::isfinite( def.localAnchor[0] ) ||
+		 !std::isfinite( def.localAnchor[1] ) || std::abs( def.localAnchor[0] ) > 1e4f ||
+		 std::abs( def.localAnchor[1] ) > 1e4f )
+	{
+		s.error = "invalid soft rigid pin definition";
+		return {};
+	}
+	auto rigid = s.attachments[def.rigid.index].body;
+	if ( !b2Body_IsEnabled( rigid ) || ( b2Body_GetType( rigid ) != b2_staticBody &&
+										 Game::Bridge::validateStepBody( s.def.world, rigid ) ) )
+	{
+		s.error = "rigid pin requires enabled static or awake unlocked rigid body";
+		return {};
+	}
+	auto& body = s.state.core.bodies[def.body.index];
+	double sum = 0;
+	for ( float w : def.weights )
+	{
+		if ( !( w >= 0 && w <= 1 ) )
+		{
+			s.error = "invalid rigid pin weights";
+			return {};
+		}
+		sum += w;
+	}
+	if ( def.weights.size() != size_t( body.nodeCount ) || std::abs( sum - 1 ) > 1e-6 )
+	{
+		s.error = "rigid pin requires one normalized weight per source node";
+		return {};
+	}
+	Game::Assembly::RigidLink link;
+	link.active = true;
+	link.body = def.body.index;
+	link.rigid = rigid;
+	link.weights.resize( body.nodeCount );
+	for ( int i = 0; i < body.nodeCount; ++i )
+		link.weights[i] = def.weights[body.sourceNodes[i]];
+	link.localAnchor = { def.localAnchor[0], def.localAnchor[1] };
+	link.frequency = def.frequency;
+	link.dampingRatio = def.dampingRatio;
+	link.motorGain = def.motorGain;
+	auto softAnchor = s.state.core.anchor( link.body, link.weights );
+	auto rigidAnchor = b2Body_GetWorldPoint(
+		rigid, { def.localAnchor[0], s.def.flipY ? -def.localAnchor[1] : def.localAnchor[1] } );
+	if ( std::hypot( double( softAnchor[0] ) - rigidAnchor.x,
+					 double( softAnchor[1] ) - ( s.def.flipY ? -rigidAnchor.y : rigidAnchor.y ) ) >
+		 .001 )
+	{
+		s.error = "rigid pin anchors must initially coincide within 1mm";
+		return {};
+	}
+	s.pruneJoints();
+	int slot = 0;
+	while ( slot < int( s.joints.size() ) && s.solver.rigidLinks[slot].active )
+		++slot;
+	if ( slot >= s.def.maxRigidJoints )
+	{
+		s.error = "soft rigid joint capacity reached";
+		return {};
+	}
+	Impl::Joint item;
+	item.body = def.body;
+	item.attachment = def.rigid;
+	if ( slot == int( s.joints.size() ) )
+	{
+		s.joints.push_back( item );
+		s.solver.rigidLinks.push_back( std::move( link ) );
+	}
+	else
+	{
+		item.generation = s.joints[slot].generation + 1;
+		s.joints[slot] = item;
+		s.solver.rigidLinks[slot] = std::move( link );
+	}
+	auto id = s.state.id( ObjectKind::RigidJoint, slot, item.generation );
+	id.owner = s.owner;
+	return id;
+}
+bool Box2DCoupling::removeRigidJoint( ObjectId id )
+{
+	if ( !impl_ || !impl_->editable() )
+		return false;
+	if ( !impl_->ownsJoint( id ) )
+	{
+		impl_->error = "rigid pin was removed or belongs to another world";
+		return false;
+	}
+	auto& link = impl_->solver.rigidLinks[id.index];
+	link.active = link.enabled = false;
+	return true;
+}
+bool Box2DCoupling::setRigidMotor( ObjectId id, float speed, float maxTorque )
+{
+	if ( !impl_ || !impl_->editable() )
+		return false;
+	if ( !impl_->ownsJoint( id ) || !impl_->jointAlive( id.index ) || !std::isfinite( speed ) ||
+		 std::abs( speed ) > 1e4f || !( maxTorque >= 0 && maxTorque <= 1e6f ) )
+	{
+		impl_->error = "invalid soft rigid motor input";
+		return false;
+	}
+	auto& link = impl_->solver.rigidLinks[id.index];
+	link.motorSpeed = speed;
+	link.maxMotorTorque = maxTorque;
+	return true;
+}
+bool Box2DCoupling::getRigidJointState( ObjectId id, SoftRigidJointState& result ) const
+{
+	if ( !impl_ || impl_->state.stepping || !impl_->ownsJoint( id ) || !isValid( id ) )
+		return false;
+	const auto& s = *impl_;
+	const auto& link = s.solver.rigidLinks[id.index];
+	result = {};
+	result.enabled = b2Body_IsEnabled( link.rigid );
+	if ( !result.enabled )
+		return true;
+	auto a = s.state.core.anchor( link.body, link.weights );
+	auto b = b2Body_GetWorldPoint(
+		link.rigid,
+		{ link.localAnchor.x, s.def.flipY ? -link.localAnchor.y : link.localAnchor.y } );
+	result.errorM =
+		std::hypot( double( a[0] ) - b.x, double( a[1] ) - ( s.def.flipY ? -b.y : b.y ) );
+	result.impulse = { link.impulse.x, link.impulse.y };
+	result.relativeSpeed = s.state.core.omega( link.body ) -
+						   ( s.def.flipY ? -1 : 1 ) * b2Body_GetAngularVelocity( link.rigid );
+	result.motorImpulse = link.motorImpulse;
+	result.motorWork = link.motorWork;
 	return true;
 }
 bool Box2DCoupling::setCollisionEnabled( ObjectId attachment, ObjectId body, bool enabled )
@@ -222,6 +390,7 @@ bool Box2DCoupling::prepare()
 		return false;
 	auto& s = *impl_;
 	auto& solver = s.solver;
+	s.pruneJoints();
 	Game::Profile::Scope timing( solver.profile, Game::Profile::Adapter );
 	if ( solver.error )
 		return false;
