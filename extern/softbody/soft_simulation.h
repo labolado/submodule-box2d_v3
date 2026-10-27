@@ -78,6 +78,13 @@ struct SoftBodyDef
 		// Starts empty; target is approached at rate N/m/s, without adding mass.
 		float target = 0, maxPressure = 1000, rate = 500, maxAcceleration = 200;
 	} pressure;
+	struct ReferenceScale
+	{
+		bool enabled = false;
+		// Uniform scale about the creation mass centroid. Rate is scale/s;
+		// maxSpeed bounds reference-node motion in m/s, not actual velocity.
+		float target = 1, min = .5f, max = 2, rate = 1, maxSpeed = 2;
+	} referenceScale;
 };
 struct SoftJointDef
 {
@@ -104,6 +111,8 @@ struct SoftWorldJointDef
 };
 struct SoftBodyState
 {
+	double referenceScale = 1, referenceScaleTarget = 1, referenceScaleWork = 0;
+	unsigned long long referenceScaleLimitedSteps = 0;
 	double pressureTarget = 0, pressureLevel = 0, pressureApplied = 0, pressureScale = 1;
 	double pressureWork = 0; // Discrete pressure force work; included in appliedWork.
 	unsigned long long pressureRecoverySteps = 0, pressureLimitedSteps = 0;
@@ -158,6 +167,7 @@ public:
 	bool applyLinearImpulse( ObjectId body, Point impulse );
 	// Requires pressure opt-in at creation; changes the target, never the nodes.
 	bool setPressureTarget( ObjectId body, float pressure );
+	bool setReferenceScaleTarget( ObjectId body, float scale );
 	bool setCollisionEnabled( ObjectId a, ObjectId b, bool enabled );
 	bool getBodyState( ObjectId body, SoftBodyState& state ) const;
 	bool getTouchState( ObjectId touch, SoftTouchState& state ) const;

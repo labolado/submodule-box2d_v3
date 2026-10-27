@@ -253,6 +253,8 @@ template <class T> void World<T>::advanceMaterialVelocity()
 			// reduce the wall reaction without reducing stored elastic energy.
 			if ( b.kind == 3 )
 			{
+				if ( b.referenceScale.enabled )
+					appliedWork += b.updateReferenceScale( dt );
 				b.dampDeformation( dt );
 				if ( !b.internalSprings.empty() )
 				{

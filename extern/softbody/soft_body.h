@@ -33,6 +33,17 @@ template <class T> struct Body
 		unsigned long long recoverySteps = 0, limitedSteps = 0;
 		std::vector<Vec> forces; // Allocated only for an enabled pressure module.
 	} pressure;
+	struct ReferenceScale
+	{
+		bool enabled = false;
+		double value = 1, target = 1, min = .5, max = 2, rate = 1, maxSpeed = 2;
+		double area = 0, radius = 0, work = 0;
+		V center{};
+		std::vector<Vec> baseRest;
+		std::vector<T> baseLengths;
+		std::vector<V> baseSprings; // Rest length and regularization length.
+		unsigned long long limitedSteps = 0;
+	} referenceScale;
 	int nodeCount = 16;
 	// Solver nodes follow the normalized boundary; public node identities do not.
 	std::vector<int> sourceNodes;
@@ -59,9 +70,12 @@ template <class T> struct Body
 		  T scale, T overlap );
 	T area() const;
 	void resizeNodes( int count );
+	void initializeReferenceScale();
+	double updateReferenceScale( T dt ); // Reference changes only; returns parameter work.
 	// Finite corotated quadratic energy. Unlike pressure, this material is
-	// defined for signed/zero area and overlapping nodes. Node identities and
-	// rest coordinates never change; forces, not a rest-pose teleport, unfold it.
+	// defined for signed/zero area and overlapping nodes. Node identities remain
+	// fixed. Optional reference scaling changes the target
+	// smoothly; forces, not a rest-pose teleport, unfold it.
 	T recoverableForce( Vec* forces ) const;
 	T supportedForce( Vec* forces ) const;
 	T internalSpringForce( Vec* forces, double scale = 1 ) const;

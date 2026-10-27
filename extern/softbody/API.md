@@ -52,7 +52,8 @@ The list belongs to the body definition, not `shape`. Omission/empty lists keep
 the previous material arithmetic. No mass points, collision edges, pins or mesh
 triangles are created; crossing spring lines do not create a shared node.
 Connections can include boundary neighbours. Internal mass points and runtime
-topology/rest-length editing are not supported.
+topology or individual rest-length editing are not supported; optional uniform
+reference scaling below updates all lengths together.
 
 Stiffness is N/m (default300, accepted0.001..1e8); dampingRatio is dimensionless
 (default0.3, accepted0..10). Reference length comes from the initial shape and
@@ -137,7 +138,8 @@ recovery, motors and touch forces are **not** acceleration-limited by this optio
 Total node mass stays fixed; inertia changes naturally with node positions.
 Sampling, contour identity and material joint weights remain unchanged.
 
-At <=5% of creation area, inverted/self-crossed/nonadjacent-touching contours,
+At <=5% of current reference area (creation area without scaling),
+inverted/self-crossed/nonadjacent-touching contours,
 or a boundary edge <=1um, pressure is suspended. The finite recoverable material
 continues. Eight consecutive healthy steps above10% area are required before
 pressure scale ramps back at `frequency` per second. No rest-pose teleport or
@@ -161,8 +163,85 @@ per material step. Default-off bodies skip it. Local tests cover force balance,
 rate/cap/identity/lifecycle, real load lifting, flatten/recover, concave24-node
 structure networks and a car with inflatable tyres. Android cost and human
 acceptance are pending. The old `kind=2`/`preload` pressure material is unchanged.
-Shape-preserving reference-size changes are a separate, unimplemented feature;
+Shape-preserving reference-size changes use the separate opt-in module below;
 pressure can round a noncircular body and must not be presented as uniform scaling.
+
+## Optional uniform reference scaling
+
+`SoftBodyDef.referenceScale.enabled` enables continuous physical reference-size
+changes for a recoverable body. Lua enables the module with a table:
+
+```lua
+local chassis = world:createBody{
+    material='recoverable', mass=3, shape=chassisShape,
+    frequency=12, damping=40, materialScale=1.5,
+    referenceScale={target=1, min=.5, max=2, rate=1, maxSpeed=2},
+}
+chassis:setReferenceScaleTarget(1.5)
+chassis:setReferenceScaleTarget(.7)
+chassis:setReferenceScaleTarget(1)
+```
+
+Native uses `Simulation::setReferenceScaleTarget(id, factor)`. An empty Lua table
+enables defaults; omission stays disabled and rejects even a target of1. Invalid
+values, stale/foreign handles and mutation during a native step are rejected.
+The setter only changes the requested target. Actual reference scale starts at1,
+including when a different target is supplied at creation.
+
+| Field | Default | Supported range / units |
+| --- | --- | --- |
+| target | 1 | min..max, dimensionless |
+| min | .5 | .25..1 |
+| max | 2 | 1..4 |
+| rate | 1 | .001..10 scale factors per simulated second |
+| maxSpeed | 2 | .001..20 m/s of reference-node motion |
+
+The entire allowed range is checked at creation: scaled boundary/spring edges
+must remain at least1mm, area at least1e-6m² and reference coordinates within
+±100m. This envelope is an input contract, not a stability guarantee for arbitrary
+materials, forces or confinements. `maxSpeed` limits the moving reference only;
+it does **not** cap actual node speed or collision/recovery forces.
+
+Scaling is uniform about the **creation mass centroid**, including world-supported
+and off-origin shapes. Immutable creation copies generate each new reference;
+returning to1 restores those copies exactly, without accumulated scaling drift.
+Boundary lengths, recovery area, internal spring rest lengths and their smoothing
+lengths follow scale. Spring stiffness (N/m), damping and material parameters stay
+unchanged. Total mass, node IDs, pin/touch weights and object handles stay fixed;
+actual mass distribution/inertia changes as the nodes move. Lua decides whether
+to scale the chassis, tyres, or all parts. Pin targets are still their weighted
+material nodes, so growing a chassis changes axle spacing through the same forces.
+
+No node teleport, body rebuild, contact disabling or display transform is used.
+Material forces move the current nodes toward the new reference; collision and
+rendering continue to use those actual nodes. A loaded body need not equal its
+unloaded reference silhouette. While confined it can remain distorted and recover
+toward the new size after release. This is active gameplay shape actuation, not
+mass-conserving areal density, a gas law or independent x/y stretch.
+
+If pressure is also enabled, virtual gas amount remains based on **creation**
+area. Scaling the reference does not add gas; increasing actual area lowers gas
+pressure at a fixed level. Pressure recovery ratios use the **current reference**
+area so a healthy shrunken body is not permanently classified as collapsed.
+
+Snapshots expose `referenceScale`, `referenceScaleTarget`, `referenceScaleWork`
+and `referenceScaleLimitedSteps`. Work is the signed change in recoverable plus
+currently active structural potential at fixed positions/velocity, in joules;
+it is included once in world `appliedWork`. Structural stiffness-recovery work
+and pressure force work retain their separate ledgers. Limited steps count the
+reference-speed cap, not ordinary rate limiting. This is accounting for active
+reference changes, not a complete coupled-system energy-conservation proof.
+
+The update costs O(nodes + internal springs) while the reference changes; base
+arrays allocate only on opt-in creation. A settled scale does not recompute this
+work. Default-off and enabled-but-static1 paths preserve the old numerical update.
+K3b has local native, sanitizer and Simulator validation, including noncircular
+car/chassis scaling, structural nodes, press recovery and chain contact. Human
+acceptance and Android cost remain pending. Experimental native definition/state
+and private body layouts changed: rebuild direct native consumers; no stable C++
+ABI is promised here. No Corona public plugin headers, existing engine object
+layouts/vtables, Box2D rigid `src` or LiquidFun code changed.
+
 
 ## Static chain terrain
 

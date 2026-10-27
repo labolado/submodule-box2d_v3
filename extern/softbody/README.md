@@ -10,7 +10,11 @@ Bodies may also opt into regulated virtual pressure with `pressure` at creation
 and `setPressureTarget` at runtime. Gas pressure changes physical geometry while
 preserving mass and node identity; limits and collapse recovery are documented
 in the API. It is distinct from the historical pressure material and from
-shape-preserving reference-size scaling. Local validation only.
+shape-preserving reference-size scaling. Recoverable bodies can separately opt
+into `referenceScale` and `setReferenceScaleTarget` for uniform physical scaling,
+including a noncircular chassis. Mass and node/pin identities remain fixed;
+material forces move the collision contour toward the scaled reference. See the
+API for rate/geometry bounds and gas interaction. Local validation only.
 Assembly coupling accepts one circle or multiple sharp convex polygon fixtures
 per rigid body, including local offsets. Polygon compounds share rigid reaction
 state and use their exposed union boundary; assembly allows sixteen closed

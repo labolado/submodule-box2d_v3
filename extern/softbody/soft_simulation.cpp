@@ -148,6 +148,38 @@ bool configureSprings( Body<float>& body, const std::vector<SoftSpringDef>& spri
 			return false;
 	return true;
 }
+bool configureReferenceScale( Body<float>& body, const SoftBodyDef::ReferenceScale& def )
+{
+	if ( !range( def.min, .25f, 1 ) || !range( def.max, 1, 4 ) ||
+		 !range( def.target, def.min, def.max ) || !range( def.rate, .001f, 10 ) ||
+		 !range( def.maxSpeed, .001f, 20 ) || ( !def.enabled && def.target != 1 ) )
+		return false;
+	if ( !def.enabled )
+		return true;
+	auto& scale = body.referenceScale;
+	scale.enabled = true;
+	scale.target = def.target;
+	scale.min = def.min;
+	scale.max = def.max;
+	scale.rate = def.rate;
+	scale.maxSpeed = def.maxSpeed;
+	body.initializeReferenceScale();
+	if ( body.restArea * def.min * def.min < 1e-6 || !( scale.radius > 0 ) )
+		return false;
+	for ( int i = 0; i < body.nodeCount; ++i )
+	{
+		if ( body.lengths[i] * def.min < .001f )
+			return false;
+		for ( int axis = 0; axis < 2; ++axis )
+			if ( std::abs( scale.center[axis] +
+						   def.max * ( body.rest[i][axis] - scale.center[axis] ) ) > 100 )
+				return false;
+	}
+	for ( const auto& spring : body.internalSprings )
+		if ( spring.restLength * def.min < .001 )
+			return false;
+	return true;
+}
 Weights orderWeights( const Weights& input, const Body<float>& body )
 {
 	Weights result( body.nodeCount );
@@ -313,6 +345,11 @@ ObjectId Simulation::createBody( const SoftBodyDef& def )
 	if ( !configureSprings( body, def.internalSprings, s.core.dt ) )
 	{
 		s.error = "invalid internal springs or fixed-step stiffness budget exceeded";
+		return {};
+	}
+	if ( !configureReferenceScale( body, def.referenceScale ) )
+	{
+		s.error = "invalid reference scale definition or scaled shape outside supported geometry";
 		return {};
 	}
 	const auto& pressure = def.pressure;
@@ -570,6 +607,24 @@ bool Simulation::setPressureTarget( ObjectId id, float value )
 	pressure.target = value;
 	return true;
 }
+bool Simulation::setReferenceScaleTarget( ObjectId id, float value )
+{
+	if ( !impl_ || !impl_->editable() )
+		return false;
+	if ( !impl_->check( id, ObjectKind::Body ) )
+	{
+		impl_->error = "invalid soft reference scale body";
+		return false;
+	}
+	auto& scale = impl_->core.bodies[id.index].referenceScale;
+	if ( !scale.enabled || !range( value, float( scale.min ), float( scale.max ) ) )
+	{
+		impl_->error = "reference scaling requires opt-in and a target within its limits";
+		return false;
+	}
+	scale.target = value;
+	return true;
+}
 bool Simulation::setCollisionEnabled( ObjectId a, ObjectId b, bool enabled )
 {
 	if ( !impl_ || !impl_->editable() )
@@ -599,6 +654,10 @@ bool Simulation::getBodyState( ObjectId id, SoftBodyState& result ) const
 		return false;
 	const auto& body = impl_->core.bodies[id.index];
 	result.nodeCount = body.nodeCount;
+	result.referenceScale = body.referenceScale.value;
+	result.referenceScaleTarget = body.referenceScale.target;
+	result.referenceScaleWork = body.referenceScale.work;
+	result.referenceScaleLimitedSteps = body.referenceScale.limitedSteps;
 	result.internalSpringScale = body.internalSpringScale;
 	result.internalSpringWork = body.internalSpringWork;
 	result.internalSpringRecoverySteps = body.internalSpringRecoverySteps;

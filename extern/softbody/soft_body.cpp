@@ -56,6 +56,65 @@ template <class T> void Body<T>::resizeNodes( int count )
 	weightScratch.resize( count );
 }
 
+template <class T> void Body<T>::initializeReferenceScale()
+{
+	auto& scale = referenceScale;
+	scale.baseRest = rest;
+	scale.baseLengths = lengths;
+	scale.area = restArea;
+	double totalMass = 0;
+	for ( int i = 0; i < nodeCount; ++i )
+	{
+		totalMass += mass[i];
+		for ( int axis = 0; axis < 2; ++axis )
+			scale.center[axis] += double( mass[i] ) * rest[i][axis];
+	}
+	for ( auto& axis : scale.center )
+		axis /= totalMass;
+	for ( auto p : rest )
+		scale.radius =
+			std::max( scale.radius, std::hypot( p[0] - scale.center[0], p[1] - scale.center[1] ) );
+	for ( const auto& spring : internalSprings )
+		scale.baseSprings.push_back( { spring.restLength, spring.epsilon } );
+}
+
+template <class T> double Body<T>::updateReferenceScale( T dt )
+{
+	auto& scale = referenceScale;
+	if ( !scale.enabled || scale.value == scale.target )
+		return 0;
+	double distance = scale.target - scale.value;
+	double rateStep = scale.rate * dt;
+	double step = std::min( rateStep, scale.maxSpeed * dt / scale.radius );
+	if ( step < std::min( rateStep, std::abs( distance ) ) )
+		++scale.limitedSteps;
+	double next =
+		std::abs( distance ) <= step ? scale.target : scale.value + std::copysign( step, distance );
+	// Account for active reference changes at unchanged positions and velocity.
+	// Structural stiffness recovery is a separate parameter-work ledger.
+	double before = double( recoverableForce( forceScratch.data() ) ) +
+					internalSpringForce( nullptr, internalSpringScale );
+	for ( int i = 0; i < nodeCount; ++i )
+	{
+		for ( int axis = 0; axis < 2; ++axis )
+			rest[i][axis] = next == 1 ? scale.baseRest[i][axis]
+									  : T( scale.center[axis] + next * ( scale.baseRest[i][axis] -
+																		 scale.center[axis] ) );
+		lengths[i] = T( scale.baseLengths[i] * next );
+	}
+	for ( size_t i = 0; i < internalSprings.size(); ++i )
+	{
+		internalSprings[i].restLength = scale.baseSprings[i][0] * next;
+		internalSprings[i].epsilon = scale.baseSprings[i][1] * next;
+	}
+	restArea = T( scale.area * next * next );
+	scale.value = next;
+	double work = double( recoverableForce( forceScratch.data() ) ) +
+				  internalSpringForce( nullptr, internalSpringScale ) - before;
+	scale.work += work;
+	return work;
+}
+
 template <class T> T Body<T>::area() const
 {
 	T a = 0;
@@ -265,8 +324,9 @@ template <class T> double Body<T>::pressureForce( Vec* forces ) const
 		return 0;
 	// A fixed amount of virtual gas has p*A = level*creationArea. No vacuum
 	// suction: the recoverable material supplies the restoring membrane force.
+	double gasArea = referenceScale.enabled ? referenceScale.area : double( restArea );
 	double applied =
-		pressure.scale * std::min( pressure.maxPressure, pressure.level * restArea / a );
+		pressure.scale * std::min( pressure.maxPressure, pressure.level * gasArea / a );
 	double inverseMassGradient = 0;
 	for ( int i = 0; i < nodeCount; ++i )
 	{
@@ -309,8 +369,9 @@ template <class T> void Body<T>::updatePressure( T dt )
 		++pressure.recoverySteps;
 	pressure.forces.resize( nodeCount );
 	pressure.applied = pressureForce( pressure.forces.data() );
+	double gasArea = referenceScale.enabled ? referenceScale.area : double( restArea );
 	if ( pressure.scale > 0 && pressure.level > 0 &&
-		 pressure.applied < pressure.scale * pressure.level * restArea / area() )
+		 pressure.applied < pressure.scale * pressure.level * gasArea / area() )
 		++pressure.limitedSteps;
 }
 
