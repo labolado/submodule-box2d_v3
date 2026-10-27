@@ -14,8 +14,14 @@ namespace Game
 {
 bool Solver::add( b2ShapeId shape )
 {
-	if ( boxCount == ( extendedGeometry ? MaxCompoundShapes : MaxBoxes ) )
+	if ( boxCount == ( extendedGeometry ? MaxCompoundShapes + maxChainSegments : MaxBoxes ) )
 		return false;
+	if ( size_t( boxCount ) == boxes.size() )
+	{
+		boxes.resize( boxCount + 1 );
+		if ( contactSteps.size() < boxes.size() )
+			contactSteps.resize( boxes.size() );
+	}
 	boundaryDirty = true;
 	boxes[boxCount++].shape = shape;
 	return true;
@@ -102,6 +108,13 @@ bool Solver::prepareTargets()
 			if ( !geometry.read( box.shape, flipY ) )
 			{
 				error = "game_requires_circle_or_sharp_convex_polygon";
+				return false;
+			}
+			if ( geometry.kind == RigidGeometry::Chain &&
+				 ( maxChainSegments == 0 || !chainQueryActive ||
+				   chainStart.size() != body().x.size() ) )
+			{
+				error = "chain_requires_assembly_query";
 				return false;
 			}
 		}
@@ -197,6 +210,9 @@ bool Solver::prepareTargets()
 					error = "game_duplicate_body";
 					return false;
 				}
+				if ( box.geometry.kind == RigidGeometry::Chain ||
+					 boxes[j].geometry.kind == RigidGeometry::Chain )
+					continue; // Static segments are surfaces, never a filled polygon union.
 				if ( box.geometry.kind == RigidGeometry::Circle ||
 					 boxes[j].geometry.kind == RigidGeometry::Circle )
 				{
@@ -474,6 +490,196 @@ bool Solver::projectCompound( int owner )
 	return observeRecovery();
 }
 
+namespace
+{
+struct ChainHit
+{
+	Row row;
+	float gap;
+};
+// Use Box2D's public narrow phase for the adjacency normal cone. Each material
+// edge is a thin capsule, not a separately simulated rigid body. A front-side
+// edge may continue through the plane within this step; back-side edges pass.
+int chainHits( const Solver& solver, int shape, int edge, ChainHit hits[2], float reach = Margin )
+{
+	const auto& box = solver.boxes[shape];
+	const auto& body = solver.body();
+	const auto& chain = box.geometry.chain;
+	b2WorldTransform transform{ box.state.origin, box.state.rotation };
+	int next = ( edge + 1 ) % body.nodeCount;
+	auto local = [&]( Core::Vec p ) {
+		return b2InvTransformWorldPoint( transform, { p[0], p[1] } );
+	};
+	auto a = local( body.x[edge] ), b = local( body.x[next] );
+	auto start = b2Lerp( local( solver.chainStart[edge] ), local( solver.chainStart[next] ), .5f );
+	auto normal = b2Normalize( b2RightPerp( b2Sub( chain.segment.point2, chain.segment.point1 ) ) );
+	if ( b2Dot( normal, b2Sub( start, chain.segment.point1 ) ) < -Margin )
+		return 0;
+	float side = b2Dot( normal, b2Sub( b2Lerp( a, b, .5f ), chain.segment.point1 ) );
+	auto shift = b2MulSV( std::max( 0.f, Margin - side ), normal );
+	float radius = Margin + std::max( 0.f, reach );
+	b2LocalManifold manifold;
+	auto d = b2Sub( b, a );
+	float length2 = b2LengthSquared( d );
+	if ( length2 < 1e-12f )
+	{
+		b2Circle point{ b2Add( a, shift ), radius };
+		manifold = b2CollideChainSegmentAndCircle( &chain, &point, b2Transform_identity );
+	}
+	else
+	{
+		b2Capsule edgeShape{ b2Add( a, shift ), b2Add( b, shift ), radius };
+		b2SimplexCache cache{};
+		manifold =
+			b2CollideChainSegmentAndCapsule( &chain, &edgeShape, b2Transform_identity, &cache );
+	}
+	int count = 0;
+	for ( int i = 0; i < manifold.pointCount; ++i )
+	{
+		const auto& contact = manifold.points[i];
+		auto n = manifold.normal;
+		auto surface = b2MulAdd( contact.point, -.5f * contact.separation, n );
+		auto center =
+			b2Sub( b2MulAdd( contact.point, .5f * contact.separation + radius, n ), shift );
+		float fraction =
+			length2 > 1e-12f
+				? std::max( 0.f, std::min( 1.f, b2Dot( b2Sub( center, a ), d ) / length2 ) )
+				: 0;
+		float gap = b2Dot( b2Sub( b2Lerp( a, b, fraction ), surface ), n ) - Margin;
+		if ( gap > reach )
+			continue;
+		Row row;
+		row.box = shape;
+		row.edge = edge;
+		row.fraction = fraction;
+		row.feature = contact.id;
+		row.normal = b2RotateVector( transform.q, n );
+		row.localAnchor = b2MulAdd( surface, Margin, n );
+		hits[count++] = { row, gap };
+	}
+	return count;
+}
+} // namespace
+
+bool Solver::withinChainQuery()
+{
+	if ( !chainQueryActive )
+		return true;
+	for ( auto p : body().x )
+		if ( p[0] < chainQueryBounds.lowerBound.x || p[1] < chainQueryBounds.lowerBound.y ||
+			 p[0] > chainQueryBounds.upperBound.x || p[1] > chainQueryBounds.upperBound.y )
+		{
+			error = "chain_motion_exceeded_query_bounds";
+			return false;
+		}
+	return true;
+}
+void Solver::chainEdgeRows( int edge )
+{
+	// On a straight material edge, coplanar contacts with the same friction
+	// impose redundant constraints. Retain their extreme material coordinates
+	// so support does not depend on how finely a flat road is segmented.
+	// Different normals and materials keep separate rows and actual anchors.
+	chainPatches.clear();
+	auto anchor = [&]( const Row& row ) {
+		const auto& box = boxes[row.box];
+		auto p = b2TransformWorldPoint( { box.state.origin, box.state.rotation }, row.localAnchor );
+		return b2Dot( { float( p.x ), float( p.y ) }, row.normal );
+	};
+	for ( int shape = 0; shape < boxCount; ++shape )
+	{
+		if ( !boxes[shape].enabled || boxes[shape].geometry.kind != RigidGeometry::Chain )
+			continue;
+		ChainHit hits[2];
+		int count = chainHits( *this, shape, edge, hits );
+		for ( int i = 0; i < count; ++i )
+		{
+			const auto& row = hits[i].row;
+			bool merged = false;
+			for ( size_t j = 0; j < chainPatches.size(); j += 2 )
+			{
+				auto& low = chainPatches[j];
+				auto& high = chainPatches[j + 1];
+				if ( b2LengthSquared( b2Sub( low.normal, row.normal ) ) > 1e-12f ||
+					 std::abs( anchor( low ) - anchor( row ) ) > 1e-6f ||
+					 boxes[low.box].friction != boxes[row.box].friction )
+					continue;
+				if ( row.fraction < low.fraction )
+					low = row;
+				if ( row.fraction > high.fraction )
+					high = row;
+				merged = true;
+				break;
+			}
+			if ( !merged )
+			{
+				chainPatches.push_back( row );
+				chainPatches.push_back( row );
+			}
+		}
+	}
+}
+void Solver::gatherChains()
+{
+	for ( int edge = 0; edge < body().nodeCount; ++edge )
+	{
+		chainEdgeRows( edge );
+		for ( size_t i = 0; i < chainPatches.size(); ++i )
+		{
+			const auto& row = chainPatches[i];
+			if ( i % 2 && row.fraction == chainPatches[i - 1].fraction )
+				continue;
+			append( row );
+			++contactSteps[row.box];
+		}
+	}
+}
+bool Solver::projectChains()
+{
+	if ( !observeRecovery() )
+		return false;
+	// The projection needs only body mass and a world-space normal. Individual
+	// row anchors below retain their actual segment transform and material.
+	View origin{};
+	BoxProjection projection( body(), origin, 0, 0 );
+	projection.stopOnInvalid = !recovery.active;
+	if ( recovery.active )
+	{
+		projection.remaining = &recovery.remaining;
+		projection.correctionDistance = &recovery.correctionDistance;
+	}
+	for ( int edge = 0; edge < body().nodeCount && !projection.invalidated; ++edge )
+	{
+		chainEdgeRows( edge );
+		for ( size_t i = 0; i < chainPatches.size() && !projection.invalidated; ++i )
+		{
+			const auto& row = chainPatches[i];
+			if ( i % 2 && row.fraction == chainPatches[i - 1].fraction )
+				continue;
+			const auto& box = boxes[row.box];
+			auto anchor =
+				b2TransformWorldPoint( { box.state.origin, box.state.rotation }, row.localAnchor );
+			auto p = point( row );
+			float gap = b2Dot( { float( p.x - anchor.x ), float( p.y - anchor.y ) }, row.normal );
+			projection.move( edge, row.fraction, row.normal, -gap );
+		}
+	}
+	geometryCorrections += projection.corrections;
+	return observeRecovery() && withinChainQuery();
+}
+double Solver::chainDepth( int shape ) const
+{
+	double depth = 0;
+	for ( int edge = 0; edge < body().nodeCount; ++edge )
+	{
+		ChainHit hits[2];
+		int count = chainHits( *this, shape, edge, hits );
+		for ( int i = 0; i < count; ++i )
+			depth = std::max( depth, double( -hits[i].gap ) );
+	}
+	return depth;
+}
+
 b2Vec2 Solver::point( const Row& row ) const
 {
 	const auto& body = this->body();
@@ -519,6 +725,7 @@ void Solver::append( Row row )
 
 void Solver::gather()
 {
+	bool chainsGathered = false;
 	rowCount = 0;
 	auto& body = this->body();
 	for ( int id = 0; id < boxCount; ++id )
@@ -527,6 +734,13 @@ void Solver::gather()
 		if ( !box.enabled )
 			continue;
 		b2WorldTransform transform = { box.state.origin, box.state.rotation };
+		if ( box.geometry.kind == RigidGeometry::Chain )
+		{
+			if ( !chainsGathered )
+				gatherChains();
+			chainsGathered = true;
+			continue;
+		}
 		if ( box.compound )
 		{
 			if ( box.stateSlot == id )
@@ -670,18 +884,30 @@ void Solver::gather()
 
 bool Solver::projectGeometry()
 {
+	if ( !withinChainQuery() )
+		return false;
 	// Within this call only BoxProjection::move can change node positions;
 	// it increments corrections before every write. Velocities stay unchanged.
 	// Repeated endOfStep=false observations of unchanged topology are idempotent.
 	// Keep the observation local so edits between calls cannot reuse stale data.
 	bool observed = false;
 	for ( int sweep = 0; sweep < Sweeps; ++sweep )
+	{
+		bool chainsProjected = false;
 		for ( int j = 0; j < boxCount; ++j )
 		{
 			int id = j;
 			auto& box = boxes[id];
 			if ( !box.enabled )
 				continue;
+			if ( box.geometry.kind == RigidGeometry::Chain )
+			{
+				if ( !chainsProjected && !projectChains() )
+					return false;
+				chainsProjected = true;
+				observed = false;
+				continue;
+			}
 			if ( box.compound )
 			{
 				if ( box.stateSlot == id && !projectCompound( id ) )
@@ -718,7 +944,8 @@ bool Solver::projectGeometry()
 			if ( geometry.corrections != 0 && !observeRecovery() )
 				return false;
 		}
-	return true;
+	}
+	return withinChainQuery();
 }
 
 void Solver::captureBoundarySides()
@@ -734,7 +961,7 @@ void Solver::captureBoundarySides()
 		BoxProjection geometry( body(), box.state, box.geometry );
 		geometry.nodeFaces = &box.nodeFaces;
 		geometry.faceMargin = Margin;
-		if ( box.compound || geometry.circular() )
+		if ( box.compound || geometry.circular() || box.geometry.kind == RigidGeometry::Chain )
 		{
 			std::fill( box.nodeFaces.begin(), box.nodeFaces.end(), -1 );
 			continue;
@@ -775,6 +1002,24 @@ float Solver::limitCorrection( int node, Core::Vec delta )
 		const auto& box = boxes[j];
 		if ( !box.enabled )
 			continue;
+		if ( box.geometry.kind == RigidGeometry::Chain )
+		{
+			float reach = std::hypot( delta[0], delta[1] );
+			for ( int edge : { node, ( node + body().nodeCount - 1 ) % body().nodeCount } )
+			{
+				ChainHit hits[2];
+				int count = chainHits( *this, j, edge, hits, reach );
+				for ( int i = 0; i < count; ++i )
+				{
+					const auto& hit = hits[i];
+					float weight = edge == node ? 1 - hit.row.fraction : hit.row.fraction;
+					float toward = weight * b2Dot( { delta[0], delta[1] }, hit.row.normal );
+					if ( toward < 0 )
+						fraction = std::min( fraction, std::max( 0.f, hit.gap ) / -toward );
+				}
+			}
+			continue;
+		}
 		BoxProjection geometry( body(), box.state, box.geometry );
 		geometry.faceMargin = Margin;
 		if ( box.compound )
@@ -824,6 +1069,18 @@ Core::Vec Solver::projectTranslation( Core::Vec desired )
 		const auto& box = boxes[j];
 		if ( !box.enabled )
 			continue;
+		if ( box.geometry.kind == RigidGeometry::Chain )
+		{
+			float reach = std::hypot( desired[0], desired[1] );
+			for ( int edge = 0; edge < body().nodeCount; ++edge )
+			{
+				ChainHit hits[2];
+				int hitCount = chainHits( *this, j, edge, hits, reach );
+				for ( int i = 0; i < hitCount; ++i )
+					planes[count++] = { hits[i].row.normal, std::max( 0.f, hits[i].gap ) };
+			}
+			continue;
+		}
 		BoxProjection geometry( body(), box.state, box.geometry );
 		geometry.faceMargin = Margin;
 		if ( box.compound )
@@ -1364,12 +1621,14 @@ bool Solver::validate()
 	// Allocate during preflight, before entering Box2D; retain across steps.
 	size_t capacity = size_t( std::max( 1, boxCount ) ) *
 					  ( 2 * size_t( body.nodeCount ) + B2_MAX_POLYGON_VERTICES );
+	if ( maxChainSegments )
+		chainPatches.reserve( 4 * size_t( boxCount ) );
 	if ( rows.size() < capacity )
 		rows.resize( capacity );
 	if ( previous.size() < capacity )
 		previous.resize( capacity );
 	translationPlanes.resize( size_t( std::max( 1, boxCount ) ) *
-							  ( size_t( body.nodeCount ) + B2_MAX_POLYGON_VERTICES ) );
+							  ( 2 * size_t( body.nodeCount ) + B2_MAX_POLYGON_VERTICES ) );
 	recovery.remaining.resize( body.nodeCount );
 	for ( auto& box : boxes )
 		box.nodeFaces.resize( body.nodeCount, -1 );

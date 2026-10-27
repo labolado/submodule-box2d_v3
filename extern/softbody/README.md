@@ -8,8 +8,11 @@ see the API's units, creation budget and recoverable stiffness policy. This
 extension has local validation only; Android cost/visual acceptance is pending.
 Assembly coupling accepts one circle or multiple sharp convex polygon fixtures
 per rigid body, including local offsets. Polygon compounds share rigid reaction
-state and use their exposed union boundary; assembly allows sixteen contact
-shapes per soft body. Mixed-circle compounds remain unsupported.
+state and use their exposed union boundary; assembly allows sixteen closed
+contact shapes per soft body. Static chain-only registrations additionally query
+nearby segments with a separate `maxChainSegments` budget; one-sided contacts
+retain Box2D ghost-vertex normals. See the API for the bounded query envelope
+and small read-only static-tree bridge. Mixed-circle compounds remain unsupported.
 See the API for the explicit dynamic-contact option and remaining restrictions.
 Assembly also supports compliant fixed-world pins with bounded motors; centre
 roller fixtures are locally validated, while single-node bearing retains a

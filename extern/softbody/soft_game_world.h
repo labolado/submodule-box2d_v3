@@ -76,11 +76,16 @@ struct Solver
 	Recovery recovery;
 	void* activeStep = nullptr; // Valid only during this call's phase 2.
 	double pinInverseXX = 0, pinInverseXY = 0, pinInverseYY = 0;
-	std::array<Box, MaxCompoundShapes> boxes{};
+	std::vector<Box> boxes = std::vector<Box>( MaxCompoundShapes );
 	int boxCount = 0;
+	int maxChainSegments = 0; // Only assembly enables nearby static chain candidates.
+	bool chainQueryActive = false;
+	b2AABB chainQueryBounds{}; // Soft coordinates; reject motion escaping this query envelope.
+	std::vector<Core::Vec> chainStart;
 	bool boundaryDirty = true;
 	float friction = .8f;
 	std::vector<Row> rows, previous;
+	std::vector<Row> chainPatches; // Two extreme barycentric contacts per coplanar edge patch.
 	struct Plane
 	{
 		b2Vec2 normal;
@@ -89,7 +94,8 @@ struct Solver
 	std::vector<Plane> translationPlanes;
 	int rowCount = 0, previousCount = 0;
 	unsigned long long steps = 0, rowSolves = 0, pinSolves = 0, warmHits = 0, cacheResets = 0;
-	std::array<unsigned long long, MaxCompoundShapes> contactSteps{};
+	std::vector<unsigned long long> contactSteps =
+		std::vector<unsigned long long>( MaxCompoundShapes );
 	unsigned long geometryCorrections = 0;
 	double maxDepth = 0, lastDepth = 0, maxGap = 0, normalTotal = 0, tangentTotal = 0;
 	unsigned long long overlapSteps = 0;
@@ -142,6 +148,11 @@ struct Solver
 	bool nearestCompound( int owner, b2Vec2 p, b2Vec2& q, int& segment ) const;
 	void gatherCompound( int owner );
 	bool projectCompound( int owner );
+	void chainEdgeRows( int edge );
+	void gatherChains();
+	bool projectChains();
+	double chainDepth( int shape ) const;
+	bool withinChainQuery();
 
 	b2Vec2 point( const Row& row ) const;
 

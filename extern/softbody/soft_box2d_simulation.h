@@ -19,6 +19,7 @@ struct Box2DCouplingDef
 	bool enableDynamicContacts = false;
 	int maxAttachments = 64;
 	int maxRigidJoints = 64;
+	int maxChainSegments = 256; // Nearby candidates per soft body, not total terrain length.
 };
 // Positional spring with optional relative-speed motor. Local anchors use soft metres/y-up, even
 // when flipY is enabled. Connections never implicitly change collision filtering.
@@ -47,6 +48,8 @@ struct CouplingState
 	// Accumulated magnitude of whole-body position assistance, in metres.
 	double softRecoveryDistance = 0, softContactDepth = 0;
 	double contactDepth = 0, peakGap = 0;
+	unsigned long long chainQueries = 0;
+	int chainCandidates = 0;
 	bool recovering = false;
 	const char* failure = nullptr;
 };

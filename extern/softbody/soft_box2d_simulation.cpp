@@ -22,6 +22,7 @@ struct Box2DCoupling::Impl
 		b2BodyId body = b2_nullBodyId;
 		std::vector<b2ShapeId> shapes;
 		bool active = true;
+		bool chainTerrain = false;
 		std::uint64_t generation = 1;
 		std::vector<ObjectId> excluded;
 	};
@@ -43,8 +44,12 @@ struct Box2DCoupling::Impl
 	std::vector<Attachment> attachments;
 	std::vector<Joint> joints;
 	std::array<Filter, 32> filters{};
+	std::array<std::vector<b2ShapeId>, 32> targetScratch;
+	std::vector<b2BodyId> terrainScratch;
 	const char* error = nullptr;
 	bool valid = false;
+	unsigned long long chainQueries = 0;
+	int chainCandidates = 0;
 	Impl( Simulation& simulation, const Box2DCouplingDef& def )
 		: simulation( simulation )
 		, state( *simulation.impl_ )
@@ -54,6 +59,7 @@ struct Box2DCoupling::Impl
 		if ( !state.valid || state.coupled || !b2World_IsValid( def.world ) ||
 			 b2World_IsLocked( def.world ) || def.maxAttachments < 1 || def.maxAttachments > 64 ||
 			 def.maxRigidJoints < 0 || def.maxRigidJoints > Game::Assembly::MaxLinks ||
+			 def.maxChainSegments < 1 || def.maxChainSegments > 4096 ||
 			 ( def.profile && !Game::Profile::supported() ) )
 		{
 			error = "invalid soft Box2D coupling definition";
@@ -66,6 +72,7 @@ struct Box2DCoupling::Impl
 		solver.enableSoftContacts = state.limits.enableSoftContacts;
 		solver.profile.enabled = def.profile;
 		attachments.reserve( def.maxAttachments );
+		terrainScratch.reserve( def.maxAttachments );
 		joints.reserve( def.maxRigidJoints );
 		solver.rigidLinks.reserve( def.maxRigidJoints );
 		valid = true;
@@ -137,31 +144,54 @@ ObjectId Box2DCoupling::attachBody( b2BodyId body )
 	auto& s = *impl_;
 	if ( !b2Body_IsValid( body ) ||
 		 b2StoreWorldId( b2Body_GetWorld( body ) ) != b2StoreWorldId( s.def.world ) ||
-		 b2Body_GetShapeCount( body ) < 1 ||
-		 b2Body_GetShapeCount( body ) > Game::MaxCompoundShapes )
+		 b2Body_GetShapeCount( body ) < 1 )
 	{
-		s.error = "attachment requires 1-16 supported shapes in this world";
+		s.error = "attachment requires supported shapes in this world";
 		return {};
 	}
-	b2ShapeId shapes[Game::MaxCompoundShapes];
-	int count = b2Body_GetShapes( body, shapes, Game::MaxCompoundShapes );
-	Game::Solver candidate( s.state.core );
-	candidate.world = s.def.world;
-	candidate.flipY = s.def.flipY;
-	candidate.extendedGeometry = true;
-	for ( int i = 0; i < count; ++i )
+	int count = b2Body_GetShapeCount( body );
+	std::vector<b2ShapeId> shapes( count );
+	b2Body_GetShapes( body, shapes.data(), count );
+	bool chainTerrain = b2Shape_GetType( shapes[0] ) == b2_chainSegmentShape;
+	if ( chainTerrain )
 	{
-		if ( count > 1 && b2Shape_GetType( shapes[i] ) != b2_polygonShape )
+		for ( auto shape : shapes )
 		{
-			s.error = "compound requires sharp polygons";
+			Game::RigidGeometry geometry;
+			if ( b2Shape_GetType( shape ) != b2_chainSegmentShape ||
+				 b2Shape_GetRestitution( shape ) != 0 || !geometry.read( shape, s.def.flipY ) )
+			{
+				s.error = "chain terrain requires only static zero-bounce chain segments";
+				return {};
+			}
+		}
+	}
+	else
+	{
+		if ( count > Game::MaxCompoundShapes )
+		{
+			s.error = "attachment requires 1-16 closed shapes or static chain terrain";
 			return {};
 		}
-		candidate.add( shapes[i] );
-	}
-	if ( !candidate.prepare() )
-	{
-		s.error = candidate.error;
-		return {};
+		Game::Solver candidate( s.state.core );
+		candidate.world = s.def.world;
+		candidate.flipY = s.def.flipY;
+		candidate.extendedGeometry = true;
+		for ( auto shape : shapes )
+		{
+			if ( ( count > 1 && b2Shape_GetType( shape ) != b2_polygonShape ) ||
+				 b2Shape_GetType( shape ) == b2_chainSegmentShape )
+			{
+				s.error = "compound requires sharp polygons";
+				return {};
+			}
+			candidate.add( shape );
+		}
+		if ( !candidate.prepare() )
+		{
+			s.error = candidate.error;
+			return {};
+		}
 	}
 	for ( const auto& item : s.attachments )
 		if ( item.active && B2_ID_EQUALS( item.body, body ) )
@@ -179,7 +209,9 @@ ObjectId Box2DCoupling::attachBody( b2BodyId body )
 	}
 	Impl::Attachment item;
 	item.body = body;
-	item.shapes.assign( shapes, shapes + count );
+	item.chainTerrain = chainTerrain;
+	if ( !chainTerrain )
+		item.shapes = std::move( shapes );
 	if ( slot == int( s.attachments.size() ) )
 		s.attachments.push_back( item );
 	else
@@ -411,6 +443,15 @@ bool Box2DCoupling::prepare()
 				s.error = "coupled body was destroyed; detach it";
 				return false;
 			}
+			if ( item.chainTerrain )
+			{
+				if ( b2Body_GetType( item.body ) != b2_staticBody )
+				{
+					s.error = "chain terrain must remain static";
+					return false;
+				}
+				continue;
+			}
 			int count = b2Body_GetShapeCount( item.body );
 			if ( count > Game::MaxCompoundShapes )
 			{
@@ -424,6 +465,7 @@ bool Box2DCoupling::prepare()
 				Game::RigidGeometry geometry;
 				if ( b2Shape_GetRestitution( shapes[i] ) != 0 ||
 					 !geometry.read( shapes[i], s.def.flipY ) ||
+					 geometry.kind == Game::RigidGeometry::Chain ||
 					 ( count > 1 && geometry.kind == Game::RigidGeometry::Circle ) )
 				{
 					s.error = "compound requires sharp zero-bounce polygons; single circles are "
@@ -433,6 +475,7 @@ bool Box2DCoupling::prepare()
 			}
 			item.shapes.assign( shapes, shapes + count );
 		}
+	s.chainCandidates = 0;
 	for ( size_t index = 0; index < solver.parts.size(); ++index )
 	{
 		if ( !solver.parts[index] )
@@ -446,7 +489,13 @@ bool Box2DCoupling::prepare()
 		if ( same( filter.body, body ) )
 			contact.filter = { filter.value.categoryBits, filter.value.maskBits,
 							   filter.value.groupIndex };
-		b2ShapeId targets[Game::MaxCompoundShapes];
+		contact.maxChainSegments = s.def.maxChainSegments;
+		contact.chainQueryActive = false;
+		auto& targets = s.targetScratch[index];
+		targets.clear();
+		targets.reserve( Game::MaxCompoundShapes );
+		auto& terrain = s.terrainScratch;
+		terrain.clear();
 		int count = 0;
 		for ( const auto& item : s.attachments )
 			if ( item.active )
@@ -460,14 +509,108 @@ bool Box2DCoupling::prepare()
 					}
 				if ( excluded )
 					continue;
+				if ( item.chainTerrain )
+				{
+					if ( b2Body_IsEnabled( item.body ) )
+						terrain.push_back( item.body );
+					continue;
+				}
 				if ( count + int( item.shapes.size() ) > Game::MaxCompoundShapes )
 				{
 					s.error = "soft coupling supports sixteen contact shapes per soft body";
 					return false;
 				}
 				for ( auto shape : item.shapes )
-					targets[count++] = shape;
+					targets.push_back( shape );
+				count = int( targets.size() );
 			}
+		if ( !terrain.empty() )
+		{
+			const auto& soft = s.state.core.bodies[index];
+			contact.chainStart = soft.x;
+			b2AABB bounds{ { 1e30f, 1e30f }, { -1e30f, -1e30f } };
+			float reach = 1;
+			for ( int node = 0; node < soft.nodeCount; ++node )
+			{
+				auto p = soft.x[node], v = soft.v[node], r = soft.rest[node];
+				if ( !std::isfinite( p[0] ) || !std::isfinite( p[1] ) || !std::isfinite( v[0] ) ||
+					 !std::isfinite( v[1] ) )
+				{
+					s.error = "nonfinite_chain_query";
+					return false;
+				}
+				bounds.lowerBound = b2Min( bounds.lowerBound, { p[0], p[1] } );
+				bounds.upperBound = b2Max( bounds.upperBound, { p[0], p[1] } );
+				reach = std::max( reach, std::hypot( r[0], r[1] ) +
+											 Game::Step * std::hypot( v[0], v[1] ) +
+											 contact.recovery.maxCorrection );
+			}
+			bounds.lowerBound = b2Sub( bounds.lowerBound, { reach, reach } );
+			bounds.upperBound = b2Add( bounds.upperBound, { reach, reach } );
+			contact.chainQueryBounds = bounds;
+			contact.chainQueryActive = true;
+			if ( s.def.flipY )
+			{
+				float low = bounds.lowerBound.y;
+				bounds.lowerBound.y = -bounds.upperBound.y;
+				bounds.upperBound.y = -low;
+			}
+			struct Query
+			{
+				const std::vector<b2BodyId>& terrain;
+				std::vector<b2ShapeId>& targets;
+				Game::Solver& contact;
+				int limit;
+				const char* error = nullptr;
+				Query( const std::vector<b2BodyId>& t, std::vector<b2ShapeId>& s, Game::Solver& c,
+					   int l )
+					: terrain( t )
+					, targets( s )
+					, contact( c )
+					, limit( l )
+				{
+				}
+			} query( terrain, targets, contact, count + s.def.maxChainSegments );
+			++s.chainQueries;
+			Game::queryStaticShapes(
+				s.def.world, bounds,
+				[]( b2ShapeId shape, void* user ) {
+					auto& q = *static_cast<Query*>( user );
+					auto owner = b2Shape_GetBody( shape );
+					bool registered = false;
+					for ( auto terrain : q.terrain )
+						registered = registered || B2_ID_EQUALS( terrain, owner );
+					if ( !registered )
+						return true;
+					if ( b2Shape_GetType( shape ) != b2_chainSegmentShape ||
+						 b2Shape_GetRestitution( shape ) != 0 )
+					{
+						q.error = "terrain candidate is not a zero-bounce chain segment";
+						return false;
+					}
+					if ( b2Shape_IsSensor( shape ) ||
+						 !q.contact.enabled( b2Shape_GetFilter( shape ) ) )
+						return true;
+					if ( int( q.targets.size() ) == q.limit )
+					{
+						q.error = "nearby chain segment capacity reached (maxChainSegments)";
+						return false;
+					}
+					q.targets.push_back( shape );
+					return true;
+				},
+				&query );
+			if ( query.error )
+			{
+				s.error = query.error;
+				return false;
+			}
+			std::sort( targets.begin() + count, targets.end(), []( b2ShapeId a, b2ShapeId b ) {
+				return b2StoreShapeId( a ) < b2StoreShapeId( b );
+			} );
+			s.chainCandidates += int( targets.size() ) - count;
+			count = int( targets.size() );
+		}
 		bool changed = count != contact.boxCount;
 		for ( int i = 0; i < count && !changed; ++i )
 			changed = !B2_ID_EQUALS( targets[i], contact.boxes[i].shape );
@@ -505,6 +648,8 @@ CouplingState Box2DCoupling::getState() const
 		return result;
 	}
 	const auto& solver = impl_->solver;
+	result.chainQueries = impl_->chainQueries;
+	result.chainCandidates = impl_->chainCandidates;
 	result.entered = solver.entered;
 	result.completed = solver.completed;
 	result.softContactRows = solver.pairs.rowSolves;

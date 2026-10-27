@@ -19,15 +19,22 @@ struct RigidGeometry
 	{
 		Rectangle,
 		Polygon,
-		Circle
+		Circle,
+		Chain
 	};
 	Kind kind = Rectangle;
 	float hx = 0, hy = 0;
 	b2Polygon polygon{};
 	b2Circle circle{};
+	b2ChainSegment chain{};
 	bool read( b2ShapeId shape, bool flipY );
 	bool equals( const RigidGeometry& other ) const;
 };
+
+// Unfiltered static-tree query: public world queries discard zero masks before
+// a positive collision group can override them. Kept in the thin adapter.
+b2TreeStats queryStaticShapes( b2WorldId world, b2AABB bounds, b2OverlapResultCallbackFcn* callback,
+							   void* context );
 
 // Exposed polygon-union boundary in a single rigid body's local coordinates.
 // Each segment retains its source fixture for material and cache identity.

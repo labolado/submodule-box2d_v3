@@ -1,4 +1,9 @@
 #include "soft_game_geometry.h"
+extern "C"
+{
+#include "../../src/physics_world.h"
+#include "../../src/shape.h"
+}
 
 #if defined( __clang__ )
 #pragma clang fp contract( off )
@@ -9,8 +14,50 @@ namespace SoftBody
 namespace Game
 {
 
+b2TreeStats queryStaticShapes( b2WorldId id, b2AABB bounds, b2OverlapResultCallbackFcn* callback,
+							   void* context )
+{
+	struct Query
+	{
+		b2World* world;
+		b2OverlapResultCallbackFcn* callback;
+		void* context;
+	} query{ b2GetWorldFromId( id ), callback, context };
+	B2_ASSERT( !query.world->locked );
+	if ( query.world->locked )
+		return {};
+	return b2DynamicTree_OverlapAABBAll(
+		query.world->broadPhase.trees + b2_staticBody, bounds,
+		[]( int, uint64_t data, void* user ) {
+			auto& q = *static_cast<Query*>( user );
+			auto* shape = b2Array_Get( q.world->shapes, int( data ) );
+			return q.callback( { int( data ) + 1, q.world->worldId, shape->generation },
+							   q.context );
+		},
+		&query );
+}
+
 bool RigidGeometry::read( b2ShapeId shape, bool flipY )
 {
+	if ( b2Shape_GetType( shape ) == b2_chainSegmentShape )
+	{
+		if ( b2Body_GetType( b2Shape_GetBody( shape ) ) != b2_staticBody )
+			return false;
+		kind = Chain;
+		chain = b2Shape_GetChainSegment( shape );
+		if ( flipY )
+		{
+			// Reflection reverses handedness. Reverse endpoints AND ghosts so
+			// the chain's right-facing collision side is reflected correctly.
+			std::swap( chain.segment.point1, chain.segment.point2 );
+			std::swap( chain.ghost1, chain.ghost2 );
+			chain.segment.point1.y = -chain.segment.point1.y;
+			chain.segment.point2.y = -chain.segment.point2.y;
+			chain.ghost1.y = -chain.ghost1.y;
+			chain.ghost2.y = -chain.ghost2.y;
+		}
+		return b2LengthSquared( b2Sub( chain.segment.point2, chain.segment.point1 ) ) > 1e-6f;
+	}
 	if ( b2Shape_GetType( shape ) == b2_circleShape )
 	{
 		kind = Circle;
@@ -60,6 +107,17 @@ bool RigidGeometry::equals( const RigidGeometry& other ) const
 	if ( kind == Circle )
 		return circle.center.x == other.circle.center.x &&
 			   circle.center.y == other.circle.center.y && circle.radius == other.circle.radius;
+	if ( kind == Chain )
+	{
+		const b2Vec2 a[] = { chain.ghost1, chain.segment.point1, chain.segment.point2,
+							 chain.ghost2 };
+		const auto& c = other.chain;
+		const b2Vec2 b[] = { c.ghost1, c.segment.point1, c.segment.point2, c.ghost2 };
+		for ( int i = 0; i < 4; ++i )
+			if ( a[i].x != b[i].x || a[i].y != b[i].y )
+				return false;
+		return true;
+	}
 	if ( polygon.count != other.polygon.count )
 		return false;
 	for ( int i = 0; i < polygon.count; ++i )

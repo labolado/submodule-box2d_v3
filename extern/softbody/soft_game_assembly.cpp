@@ -736,6 +736,12 @@ void Assembly::stage( void* step, int phase, void* context )
 					if ( contact.boxes[i].enabled )
 					{
 						auto& box = contact.boxes[i];
+						if ( box.geometry.kind == RigidGeometry::Chain )
+						{
+							contact.lastDepth =
+								std::max( contact.lastDepth, contact.chainDepth( i ) );
+							continue;
+						}
 						BoxProjection geometry( part->contact.body(), box.state, box.geometry );
 						contact.lastDepth = std::max( contact.lastDepth, geometry.boundaryDepth() );
 					}
@@ -789,7 +795,7 @@ bool Assembly::advance()
 		if ( part )
 		{
 			auto& contact = part->contact;
-			if ( !contact.observeRecovery( true ) )
+			if ( !contact.observeRecovery( true ) || !contact.withinChainQuery() )
 			{
 				error = contact.error;
 				return false;

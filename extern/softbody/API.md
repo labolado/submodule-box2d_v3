@@ -90,6 +90,52 @@ material checks and unchanged no-network car regressions. Extreme press speeds
 and loaded negative-control overlap remain documented limitations. These tests
 do not certify every network, general CCD or arbitrary highly stiff materials.
 
+## Static chain terrain
+
+Assembly `Box2DCoupling::attachBody` / Lua `world:attachPhysicsBody` accepts a
+static body containing only zero-restitution chain segments. Use the existing
+Box2D/Solar2D chain creation interface, including its ghost vertices. A chain
+does not become a filled polygon or a hidden thick box. Single circles and
+polygon compounds remain separate registrations; mixed chain/closed-shape
+bodies, moving chains and plain segments are unsupported.
+
+The colliding side is to the right of the directed Box2D segment. `flipY`
+reflects the side as well as the coordinates. Front-side support uses Box2D's
+public chain/capsule or chain/circle narrow phase and its adjacency normals.
+Back-side passage is intentional. The soft contact skin is1mm, with friction
+`sqrt(softFriction * shapeFriction)` and the existing zero-bounce response.
+Coplanar contacts with identical friction on one straight material edge retain
+their extreme material coordinates, avoiding redundant constraints on finely
+segmented roads. Different planes and materials remain separate.
+
+Registration validates the entire terrain once. Each preflight selects nearby
+segments from the static tree, sorts by shape identity and refreshes caches when
+the selection, geometry, transform or material changes. It does not enumerate
+the whole road every step. Sensors, attachment exclusions and soft category/mask/
+group filters apply, including matching positive groups with zero bit masks.
+The public world query filters those zero bits before its callback; therefore
+`soft_game_geometry.cpp::queryStaticShapes` contains a small read-only internal
+bridge to the unfiltered static tree. This is an explicit upstream maintenance
+boundary; Box2D `src` and LiquidFun are not modified.
+
+`Box2DCouplingDef.maxChainSegments` / Lua world option `maxChainSegments` defaults
+to256 (integer1..4096), **per soft body per preflight**, in addition to the16
+closed-shape targets. A road can contain more segments than this local budget.
+Overflow rejects preflight before either world advances, rather than dropping
+contacts. `chainCandidates` is the sum across bodies in the latest preflight
+(possibly partial on rejection); `chainQueries` counts actual queries, including a scheduler
+preflight repeated before entry. These are not wall-clock performance measures.
+
+The query envelope expands the current soft AABB by the maximum of1m and each
+node's rest radius plus one-step travel plus recovery-correction allowance.
+It is a bounded contract, not a proof for arbitrary forces: an actual node
+escaping the envelope fails with `chain_motion_exceeded_query_bounds` under the
+normal sticky-step rule. Front-side continuation is discrete and bounded, not
+general CCD. Bodies spawned behind terrain are not pulled through it. Far-away
+unsupported terrain replacements are detected when they enter a query; destroyed
+body registrations must be detached. Mutating terrain during a step is forbidden.
+The original raw experimental modes do not gain chain support.
+
 ## Fixed-world pins
 
 `Simulation::createWorldJoint(SoftWorldJointDef)` accepts a body, its node weights,
@@ -251,9 +297,10 @@ entry. Counters report entered rigid steps and successfully completed soft steps
 - Static/kinematic bodies accept a single circle or 1–16 sharp convex polygon
   fixtures (3–8 vertices each), with zero restitution. Local offsets/rotations
   are supported. Multi-fixture circles/mixed circle-polygon bodies, capsules,
-  segments/chains and rounded polygons remain rejected. Single circles retain
+  plain segments and rounded polygons remain rejected. Static chain-only bodies
+  have the separate terrain contract above. Single circles retain
   analytic distances; centered single boxes retain their historical arithmetic.
-- Up to sixteen registered contact shapes per soft body after attachment
+- Up to sixteen registered closed contact shapes per soft body after attachment
   exclusions, at most 64 body registrations. This is a preflight capacity limit,
   not a certified mobile budget. Per-soft-body filtering determines which
   fixtures contribute to the polygon union; sensors never hide solid faces.
