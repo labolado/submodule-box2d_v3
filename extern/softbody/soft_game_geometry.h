@@ -1,5 +1,5 @@
 #pragma once
-#include "soft_box2d_box.h"
+#include "soft_box2d_state.h"
 #include "soft_game_recovery.h"
 
 #include <algorithm>
@@ -10,7 +10,7 @@ namespace SoftBody
 namespace Game
 {
 using Core = SoftBody::World<float>;
-using View = SoftBody::Box2DBoxContacts::StateView;
+using View = SoftBody::Box2DState::StateView;
 // Shape data copied at preflight into soft-space local coordinates. Rectangles
 // retain the original feature order and arithmetic for the frozen car baseline.
 struct RigidGeometry

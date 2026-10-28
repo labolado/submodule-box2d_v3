@@ -1,8 +1,9 @@
 #pragma once
-// Private restricted game solver. No Box2D public API or existing solver changes.
-#include "soft_box2d_box.h"
+// Per-body rigid contact constraints; assembly owns the step and all joints.
+#include "soft_box2d_state.h"
 #include "soft_game_geometry.h"
 #include "soft_profile.h"
+#include "soft_world.h"
 
 #include <algorithm>
 #include <array>
@@ -13,12 +14,11 @@ namespace SoftBody
 namespace Game
 {
 using Core = SoftBody::World<float>;
-using Bridge = SoftBody::Box2DBoxContacts;
+using Bridge = SoftBody::Box2DState;
 using View = Bridge::StateView;
 constexpr float Step = 1.f / 480;
 constexpr float Margin = .001f; // 0.16 content units at scale 160.
 constexpr int Sweeps = 8;
-constexpr int MaxBoxes = 4;			  // Historical centered-box modes.
 constexpr int MaxCompoundShapes = 16; // Assembly registration budget per soft body.
 
 struct Box
@@ -56,9 +56,7 @@ struct Solver
 	Profile* profile =
 		nullptr; // Non-owning assembly diagnostics; never used by the solver equations.
 	int bodyIndex = 0;
-	bool sharedWorld = false;
 	bool retainBoundarySides = false;
-	bool extendedGeometry = false;
 	SoftBody::Body<float>& body()
 	{
 		return soft.bodies[bodyIndex];
@@ -68,17 +66,9 @@ struct Solver
 		return soft.bodies[bodyIndex];
 	}
 	bool flipY = false;
-	unsigned long long entered = 0;
-	b2WorldId boundWorld = b2_nullWorldId;
-	bool boundFlipY = false;
-	Bridge::Pin cachedPin;
-	b2Vec2 impulse{};
 	b2WorldId world = b2_nullWorldId;
-	Bridge::Pin pin;
 	b2Filter filter = b2DefaultFilter();
 	Recovery recovery;
-	void* activeStep = nullptr; // Valid only during this call's phase 2.
-	double pinInverseXX = 0, pinInverseXY = 0, pinInverseYY = 0;
 	std::vector<Box> boxes = std::vector<Box>( MaxCompoundShapes );
 	int boxCount = 0;
 	int maxChainSegments = 0; // Only assembly enables nearby static chain candidates.
@@ -96,27 +86,23 @@ struct Solver
 	};
 	std::vector<Plane> translationPlanes;
 	int rowCount = 0, previousCount = 0;
-	unsigned long long steps = 0, rowSolves = 0, pinSolves = 0, warmHits = 0, cacheResets = 0;
+	unsigned long long rowSolves = 0, warmHits = 0, cacheResets = 0;
 	std::vector<unsigned long long> contactSteps =
 		std::vector<unsigned long long>( MaxCompoundShapes );
 	unsigned long geometryCorrections = 0;
-	double maxDepth = 0, lastDepth = 0, maxGap = 0, normalTotal = 0, tangentTotal = 0;
+	double maxDepth = 0, lastDepth = 0, normalTotal = 0, tangentTotal = 0;
 	unsigned long long overlapSteps = 0;
 	double contactMomentumResidual = 0;
 	const char* error = nullptr;
-	int nextPhase = 0;
 
 	explicit Solver( Core& core )
 		: soft( core )
 	{
-		pin.active = cachedPin.active = false;
 	}
 	Solver( Core& core, int index )
 		: soft( core )
 		, bodyIndex( index )
-		, sharedWorld( true )
 	{
-		pin.active = cachedPin.active = false;
 	}
 	Solver( const Solver& ) = delete;
 	Solver& operator=( const Solver& ) = delete;
@@ -126,7 +112,6 @@ struct Solver
 	bool read( void* step, b2BodyId id, View& state, int& index ) const;
 	void write( void* step, int index, View state ) const;
 	void reflect( View& state ) const;
-	b2Vec2 localPinAnchor() const;
 	bool validate();
 
 	bool add( b2ShapeId shape );
@@ -172,12 +157,6 @@ struct Solver
 
 	bool observeRecovery( bool endOfStep = false );
 
-	double anchorCoupling( const Row& row ) const;
-
-	b2Vec2 compensatingImpulse( const Row& row, b2Vec2 impulse ) const;
-
-	bool preparePinResponse( void* step );
-
 	float inverseMass( const Row& row, b2Vec2 direction ) const;
 
 	float relativeSpeed( const Row& row, b2Vec2 direction ) const;
@@ -185,12 +164,6 @@ struct Solver
 	void apply( const Row& row, b2Vec2 impulse );
 
 	void solve( Row& row );
-
-	bool attachment( void* step, bool bias );
-
-	static void stage( void* step, int phase, void* context );
-
-	bool advance();
 };
 } // namespace Game
 } // namespace SoftBody

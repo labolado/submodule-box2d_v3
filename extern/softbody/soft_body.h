@@ -49,25 +49,18 @@ template <class T> struct Body
 	std::vector<int> sourceNodes;
 	// Sized with the body. Reused by material, diagnostics and box projection.
 	mutable std::vector<Vec> forceScratch, positionScratch;
-	mutable std::vector<double> weightScratch;
 	bool concaveReference = false;
 	mutable const char* failure = nullptr;
-	int kind; // 0: local frames, 1: global frame, 2: pressure tire, 3: recoverable
 	mutable double recoveryCosine = 1, recoverySine = 0;
 	T restArea;
-	T preload = T( 0 );
 	T materialScale = T( 1 );
 	T friction = T( 0 ); // Soft/soft Coulomb friction; boundaries have their own coefficient.
 	unsigned long long generation = 1;
 	bool active = true;
 	bool worldSupported = false;
 	Vec referencePosition{};
-	Vec forceInput{};
-	T torqueInput = 0;
-	T stiffness, frequency, damping, frameOverlap;
-	T bulk = T( 300 );
-	Body( int model, T totalMass, T rx, T ry, T edgeStiffness, T hz, T dampingRate, T pressure,
-		  T scale, T overlap );
+	T frequency, damping;
+	Body( T totalMass, T rx, T ry, T hz, T dampingRate, T scale );
 	T area() const;
 	void resizeNodes( int count );
 	void initializeReferenceScale();
@@ -98,7 +91,6 @@ template <class T> struct Body
 	// World-supported bodies damp relative to their stationary reference.
 	// Reductions use double for float state.
 	void dampDeformation( T dt );
-	void damp( T dt );
 };
 extern template struct Body<float>;
 extern template struct Body<double>;

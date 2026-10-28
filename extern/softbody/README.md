@@ -1,224 +1,59 @@
-# Experimental soft-body world
+# Softbody runtime
 
-Current recoverable assembly consumers use [the native operation API](API.md):
-`Simulation` plus `Box2DCoupling`. Car layout and controls stay in application Lua.
-macOS and Android compile this path; other engine platforms are not yet integrated.
-Assembly bodies may opt into internal spring connections between contour nodes;
-see the API's units, creation budget and recoverable stiffness policy. This
-extension has local validation only; Android cost/visual acceptance is pending.
-Bodies may also opt into regulated virtual pressure with `pressure` at creation
-and `setPressureTarget` at runtime. Gas pressure changes physical geometry while
-preserving mass and node identity; limits and collapse recovery are documented
-in the API. It is distinct from the historical pressure material and from
-shape-preserving reference-size scaling. Recoverable bodies can separately opt
-into `referenceScale` and `setReferenceScaleTarget` for uniform physical scaling,
-including a noncircular chassis. Mass and node/pin identities remain fixed;
-material forces move the collision contour toward the scaled reference. See the
-API for rate/geometry bounds and gas interaction. Local validation only.
-Assembly coupling accepts one circle or multiple sharp convex polygon fixtures
-per rigid body, including local offsets. Polygon compounds share rigid reaction
-state and use their exposed union boundary; assembly allows sixteen closed
-contact shapes per soft body. Static chain-only registrations additionally query
-nearby segments with a separate `maxChainSegments` budget; one-sided contacts
-retain Box2D ghost-vertex normals. See the API for the bounded query envelope
-and small read-only static-tree bridge. Mixed-circle compounds remain unsupported.
-See the API for the explicit dynamic-contact option and remaining restrictions.
-Assembly also supports compliant fixed-world pins with bounded motors; centre
-roller fixtures are locally validated, while single-node bearing retains a
-documented large-gap failure. Soft/rigid pin migration remains separate.
-The older raw `World` interfaces described below are retained for historical
-experimental modes, not the supported boundary for new assembly consumers.
+Private experimental softbody library, isolated from LiquidFun and Box2D rigid
+solver formulas. The current runtime is `Simulation` + `Box2DCoupling`;
+Solar2D exposes it through `physics.newExperimentalSoftWorld` with
+`coupled=true, couplingMode='assembly'`. This is not a stable public C++ ABI.
 
-When editing softbody C++ files, use the Box2D repository's `.clang-format`
-(`clang-format -i extern/softbody/<file>` from the submodule root). Do not introduce
-an independent softbody style. Solar2D bindings follow their neighbouring engine
-style; this formatter rule does not apply to the rest of the engine.
+## Responsibilities
 
-## Historical kernel and prototype interfaces
+| Source | Responsibility |
+|---|---|
+| `soft_simulation.h/.cpp` | Validated definitions, generational handles, generic body/joint operations and snapshots |
+| `soft_simulation_internal.h` | Private storage shared with the coupling owner; not a consumer header |
+| `soft_body.h/.cpp` | Recoverable material, optional internal springs, bounded pressure and reference scaling |
+| `soft_world.h/.cpp` | Shared state, material velocity update, touch and diagnostics; no standalone prototype integrator |
+| `soft_contact.h/.cpp` | Contour geometry predicates used by current contacts/recovery |
+| `soft_game_assembly.h/.cpp` | Generic multi-body step, soft/world/rigid links and motors; no car layout |
+| `soft_game_world.h/.cpp` | Per-soft-body rigid contact constraints, friction, cache and boundary recovery |
+| `soft_game_geometry.h/.cpp` | Circle/polygon/chain geometry, compound exterior and projections |
+| `soft_game_recovery.h/.cpp` | Finite topology diagnostics and recovery state |
+| `soft_pair_contacts.h/.cpp` | Optional soft/soft contact and recovery |
+| `soft_box2d_state.h/.cpp` | Private phase-local Box2D velocity view; no world/geometry/joint ownership |
+| `soft_box2d_simulation.h/.cpp` | Public native coupling operations, registrations, lifetime and complete-step dispatch |
+| `soft_profile.h` | Opt-in diagnostics; does not choose solver equations |
 
-Private C++11 solver with compiled implementations and float/double explicit
-instantiations. The engine includes `soft_world.h` through its Lua adapter.
-The core has no Box2D dependency. `soft_box2d_static` is a separate experimental
-adapter using Box2D public APIs. No rigid solver, worker scheduler, SIMD flags or
-LiquidFun behavior are modified.
+`soft_game_*` names describe the current game-oriented algorithms, not a vehicle
+preset or the removed single-body Lua `game` mode. Cars, materials, shape presets,
+controls and level layouts belong to application Lua or test fixtures.
 
-The `.h` files declare data and operations; the matching `.cpp` files implement
-materials, contacts, stepping and the static bridge. Only float and double are
-instantiated. `World::step(projector, context, measure)` calls an optional synchronous
-projector each soft constraint iteration; it stores neither pointer and invokes
-no worker tasks. The context must outlive the call. No callback is registered by
-the default `step()`. This private C++ entry is not a Box2D substep API.
+Consumers include `soft_simulation.h` and `soft_box2d_simulation.h` only. See
+[API.md](API.md) for contracts, units and limitations. Native units are m/kg/s,
+y up. The coupled owner executes one complete 1/480 s rigid+soft step with eight
+soft constraint sweeps; Solar2D schedules eight complete steps per 60 Hz frame.
+This is not Box2D's eight-substep stepping and does not make softbody parallel.
 
-CMake consumers add this directory and link `softbody`; when the `box2d` target
-exists, `softbody_box2d` is also available. Both disable FP contraction and C++
-exceptions on Clang/GCC. The current macOS and Android engine projects compile the core and coupling sources.
-Other platform engine projects still need these compilation units and validation.
+## Build and verification
 
-- `soft_body.h/.cpp`: dynamic node storage and recoverable material; historical local-frame/pressure ellipse presets, deformation damping.
-- `soft_contact.h/.cpp`: point/edge contact and sweep diagnostics (not general CCD).
-- `soft_world.h/.cpp`: body storage, mass-weighted pins, equal/opposite motors, force-limited touch springs, planes,
-  static solid quadrants, contact iterations and per-substep diagnostics.
+CMake builds `softbody` without a Box2D dependency. If target `box2d` exists,
+it also builds `softbody_box2d`. Current Solar2D integration is macOS and Android;
+other platforms need explicit integration and validation. Sources are private,
+not installed as part of the public plugin SDK.
 
-- `soft_box2d_static.h/.cpp`: registered static circle/polygon prototype; no CCD,
-  dynamic reaction. Solar2D exposes an experimental static attachment. Polygon segment clipping and coherent endpoint
-  separation cover the tested discrete edge crossings; high-speed transit and
-  arbitrary deeply interlocked geometry are not certified.
+In the independent `test/` repository, start with `doc/softbody-api/README.md`
+and `TEST_INDEX.md`. Current regression groups cover API/lifetime, vehicle/touch,
+soft/soft and soft/rigid joints, compound/chain terrain, arbitrary contours,
+internal springs, pressure and reference scaling. Frozen car composition lives
+in `test/physics_soft_body_game_car/car.h`, not in the runtime.
 
-Units are meters, kilograms and seconds, with no display scaling. The validated
-profile is 60 Hz with 8 substeps and 8 iterations, gravity (0,-20), and a restricted
-three-body assembly. Sample dimensions, connection weights, collision exclusions,
-drive timing and moving-boundary paths belong to Lua/test fixtures, not this core.
-Parameters outside that profile are not certified stable.
+## Retired experiments
 
-Planes interpolate their scalar offset over each world step; work includes their
-normal motion. Forces and torques accumulate for the next outer step and then clear.
-Bodies have uniform node mass. Pressure pretension is supported for circles only.
-Static Box2D coupling uses public AABB queries in the separate bridge. There is no
-arbitrary mesh, moving rigid boundary response, threading or SIMD implementation.
+The 2026-10-28 cleanup removes local/global-frame and old pressure materials,
+virtual boundaries, `World::step()`, serial static/box bridges, attachment owners,
+single-body game stepping and their Lua bindings. Do not add compatibility
+wrappers which silently substitute assembly semantics.
 
-Body removal disables attached pins; IDs are not reused during the world's lifetime.
-Lua owns the world lifetime. Core callers must validate definitions and IDs before
-mutation; the Solar2D adapter performs those checks. Solver failures are sticky and
-require world recreation. A failed step can have partially advanced state; it is not
-transactional. The completed substep count records progress, including the failing
-substep. Product thresholds/time limits are owned by tests, not the solver.
-
-Metrics aggregate over every substep of the last call; body positions represent the
-current state. Sweep warnings remain diagnostics and do not establish robust general
-soft/soft collision. Future Box2D coupling should live in a separate adapter rather
-than leaking rigid-engine state into the material kernel.
-
-Touch springs act on weighted material points with an implicit damped update at
-substep frequency. Their target is an external controller; appliedWork records
-its kinetic work, and total force is capped. Removal invalidates the handle;
-reused touch slots carry a generation to prevent stale-handle mutation. Touch
-IDs are the exception to the non-reused body/pin/boundary allocation policy.
-
-## Recoverable material
-
-Material kind 3 uses finite, mass-weighted corotated quadratic energy instead of
-pressure or edge-length springs. A proper 2D rotation aligns rest nodes to current
-nodes, without fitting reflection or changing rest topology. At ambiguous zero
-covariance the last defined rotation is retained. Forces continuously open folded,
-inverted, collinear and coincident states; positions are not replaced by a rest pose.
-Frequency, materialScale and deformation damping determine the response. Pressure
-preload, bulk and edge stiffness are not part of this material.
-
-Zero/signed area and self-crossing are diagnostic states for kind 3, not fatal
-errors. Other materials retain their previous guards. At zero inertia, recoverable
-bodies use translation-only damping and ignore torque until they regain a lever
-arm. Normal nonfinite-state checks remain active. Deformation damping precedes
-elastic impulses for this material, to avoid attenuating boundary reactions while
-retaining the full elastic energy. This is an explicit force integrator, not an
-unconditionally stable implementation of position-based shape matching.
-
-External boundary contact and pins remain enabled, even when area reaches zero.
-The earlier uncommitted `allowYield` boundary prototype was rejected and removed.
-The validated profile remains 60Hz, 8 substeps, 8 iterations. Lua rejects
-2*pi*frequency*sqrt(materialScale)*substep > 1 for this material; core callers must
-validate their own definitions. This guard is not a universal stability guarantee.
-Normal three-part driving plus extreme parallel-plane compression and touch release
-are tested; arbitrary folded soft/soft collision, complex terrain CCD, incompatible
-negative plane gaps, and mobile performance remain outside that evidence.
-
-World pins use `Pin::b == -1` and a fixed `worldAnchor`; their motor target is
-absolute counterclockwise angular speed. No surrogate heavy body is created.
-Pins with two bodies retain their relative-speed convention. World pin reactions
-contribute to external linear impulse and motor work remains explicitly recorded.
-
-Static oriented boxes (boundary kind 2) use a center, unit x-axis and half sizes.
-Contact uses node/face projection and box-vertex/soft-edge response; the current
-box penetration metric samples nodes. This is not a general edge-edge CCD claim.
-Only planes support prescribed motion.
-
-Soft/soft friction is opt-in with `Body::friction` (Lua `createBody{friction=...}`,
-range 0..10, default 0). Pair coefficients mix as sqrt(muA * muB), so either zero
-keeps the pair frictionless. Boundary coefficients remain independent.
-After each normal projection, the point/edge relative tangent velocity is opposed
-by an impulse limited to mu * (normal positional impulse / dt). Barycentric edge
-reactions preserve linear momentum and, at the coincident corrected contact,
-angular momentum. Only velocities change, keeping normal projection intact.
-`World::frictionLoss` includes soft/soft tangent kinetic-energy loss as well as
-boundary friction. It is not total system energy loss: motors, elastic forces and
-normal projection can add energy.
-This is local Coulomb-like friction, not a persistent static-contact manifold:
-no penetration correction means no friction budget, and each iteration uses only
-its own new normal impulse. Holding/sticking can depend on substeps and iterations.
-It does not repair arbitrary folded polygon contact, supply CCD, or guarantee
-passage through an overlapping rotor gap. The frozen C1 rotor fixture clears both
-rotors; this is a bounded scene result, not a general transport guarantee.
-
-Boundary/body collision exclusions are independent of soft/soft exclusions.
-`Boundary::excludedBodies` contains stable body IDs; an empty list preserves the
-original behavior. `boundaryEnabled` gates node projection, boundary-vertex
-response and penetration metrics. Lua `boundary:setCollisionEnabled(body, bool)`
-is pair-local, idempotent and rejects foreign-world or removed handles. The
-boundary's global `setEnabled` state still takes precedence. No Box2D rigid-body
-filter or LiquidFun behavior is changed.
-
-## C1 static bridge contract
-
-Only registered static circles and zero-radius convex polygons with zero bounce
-respond. Disabled bodies and sensors do not respond. Unsupported active shapes,
-nonstatic bodies, and locked worlds fail validation. Lua reflects Box2D y-down
-coordinates to the existing metre/y-up soft world; it does not change its step API.
-Shape filters and geometric-mean friction are read live. Native custom material
-and filter callbacks are unsupported. Registrations retain deterministic order
-following public AABB queries; zero-bit filters retain positive-group overrides.
-
-Static penetration is measured over edges as well as nodes, after each substep,
-and merged into the core peak. Query/candidate counters include metric queries.
-The sweep guard detects some complete-body transits and fails with
-`static_swept_transit`; it neither supplies collision response nor guarantees
-pointwise CCD. A failed step may have partially advanced state. Recreate the
-world after failure. Deep interlocking and arbitrary folded contact are not certified.
-
-Current acceptance and Lua contracts live in the independent test repository:
-`doc/jellycar-soft-body/static-c1-acceptance.md` and
-`physics_soft_body_static_bridge/README.md`. No Box2D src or LiquidFun scheduler
-changes are required for this static stage. Dynamic coupling requires a separate
-synchronization decision; manual soft stepping is not that protocol.
-
-## Restricted box bridge (C2b-1)
-
-`soft_box2d_box.h/.cpp` adds `Box2DBoxContacts` to `softbody_box2d`.
-This is separate from the C1 static bridge; it has no engine scheduling or Lua registration.
-The caller steps Box2D first, then calls `step` with exactly one soft substep.
-`project` is the synchronous per-iteration callback operation. Calls must be serialized
-while the rigid world is unlocked. No rigid world is owned or advanced by this adapter.
-
-Register explicit shape IDs in deterministic order. Active non-sensor attachments must be
-single centred sharp rectangular fixtures, with zero friction/restitution and no dynamic
-motion locks. Dimensions, mass, centre of mass and inertia are read from Box2D.
-Only recoverable, frictionless soft bodies are supported. Unsupported live data fails
-before soft advancement; a failure during contact can leave a partial step, so callers
-must latch the fault rather than retry it. Deleted IDs are inert; an engine wrapper still
-needs world-generation and handle lifecycle guards. Duplicate bodies and mixed worlds
-are rejected. Filters, group overrides, exclusions, sensors and disabled bodies are handled.
-
-`flipY` maps the existing metre/y-up soft frame to Box2D's frame, including normals,
-point velocities and reaction impulses. Position correction remains soft-only and does
-not turn penetration into velocity. Penetration metrics cover segments and contained
-corners; this is discrete collision response, not CCD or arbitrary overlap recovery.
-The known deeply interlocked/degenerate contour cases are not fixed by this extraction.
-
-macOS and native CMake build this adapter. Other engine platform projects still need the
-pre-existing soft core/C1 sources as well as this file; they remain unvalidated.
-Regression evidence is in the independent test repository at
-`doc/jellycar-soft-body/native-box-bridge.md` and `physics_soft_body_sync/box_bridge.cpp`.
-
-### Assembly timing diagnostics
-
-`Assembly::profile.enabled` defaults to false. `soft_profile.h` records inclusive
-wall and current-thread CPU intervals only when enabled; it does not change the
-solver configuration. `nativeWorld` includes soft callbacks (including the static
-world fallback), and `advance` includes `nativeWorld`. Do not add nested buckets.
-`adapter` is populated by the native `Box2DCoupling` layer. Unsupported clock targets
-can use the normal disabled path. This internal header is not a public plugin API.
-
-Assembly soft/rigid positional pins now use `Box2DCoupling::createRigidJoint`
-(Lua `createRigidPinJoint`). They share current step velocities with contacts and
-apply reaction before Box2D constraints. See API.md for coordinate, lifetime,
-finite compliance and separate maxRigidJoints budget. The optional relative-speed
-motor uses setRigidMotor / Lua setMotor; it has no angle lock. Wheels and chassis
-are still defined in Lua, not special native body types.
+Full historical source remains in Box2D Git commit `0a35da29`; matching engine
+`33015f6b` and test `9daa5dd` reproduce the old entrypoints. Instructions and
+actual cleanup evidence are in `test/doc/jellycar-soft-body/runtime-cleanup.md`.
+Historical failures remain failures; removal does not certify unsupported physics.

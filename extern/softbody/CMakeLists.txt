@@ -6,7 +6,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(softbody PRIVATE -ffp-contract=off -fno-exceptions)
 endif()
 if(TARGET box2d)
-    add_library(softbody_box2d STATIC soft_box2d_static.cpp soft_box2d_box.cpp
+    add_library(softbody_box2d STATIC soft_box2d_state.cpp
         soft_game_world.cpp soft_game_geometry.cpp soft_game_recovery.cpp soft_game_assembly.cpp soft_pair_contacts.cpp soft_box2d_simulation.cpp)
     target_compile_features(softbody_box2d PUBLIC cxx_std_11)
     target_link_libraries(softbody_box2d PUBLIC softbody box2d)

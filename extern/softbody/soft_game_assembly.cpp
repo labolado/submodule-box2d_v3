@@ -69,7 +69,7 @@ bool Assembly::prepare()
 	}
 	if ( !syncParts() )
 		return false;
-	if ( !soft.boundaries.empty() || soft.dt != Step || soft.substeps != 1 ||
+	if ( soft.dt != Step || soft.substeps != 1 ||
 		 soft.iterations != Sweeps )
 	{
 		error = "unsupported_assembly_configuration";

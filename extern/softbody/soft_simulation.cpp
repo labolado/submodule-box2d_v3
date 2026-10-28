@@ -335,8 +335,8 @@ ObjectId Simulation::createBody( const SoftBodyDef& def )
 		s.error = "soft internal spring capacity reached (maxInternalSprings)";
 		return {};
 	}
-	Body<float> body( 3, def.mass, def.halfWidth, def.halfHeight, 300, def.frequency, def.damping,
-					  0, def.materialScale, .2f );
+	Body<float> body( def.mass, def.halfWidth, def.halfHeight, def.frequency, def.damping,
+					  def.materialScale );
 	if ( !configureShape( body, def.shape, def.mass ) )
 	{
 		s.error = "invalid soft shape: expected one simple contour with at least 3 nodes";

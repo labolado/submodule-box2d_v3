@@ -176,7 +176,6 @@ ObjectId Box2DCoupling::attachBody( b2BodyId body )
 		Game::Solver candidate( s.state.core );
 		candidate.world = s.def.world;
 		candidate.flipY = s.def.flipY;
-		candidate.extendedGeometry = true;
 		for ( auto shape : shapes )
 		{
 			if ( ( count > 1 && b2Shape_GetType( shape ) != b2_polygonShape ) ||
@@ -481,7 +480,6 @@ bool Box2DCoupling::prepare()
 		if ( !solver.parts[index] )
 			continue;
 		auto& contact = solver.parts[index]->contact;
-		contact.extendedGeometry = true;
 		ObjectId body =
 			s.state.id( ObjectKind::Body, int( index ), s.state.core.bodies[index].generation );
 		const auto& filter = s.filters[index];

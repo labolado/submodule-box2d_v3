@@ -5,6 +5,10 @@ recoverable material. `soft_box2d_simulation.h` adds the coupled complete-step
 owner. Consumers include these two headers, not `soft_world.h`, `soft_game_world.h`
 or `soft_game_assembly.h`. This remains an experimental API, not a stable SDK ABI.
 
+Current Lua usage: `test/doc/softbody-api/README.md` in the independent test repository.
+The solver cleanup preserves current material equations, step ordering and assembly state;
+private prototype constructors and single-body owners are intentionally not source compatible.
+
 ## Responsibilities
 
 | Layer | Owns | Does not own |
@@ -162,7 +166,8 @@ Pressure force accumulation is O(nodes); opted-in topology checking is O(nodes²
 per material step. Default-off bodies skip it. Local tests cover force balance,
 rate/cap/identity/lifecycle, real load lifting, flatten/recover, concave24-node
 structure networks and a car with inflatable tyres. Android cost and human
-acceptance are pending. The old `kind=2`/`preload` pressure material is unchanged.
+acceptance are pending for that stage. The historical `kind=2` pressure material has been removed;
+this optional pressure module belongs to the current recoverable material.
 Shape-preserving reference-size changes use the separate opt-in module below;
 pressure can round a noncircular body and must not be presented as uniform scaling.
 
@@ -476,9 +481,9 @@ entry. Counters report entered rigid steps and successfully completed soft steps
   rigid press and centre world-pinned soft rollers have local fixtures; general
   jointed mechanisms, CCD, arbitrary topology and direct force loading are not
   certified. Soft/rigid positional pins have the bounded checks described above.
-- Historical standalone, static, attachment and single-body game modes retain
-  their internal interfaces and geometry restrictions for regression. The new
-  geometry is enabled only by `Box2DCoupling` (Lua `couplingMode='assembly'`).
+- Historical standalone, static, attachment and single-body game runtimes were removed.
+  The only Lua path is `coupled=true, couplingMode='assembly'`. Historical
+  tests require the pre-cleanup Git versions recorded in the test repository.
 
 The P4j local fixture covers static support, long-edge contacts, rotating circle
 friction, offset dynamic reaction, mirrored local geometry, bounded touch and
@@ -497,8 +502,7 @@ trapped near static terrain; it does not create a unified rigid/soft solver or C
 
 `getProfile()` is disabled by default. Inclusive buckets retain their prior
 meaning; `adapter` is now populated by the native coupling layer. Do not add
-nested timing buckets. Local CMake and macOS/Android engine lists compile the two
-new source files. Other engine platforms still need integration and validation.
+nested timing buckets. Local CMake and macOS/Android engine lists compile the current sources. Other engine platforms still need integration and validation.
 
 Geometry profiling (schemaVersion=2 in Lua) adds `geometryProject`,
 `geometryGather`, `geometryCache`, `geometryRecovery`, and `geometrySides`.
@@ -586,5 +590,5 @@ diagnostic; materials and recovery parameters were not tuned. See the independen
 This changes experimental private C++ definitions/storage; direct native users of
 these headers must rebuild and size custom-shape weights explicitly. It does not
 change the Solar2D public plugin SDK, existing engine class layouts or virtuals.
-Historical Lua modes still accept only their original 16-node ellipse. Arbitrary
-counts are exposed through `couplingMode='assembly'` only.
+Historical Lua modes no longer exist. The default ellipse has 16 nodes; custom
+contours use the current runtime node budget.
