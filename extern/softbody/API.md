@@ -25,6 +25,11 @@ are values. Editing a snapshot never edits simulation storage.
 
 ## Units and stepping
 
+Solar2D Lua uses logical pixels, y down, linear speed in pixels/s and angular
+speed in degrees/s clockwise. Mass, force, impulse, torque and material parameters
+retain physical units. The binding alone converts; native units and solver
+arithmetic are unchanged. See `test/doc/softbody-api/README.md` for the Lua contract.
+
 Native units are metres, kilograms, seconds, radians, with y up. Gravity is read
 from the coupled Box2D world; `flipY` reflects its coordinate system when needed.
 `SimulationDef.gravity` initializes an uncoupled definition only. The operation
@@ -209,7 +214,7 @@ changes for a recoverable body. Lua enables the module with a table:
 local chassis = world:createBody{
     material='recoverable', mass=3, shape=chassisShape,
     frequency=12, damping=40, materialScale=1.5,
-    referenceScale={target=1, min=.5, max=2, rate=1, maxSpeed=2},
+    referenceScale={target=1, min=.5, max=2, rate=1, maxSpeed=320}, -- pixels/s at scale160
 }
 chassis:setReferenceScaleTarget(1.5)
 chassis:setReferenceScaleTarget(.7)
@@ -228,7 +233,7 @@ including when a different target is supplied at creation.
 | min | .5 | .25..1 |
 | max | 2 | 1..4 |
 | rate | 1 | .001..10 scale factors per simulated second |
-| maxSpeed | 2 | .001..20 m/s of reference-node motion |
+| maxSpeed | 2 native; 2*scale Lua | .001..20 m/s native; multiply by scale for Lua pixels/s |
 
 The entire allowed range is checked at creation: scaled boundary/spring edges
 must remain at least1mm, area at least1e-6m² and reference coordinates within
@@ -328,11 +333,11 @@ The original raw experimental modes do not gain chain support.
 `Simulation::createWorldJoint(SoftWorldJointDef)` accepts a body, its node weights,
 an immutable world anchor, frequency/dampingRatio and motorGain. Lua assembly uses
 `world:createWorldPinJoint{body=body, weights=weights, x=x, y=y, frequency=12,
-dampingRatio=1, motorGain=8}`. Coordinates remain metres/y-up, independent of the
-display camera. The returned joint has `setMotor(speed, maxTorque)` and
-`removeSelf()` like a soft/soft pin. Speed is rad/s; positive rotates the body
-counterclockwise relative to the fixed world, whereas a soft/soft motor drives B
-relative to A. Torque is Nm.
+dampingRatio=1, motorGain=8}`. Lua coordinates use pixels/y-down, independent of
+the display camera; native coordinates remain metres/y-up. The returned joint has
+`setMotor(speed, maxTorque)` and `removeSelf()` like a soft/soft pin. Native speed is
+rad/s counterclockwise; Lua uses degrees/s clockwise. A world motor drives the body
+relative to the fixed world, whereas a soft/soft motor drives B relative to A. Torque is Nm.
 
 This is a compliant positional constraint, not an infinitely rigid pin or an
 orientation lock. Its reaction is external to the simulated bodies. Motor torque
@@ -358,10 +363,10 @@ local attachment = world:attachPhysicsBody(rigidBody)
 attachment:setCollisionEnabled(softBody, false) -- explicit application choice
 local pin = world:createRigidPinJoint {
     body = softBody, rigid = attachment, weights = nodeWeights,
-    localAnchorX = 0, localAnchorY = 0, -- metres, rigid-local y UP
+    localAnchorX = 0, localAnchorY = 0, -- pixels, rigid-local y DOWN
     frequency = 30, dampingRatio = 1, motorGain = 8,
 }
-local state = pin:getState() -- enabled, errorM, impulseX, impulseY on soft side
+local state = pin:getState() -- enabled, errorDistance (pixels), impulseX/Y (kg*m/s, y down)
 pin:removeSelf()
 ```
 
@@ -410,11 +415,13 @@ separate from native load/reaction/lifecycle checks.
 
 `Box2DCoupling::setRigidMotor(joint, speed, maxTorque)` / Lua
 `pin:setMotor(speed, maxTorque)` drives **soft angular velocity minus rigid angular
-velocity**. Units are rad/s and Nm, positive counterclockwise in soft y-up space.
-For a tyre rolling right on horizontal terrain, use a negative target speed.
+velocity**. Native units are rad/s and Nm, positive counterclockwise in soft y-up
+space; Lua uses degrees/s clockwise and Nm. A tyre rolling right therefore uses
+a negative native speed or a positive Lua speed.
 The optional creation field `motorGain` defaults to8 (Nm per rad/s), range0..1e6.
 Speed must be finite within±1e4rad/s; torque0..1e6Nm. These are input guard limits,
-not validated game parameters. The local car fixture uses±6rad/s and10Nm.
+not validated game parameters. Lua speed limits are converted to degrees/s. The
+frozen SI car fixture uses±6rad/s and10Nm; its test-only adapter converts to Lua units.
 
 No motor runs until maxTorque>0 and gain>0. `setMotor(0,0)` coasts;
 `setMotor(0,positiveTorque)` brakes relative rotation, not absolute world motion.
