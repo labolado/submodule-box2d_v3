@@ -72,10 +72,17 @@ struct CouplingProfile
 		NativeWorld,
 		Advance,
 		Adapter,
+		GeometryProject,
+		GeometryGather,
+		GeometryCache,
+		GeometryRecovery,
+		GeometrySides,
 		Count
 	};
 	bool enabled = false, clockFailed = false;
 	std::array<TimingSample, Count> samples{};
+	unsigned long long projectionCandidates = 0, projectionCorrections = 0;
+	unsigned long long gatherCandidates = 0, cacheComparisons = 0, rows = 0;
 };
 class Box2DCoupling
 {

@@ -683,6 +683,13 @@ CouplingProfile Box2DCoupling::getProfile() const
 	const auto& profile = impl_->solver.profile;
 	result.enabled = profile.enabled;
 	result.clockFailed = profile.clockFailed;
+	static_assert( int( Game::Profile::Count ) == int( CouplingProfile::Count ),
+				   "profile stage count" );
+	result.projectionCandidates = profile.work[Game::Profile::ProjectionCandidates];
+	result.projectionCorrections = profile.work[Game::Profile::ProjectionCorrections];
+	result.gatherCandidates = profile.work[Game::Profile::GatherCandidates];
+	result.cacheComparisons = profile.work[Game::Profile::CacheComparisons];
+	result.rows = profile.work[Game::Profile::Rows];
 	for ( int i = 0; i < Game::Profile::Count; ++i )
 	{
 		result.samples[i].wallMs = profile.samples[i].wallMs;

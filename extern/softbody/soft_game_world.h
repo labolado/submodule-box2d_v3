@@ -2,6 +2,7 @@
 // Private restricted game solver. No Box2D public API or existing solver changes.
 #include "soft_box2d_box.h"
 #include "soft_game_geometry.h"
+#include "soft_profile.h"
 
 #include <algorithm>
 #include <array>
@@ -52,6 +53,8 @@ struct Row
 struct Solver
 {
 	Core& soft;
+	Profile* profile =
+		nullptr; // Non-owning assembly diagnostics; never used by the solver equations.
 	int bodyIndex = 0;
 	bool sharedWorld = false;
 	bool retainBoundarySides = false;

@@ -46,6 +46,7 @@ bool Assembly::syncParts()
 		}
 		if ( !parts[id] || parts[id]->generation != soft.bodies[id].generation )
 			parts[id].reset( new Part( soft, int( id ) ) );
+		parts[id]->contact.profile = &profile;
 	}
 	return true;
 }

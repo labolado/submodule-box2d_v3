@@ -487,6 +487,8 @@ bool Solver::projectCompound( int owner )
 		}
 
 	geometryCorrections += projection.corrections;
+	if ( profile && profile->enabled && profile->geometryDepth )
+		profile->work[Profile::ProjectionCorrections] += projection.corrections;
 	return observeRecovery();
 }
 
@@ -665,6 +667,8 @@ bool Solver::projectChains()
 		}
 	}
 	geometryCorrections += projection.corrections;
+	if ( profile && profile->enabled && profile->geometryDepth )
+		profile->work[Profile::ProjectionCorrections] += projection.corrections;
 	return observeRecovery() && withinChainQuery();
 }
 double Solver::chainDepth( int shape ) const
@@ -705,8 +709,11 @@ void Solver::append( Row row )
 	}
 	if ( !recovery.active )
 	{
+		Profile::Scope timing( profile, Profile::GeometryCache );
 		for ( int i = 0; i < previousCount; ++i )
 		{
+			if ( timing.profile )
+				++timing.profile->work[Profile::CacheComparisons];
 			const auto& old = previous[i];
 			if ( old.box == row.box && old.edge == row.edge && old.feature == row.feature &&
 				 std::abs( old.fraction - row.fraction ) < .1f &&
@@ -720,11 +727,14 @@ void Solver::append( Row row )
 			}
 		}
 	}
+	if ( profile && profile->enabled && profile->geometryDepth )
+		++profile->work[Profile::Rows];
 	rows[rowCount++] = row;
 }
 
 void Solver::gather()
 {
+	Profile::Scope timing( profile, Profile::GeometryGather );
 	bool chainsGathered = false;
 	rowCount = 0;
 	auto& body = this->body();
@@ -733,6 +743,8 @@ void Solver::gather()
 		auto& box = boxes[id];
 		if ( !box.enabled )
 			continue;
+		if ( timing.profile )
+			++timing.profile->work[Profile::GatherCandidates];
 		b2WorldTransform transform = { box.state.origin, box.state.rotation };
 		if ( box.geometry.kind == RigidGeometry::Chain )
 		{
@@ -884,6 +896,7 @@ void Solver::gather()
 
 bool Solver::projectGeometry()
 {
+	Profile::Scope timing( profile, Profile::GeometryProject );
 	if ( !withinChainQuery() )
 		return false;
 	// Within this call only BoxProjection::move can change node positions;
@@ -900,6 +913,8 @@ bool Solver::projectGeometry()
 			auto& box = boxes[id];
 			if ( !box.enabled )
 				continue;
+			if ( timing.profile )
+				++timing.profile->work[Profile::ProjectionCandidates];
 			if ( box.geometry.kind == RigidGeometry::Chain )
 			{
 				if ( !chainsProjected && !projectChains() )
@@ -936,6 +951,8 @@ bool Solver::projectGeometry()
 			}
 			geometry.project();
 			geometryCorrections += geometry.corrections;
+			if ( profile && profile->enabled && profile->geometryDepth )
+				profile->work[Profile::ProjectionCorrections] += geometry.corrections;
 			if ( geometry.error )
 			{
 				error = geometry.error;
@@ -950,6 +967,7 @@ bool Solver::projectGeometry()
 
 void Solver::captureBoundarySides()
 {
+	Profile::Scope timing( profile, Profile::GeometrySides );
 	for ( int j = 0; j < boxCount; ++j )
 	{
 		auto& box = boxes[j];
@@ -1170,6 +1188,7 @@ Core::Vec Solver::projectTranslation( Core::Vec desired )
 
 bool Solver::observeRecovery( bool endOfStep )
 {
+	Profile::Scope timing( profile, Profile::GeometryRecovery );
 	auto topology = inspectTopology( body() );
 	if ( !topology.finite )
 	{

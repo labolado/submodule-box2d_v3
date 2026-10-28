@@ -500,6 +500,25 @@ meaning; `adapter` is now populated by the native coupling layer. Do not add
 nested timing buckets. Local CMake and macOS/Android engine lists compile the two
 new source files. Other engine platforms still need integration and validation.
 
+Geometry profiling (schemaVersion=2 in Lua) adds `geometryProject`,
+`geometryGather`, `geometryCache`, `geometryRecovery`, and `geometrySides`.
+These scopes collect only while `contactGeometry` is active; observations during
+prepare/finalize do not leak into these detail buckets. Project includes recovery
+observations made inside projection, and gather includes cache matching. Recovery
+counts full `observeRecovery()` calls, not the checks inside each projection move.
+The detail buckets are inclusive and must not be summed as independent costs.
+This is diagnostic instrumentation, not a performance optimization.
+
+The cumulative counters `projectionCandidates` and `gatherCandidates` count enabled
+shape visits (including repeated sweeps and compound/chain entries), not distinct
+contacts or narrow-phase calls. `projectionCorrections` counts node/edge correction
+operations, `cacheComparisons` counts attempted previous-row matches, and `rows`
+counts appended contact rows. All are zero when profiling is disabled, as are all
+timers; disabled scopes do not read a clock. Enabling profiling adds clock overhead.
+Existing Lua fields remain available. The experimental native `CouplingProfile`
+value layout grows; native consumers of this internal header must be rebuilt.
+This header is not part of the installed Corona plugin SDK.
+
 The independent test repository contains `physics_soft_body_game_car/api_checks.cpp`
 (public-header consumer), `guards.cpp` (deliberate internal corruption), frozen
 five-scenario migration, and `physics_soft_body_api` (Lua topology and lifecycle).
