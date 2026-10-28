@@ -1,4 +1,6 @@
 #include "soft_game_geometry.h"
+
+#include <limits>
 extern "C"
 {
 #include "../../src/physics_world.h"
@@ -351,20 +353,32 @@ void BoxProjection::project()
 		projectCircle();
 		return;
 	}
+	// For rectangles only, retain faces separating every original node. The
+	// existing node/retained-side projection still runs first. Any correction
+	// invalidates this proof, including a correction limited by its budget.
+	unsigned outside = !geometry || geometry->kind == RigidGeometry::Rectangle ? 15u : 0u;
+	unsigned initialCorrections = corrections;
+	float scale = 1 + float( std::abs( transform.p.x ) + std::abs( transform.p.y ) ) + hx + hy;
 	for ( int node = 0; node < body.nodeCount; ++node )
 	{
 		auto p = local( node );
+		unsigned nodeOutside = 0;
+		float margin = 32 * std::numeric_limits<float>::epsilon() *
+					   ( scale + std::abs( p.x ) + std::abs( p.y ) );
 		float closest = -1e30f;
 		int face = 0;
 		for ( int i = 0; i < faceCount(); ++i )
 		{
 			float distance = separation( p, i );
+			if ( outside && distance > margin )
+				nodeOutside |= 1u << i;
 			if ( distance > closest )
 			{
 				closest = distance;
 				face = i;
 			}
 		}
+		outside &= nodeOutside;
 		int retained = retainedFace( node );
 		if ( retained >= 0 )
 		{
@@ -377,6 +391,12 @@ void BoxProjection::project()
 			return;
 	}
 	if ( pointsOnly )
+		return;
+	// A convex half-plane contains the whole contour (including concave or
+	// folded contours) when it contains all nodes. No corner/edge can cross
+	// this rectangle. Keep near-plane cases on the original path to cover
+	// float roundoff in inverse/world transforms; this is not a contact skin.
+	if ( outside && corrections == initialCorrections )
 		return;
 	for ( int corner = 0; corner < faceCount(); ++corner )
 	{
