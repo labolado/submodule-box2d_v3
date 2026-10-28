@@ -29,9 +29,11 @@ controls and level layouts belong to application Lua or test fixtures.
 
 Consumers include `soft_simulation.h` and `soft_box2d_simulation.h` only. See
 [API.md](API.md) for contracts, units and limitations. Native units are m/kg/s,
-y up. The coupled owner executes one complete 1/480 s rigid+soft step with eight
-soft constraint sweeps; Solar2D schedules eight complete steps per 60 Hz frame.
-This is not Box2D's eight-substep stepping and does not make softbody parallel.
+y up. The coupled owner executes one complete configured Box2D step, with soft
+phases in every internal substep. Test configuration: timeStep=1/60, subSteps=8;
+each 1/480 s substep performs eight soft constraint sweeps. Native defaults remain
+1/480 + 1 for regression compatibility. See API.md for timing and counter semantics.
+Soft phases remain serial; using Box2D internal substeps does not parallelize them.
 
 ## Build and verification
 

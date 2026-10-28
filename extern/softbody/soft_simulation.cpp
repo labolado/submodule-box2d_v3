@@ -202,13 +202,15 @@ Simulation::Impl::Impl( const SimulationDef& def )
 		 def.maxNodes > std::numeric_limits<int>::max() / 4 - 4 || def.maxSoftContactRows < 1 ||
 		 def.maxInternalSprings < 0 ||
 		 def.maxInternalSprings > std::numeric_limits<int>::max() / 64 ||
-		 def.timeStep != 1.f / 480 || def.iterations != 8 || !point( def.gravity ) )
+		 !range( def.timeStep, std::numeric_limits<float>::min(), 1 ) || def.subSteps < 1 ||
+		 def.subSteps > 128 || !std::isfinite( 1.f / ( def.timeStep / def.subSteps ) ) ||
+		 def.iterations != 8 || !point( def.gravity ) )
 	{
 		error = "unsupported soft simulation definition";
 		return;
 	}
-	core.dt = def.timeStep;
-	core.substeps = 1;
+	core.dt = def.timeStep / def.subSteps;
+	core.substeps = def.subSteps;
 	core.iterations = def.iterations;
 	core.gravity = def.gravity;
 	core.maxSoftContactRows = def.maxSoftContactRows;

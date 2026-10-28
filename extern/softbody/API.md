@@ -29,9 +29,38 @@ Native units are metres, kilograms, seconds, radians, with y up. Gravity is read
 from the coupled Box2D world; `flipY` reflects its coordinate system when needed.
 `SimulationDef.gravity` initializes an uncoupled definition only. The operation
 API currently advances through `Box2DCoupling::advance`, not a standalone step.
-It executes exactly one complete Box2D step with soft phases at 1/480 s and eight
-contact/link iterations. The application supplies eight complete steps per 60 Hz
-frame. This is not Box2D's amortized eight-substep algorithm.
+`SimulationDef.timeStep` is the complete world duration; `subSteps` is the Box2D
+internal substep count. `advance()` calls Box2D once with that pair. Material,
+contacts, pins, motors and recovery use `h = timeStep / subSteps`, with eight soft
+constraint sweeps per substep (not eight further integrations). Configure before
+creating bodies; runtime timing changes require recreating the simulation.
+
+```cpp
+SoftBody::SimulationDef def;
+def.timeStep = 1.0f / 60.0f;
+def.subSteps = 8;
+SoftBody::Simulation simulation(def);
+// Construct the adapter and scene, then call coupling.advance() once per 60Hz tick.
+```
+
+Native defaults remain `1/480, 1` for existing baselines. Accepted world duration
+is positive and at most one second, with a finite reciprocal substep; subSteps is
+an integer in1..128. Body creation still checks its stiffness/frequency budget
+against the actual h: accepting timing alone does not certify any material.
+Solar2D inherits both fields from `physics.setFixedStepMode`; there is no second
+soft clock. Its listener, rigid event dispatch, force clearing and display sync
+occur once per complete world step. Force stays active through its internal
+substeps; an external impulse is applied once when requested.
+`SimulationState.completedSteps` counts soft substeps, while coupling
+`entered/completed` count whole world steps. Snapshot constraint impulses and
+touch force describe the last internal substep, not sums over the world step.
+
+Only-static/empty rigid worlds run all configured soft substeps even when Box2D
+skips its awake solver. Chain preflight covers the complete world-step reach;
+one-sided eligibility and recovery budgets reset for each internal substep.
+Changing from eight complete steps to one eight-substep world step can change
+contact generation, CCD, restitution and event timing; equal h does not promise
+bit-identical trajectories.
 
 The material, motor and contact formulas are unchanged by this API extraction.
 Recoverable bodies accept one simple hole-free contour with at least three nodes
@@ -63,7 +92,7 @@ Stiffness is N/m (default300, accepted0.001..1e8); dampingRatio is dimensionless
 (default0.3, accepted0..10). Reference length comes from the initial shape and
 must be at least1mm. Input range acceptance does not certify stability: creation
 also rejects duplicates, self edges and invalid endpoints, and checks each node's
-total incident stiffness against the fixed1/480s rest-state budget
+total incident stiffness against the actual substep rest-state budget
 `h^2 * ((2*pi*frequency)^2*materialScale + 2*sum(k)/nodeMass) <= 1`.
 This is not a bound for arbitrary compression/contact. The world budget
 `maxInternalSprings` defaults to2048; removal releases capacity.
@@ -77,7 +106,7 @@ pair kinetic energy and leaves rigid translation/rotation unchanged.
 
 An inverted/self-crossed boundary, nonpositive area or boundary edge below1um
 temporarily disables the structure network. The existing recoverable material
-unfolds it; after8 healthy complete steps, structural strength ramps at
+unfolds it; after8 healthy internal substeps, structural strength ramps at
 `frequency` per second back to1. The damping coefficient follows sqrt(strength).
 This is an active **recovery material policy**, not a globally passive spring
 network: stiffness changes can add or remove elastic energy. Positions, reference
@@ -86,7 +115,7 @@ shape and contacts are not reset. `SoftBodyState` / `body:getState()` report:
 - `internalSpringScale`: current structural strength,0..1.
 - `internalSpringWork`: signed cumulative stored-energy change due only to that
   schedule,J. This is separate from `appliedWork`; neither is a full coupled ledger.
-- `internalSpringRecoverySteps`: complete steps spent below full strength.
+- `internalSpringRecoverySteps`: internal substeps spent below full strength.
 
 Force/damping traversal is O(edges); the opted-in boundary validity check is
 O(nodes^2) per material step. Mobile cost is not yet validated. Local evidence is
@@ -307,7 +336,7 @@ relative to A. Torque is Nm.
 
 This is a compliant positional constraint, not an infinitely rigid pin or an
 orientation lock. Its reaction is external to the simulated bodies. Motor torque
-is limited once per complete step; disabling torque allows coasting, not immediate
+is limited once per internal substep; disabling torque allows coasting, not immediate
 stopping. There are no angle limits or moving-world-target setters. Use touch for
 interactive targets; a moving rigid anchor uses the separate coupling pin API below.
 Collapsed bodies retain the existing finite-inertia guard; no rigid teleport is used.
@@ -349,7 +378,7 @@ mass centre. Shifted mass centres and reflected local coordinates are supported.
 The full 2x2 effective inverse mass is
 `K = (sum(weights[i]^2/mass[i]) + inverseRigidMass) I + inverseInertia perp(r) perp(r)^T`.
 With `omega=2*pi*frequency`, compliance is `K/(h*(2*zeta*omega+h*omega^2))`.
-Accumulated impulses reset each complete step. Pins solve with the assembly's
+Accumulated impulses reset each internal substep. Pins solve with the assembly's
 contacts before rigid constraints and integration, reading/writing the current
 rigid state on every visit. Shared pins/contacts cannot overwrite one another's
 reaction. No Box2D position edits, hidden rigid bodies or new core hooks are used.
@@ -369,7 +398,7 @@ Contact filters and exclusions do not disable the pin. Registration geometry
 limits below still apply, including zero restitution. No collision is implicitly
 excluded by creating a connection.
 
-`getState()` reports current geometric gap and last-step soft impulse (kg*m/s).
+`getState()` reports current geometric gap and last-substep soft impulse (kg*m/s).
 World energy does not include these springs' stored energy or external support
 work; it is not a complete coupled energy ledger. A failed entered step is still
 non-transactional. Tight anchoring is not guaranteed: the frozen 0.3kg welded
@@ -392,7 +421,7 @@ No motor runs until maxTorque>0 and gain>0. `setMotor(0,0)` coasts;
 Changing the motor never changes positional stiffness or collision exclusions.
 No instantaneous angle lock or wheel-specific logic is added to the solver.
 
-Once per complete step, after soft material/touch velocity and before Box2D warm
+Once per internal substep, after soft material/touch velocity and before Box2D warm
 start/constraints, the motor computes `K=1/Isoft+inverseIrigid` and
 `J = clamp(h*gain*(target-relative)/(1+h*gain*K), -h*maxTorque, h*maxTorque)`.
 This implicit response prevents the isolated motor from overshooting a target at
@@ -404,7 +433,7 @@ sides until material recovery creates a lever arm. Static/kinematic endpoints
 absorb the reaction externally. No Box2D core hook or rigid-position correction.
 
 `pin:getState()` adds `relativeSpeed` (current, after all phases), `motorImpulse`
-(last step on the soft side, Nm*s) and `motorWork` (last-step actuator work,J).
+(last internal substep on the soft side, Nm*s) and `motorWork` (last-substep actuator work,J).
 The latter is `J*relativeBefore+0.5*J^2*K`; it includes the opposite dynamic reaction
 and is relative work against prescribed endpoints. It does not include pin spring,
 contact/friction, gravity, other joints, or a complete coupled energy ledger.
@@ -544,7 +573,7 @@ uncertified. Adding boundary samples changes the equal-node mass distribution
 and can change deformation/contact behavior. It is not a converged continuum model.
 
 Position assistance shares a 0.02 m per-node budget across pairs and passes in
-one 1/480 s step. During deep recovery only, the boundary adapter projects desired
+one configured soft substep. During deep recovery only, the boundary adapter projects desired
 whole-body translation onto retained rigid-face constraints. A blocked body can
 cede its share to the other. Assistance changes positions without adding delta/dt
 to velocity or rewriting rest geometry. This deliberately sacrifices exact
@@ -559,7 +588,7 @@ separation direction has no available space.
 |---|---|---|
 | `softContactRows` | same | Cumulative velocity row solves, not unique contact count |
 | `softContactDepth` | `softContactDepthM` | Latest gathered row depth in metres, not overlap volume |
-| `softRecoverySteps` | same | Complete steps that used pair recovery rows |
+| `softRecoverySteps` | same | Internal substeps that used pair recovery rows |
 | `softRecoveryEntries`, `softRecoveryExits` | same | Cumulative entries and successful healthy exits |
 | `softRecoveringPairs` | same | Active recovery pairs at the last completed step |
 | `softRecoveryDistance` | `softRecoveryDistanceM` | Cumulative whole-body translation lengths in metres |

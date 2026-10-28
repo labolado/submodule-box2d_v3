@@ -67,6 +67,7 @@ struct Box2DCoupling::Impl
 		}
 		state.coupled = true;
 		solver.world = def.world;
+		solver.timeStep = state.limits.timeStep;
 		solver.flipY = def.flipY;
 		solver.enableDynamicContacts = def.enableDynamicContacts;
 		solver.enableSoftContacts = state.limits.enableSoftContacts;
@@ -539,9 +540,10 @@ bool Box2DCoupling::prepare()
 				}
 				bounds.lowerBound = b2Min( bounds.lowerBound, { p[0], p[1] } );
 				bounds.upperBound = b2Max( bounds.upperBound, { p[0], p[1] } );
-				reach = std::max( reach, std::hypot( r[0], r[1] ) +
-											 Game::Step * std::hypot( v[0], v[1] ) +
-											 contact.recovery.maxCorrection );
+				reach =
+					std::max( reach, std::hypot( r[0], r[1] ) +
+										 s.state.limits.timeStep * std::hypot( v[0], v[1] ) +
+										 contact.recovery.maxCorrection * s.state.limits.subSteps );
 			}
 			bounds.lowerBound = b2Sub( bounds.lowerBound, { reach, reach } );
 			bounds.upperBound = b2Add( bounds.upperBound, { reach, reach } );

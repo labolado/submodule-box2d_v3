@@ -58,6 +58,7 @@ struct Assembly
 	bool enableSoftContacts = false;
 	const char* error = nullptr;
 	unsigned long long entered = 0, completed = 0;
+	float timeStep = Step; // Complete rigid-world step.
 	int nextPhase = 0;
 	double peakGap = 0, peakSpeed = 0, peakDepth = 0;
 	Profile profile;
@@ -72,6 +73,8 @@ struct Assembly
 	bool syncParts();
 	bool prepare();
 	bool advance();
+	bool beginSubstep();
+	bool finishSubstep();
 	void motors();
 	bool rigidMotors( void* step );
 	void prepareLinks();

@@ -34,12 +34,13 @@ struct SoftRigidJointState
 {
 	bool enabled = false;
 	double errorM = 0;
-	Point impulse{};						// On the soft side, in the last completed step, kg*m/s.
+	Point impulse{};						// On the soft side, in the last substep, kg*m/s.
 	double relativeSpeed = 0;				// Soft minus rigid, rad/s in y-up coordinates.
-	double motorImpulse = 0, motorWork = 0; // Last-step angular impulse and actuator work.
+	double motorImpulse = 0, motorWork = 0; // Last-substep angular impulse and actuator work.
 };
 struct CouplingState
 {
+	// entered/completed count complete world steps; recovery counters count substeps.
 	unsigned long long entered = 0, completed = 0, contactRows = 0, warmHits = 0;
 	unsigned long long recoveryEntries = 0, recoveryExits = 0, recoverySteps = 0;
 	unsigned long long softContactRows = 0, softRecoverySteps = 0;

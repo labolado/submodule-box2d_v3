@@ -69,8 +69,8 @@ bool Assembly::prepare()
 	}
 	if ( !syncParts() )
 		return false;
-	if ( soft.dt != Step || soft.substeps != 1 ||
-		 soft.iterations != Sweeps )
+	if ( !( timeStep > 0 && timeStep <= 1 ) || !std::isfinite( timeStep ) || soft.substeps < 1 ||
+		 soft.substeps > 128 || soft.dt != timeStep / soft.substeps || soft.iterations != Sweeps )
 	{
 		error = "unsupported_assembly_configuration";
 		return false;
@@ -253,9 +253,9 @@ bool Assembly::rigidMotors( void* step )
 		double relative = soft.omega( link.body ) - link.state.angularVelocity;
 		// Implicit proportional speed servo. The denominator accounts for
 		// both angular responses and avoids overshoot at small inertia.
-		double gain = double( Step ) * link.motorGain;
+		double gain = double( soft.dt ) * link.motorGain;
 		double impulse = gain * ( link.motorSpeed - relative ) / ( 1 + gain * inverse );
-		double cap = double( Step ) * link.maxMotorTorque;
+		double cap = double( soft.dt ) * link.maxMotorTorque;
 		impulse = std::max( -cap, std::min( cap, impulse ) );
 		if ( !std::isfinite( impulse ) )
 		{
@@ -263,7 +263,7 @@ bool Assembly::rigidMotors( void* step )
 			return false;
 		}
 		double before = soft.kinetic( link.body );
-		soft.torque( link.body, impulse / Step );
+		soft.torque( link.body, impulse / soft.dt );
 		soft.motorWork += soft.kinetic( link.body ) - before;
 		link.state.angularVelocity -= float( impulse * link.state.inverseInertia );
 		if ( link.index >= 0 )
@@ -292,8 +292,8 @@ void Assembly::prepareLinks()
 			for ( int i = 0; i < a.nodeCount; ++i )
 				link.inverseMass += pin.wa[i] * pin.wa[i] / a.mass[i];
 			float omega = 2 * 3.14159265358979323846f * pin.frequency;
-			float denominator = 2 * pin.dampingRatio * omega + Step * omega * omega;
-			link.gamma = link.inverseMass / ( Step * denominator );
+			float denominator = 2 * pin.dampingRatio * omega + soft.dt * omega * omega;
+			link.gamma = link.inverseMass / ( soft.dt * denominator );
 			float biasRate = omega * omega / denominator;
 			auto x = soft.anchor( pin.a, pin.wa );
 			link.bias = { biasRate * ( pin.worldAnchor[0] - x[0] ),
@@ -307,11 +307,11 @@ void Assembly::prepareLinks()
 			link.inverseMass += ( i < a.nodeCount ? pin.wa[i] * pin.wa[i] / a.mass[i] : 0 ) +
 								( i < b.nodeCount ? pin.wb[i] * pin.wb[i] / b.mass[i] : 0 );
 		float omega = 2 * 3.14159265358979323846f * pin.frequency;
-		float denominator = 2 * pin.dampingRatio * omega + Step * omega * omega;
+		float denominator = 2 * pin.dampingRatio * omega + soft.dt * omega * omega;
 		// Implicit spring compliance: gamma=1/(h*(d+h*k)), where k=m*w*w.
 		// Accumulated impulses make repeated sweeps solve the same spring,
 		// rather than applying the full spring force eight times.
-		link.gamma = link.inverseMass / ( Step * denominator );
+		link.gamma = link.inverseMass / ( soft.dt * denominator );
 		float biasRate = omega * omega / denominator;
 		auto x = soft.anchor( pin.a, pin.wa ), y = soft.anchor( pin.b, pin.wb );
 		link.bias = { biasRate * ( y[0] - x[0] ), biasRate * ( y[1] - x[1] ) };
@@ -396,8 +396,8 @@ bool Assembly::prepareRigidLinks( void* step )
 		float xy = -state.inverseInertia * link.arm.x * link.arm.y;
 		float yy = inverse + state.inverseInertia * link.arm.x * link.arm.x;
 		float omega = 2 * 3.14159265358979323846f * link.frequency;
-		float denominator = 2 * link.dampingRatio * omega + Step * omega * omega;
-		float compliance = 1 / ( Step * denominator );
+		float denominator = 2 * link.dampingRatio * omega + soft.dt * omega * omega;
+		float compliance = 1 / ( soft.dt * denominator );
 		link.gamma = { { compliance * xx, compliance * xy }, { compliance * xy, compliance * yy } };
 		link.mass = b2GetInverse22( { { xx + link.gamma.cx.x, xy + link.gamma.cx.y },
 									  { xy + link.gamma.cy.x, yy + link.gamma.cy.y } } );
@@ -512,7 +512,7 @@ bool Assembly::pairGeometry( void* step )
 			contact.captureBoundarySides();
 			for ( int i = 0; i < body.nodeCount; ++i )
 				for ( int axis = 0; axis < 2; ++axis )
-					body.x[i][axis] += Step * body.v[i][axis];
+					body.x[i][axis] += soft.dt * body.v[i][axis];
 		}
 	if ( !earlyContacts )
 		pairs.beginStep();
@@ -603,13 +603,16 @@ void Assembly::stage( void* step, int phase, void* context )
 	auto& owner = *static_cast<Assembly*>( context );
 	if ( owner.error )
 		return;
-	if ( phase != owner.nextPhase++ )
+	if ( owner.nextPhase >= 3 * owner.soft.substeps || phase != owner.nextPhase % 3 )
 	{
 		owner.error = "assembly_phase_order";
 		return;
 	}
+	++owner.nextPhase;
 	if ( phase == 0 )
 	{
+		if ( owner.nextPhase > 1 && !owner.beginSubstep() )
+			return;
 		Profile::Scope timing( owner.profile, Profile::MaterialMotor );
 		owner.soft.advanceMaterialVelocity();
 		if ( owner.soft.failure )
@@ -679,7 +682,7 @@ void Assembly::stage( void* step, int phase, void* context )
 					auto& body = part->contact.body();
 					for ( int i = 0; i < body.nodeCount; ++i )
 						for ( int axis = 0; axis < 2; ++axis )
-							body.x[i][axis] += Step * body.v[i][axis];
+							body.x[i][axis] += owner.soft.dt * body.v[i][axis];
 					if ( !contact.observeRecovery() )
 					{
 						owner.error = contact.error;
@@ -748,29 +751,43 @@ void Assembly::stage( void* step, int phase, void* context )
 					}
 			}
 	}
+	if ( owner.soft.substeps > 1 )
+		owner.finishSubstep();
 }
 
-bool Assembly::advance()
+bool Assembly::beginSubstep()
 {
-	Profile::Scope timing( profile, Profile::Advance );
-	if ( !prepare() )
-		return false;
 	for ( auto& part : parts )
 		if ( part )
 		{
 			auto& contact = part->contact;
+			if ( !contact.observeRecovery() )
+			{
+				error = contact.error;
+				return false;
+			}
+			if ( contact.chainQueryActive )
+				contact.chainStart = contact.body().x;
 			contact.recovery.remaining.assign( contact.body().nodeCount,
 											   contact.recovery.maxCorrection );
 			if ( contact.recovery.active )
 				contact.clearCache();
 		}
+	return true;
+}
+
+bool Assembly::advance()
+{
+	Profile::Scope timing( profile, Profile::Advance );
+	if ( !prepare() || !beginSubstep() )
+		return false;
 	nextPhase = 0;
 	boundWorld = world;
 	boundFlipY = flipY;
 	++entered;
 	{
 		Profile::Scope nativeTiming( profile, Profile::NativeWorld );
-		b2World_StepWithSoftStages( world, Step, 1, nullptr, nullptr, stage, this );
+		b2World_StepWithSoftStages( world, timeStep, soft.substeps, nullptr, nullptr, stage, this );
 		bool staticOnly = true;
 		for ( const auto& link : rigidLinks )
 			if ( link.enabled && b2Body_GetType( link.rigid ) != b2_staticBody )
@@ -782,15 +799,31 @@ bool Assembly::advance()
 						 b2Body_GetType( part->contact.boxes[i].body ) != b2_staticBody )
 						staticOnly = false;
 		if ( nextPhase == 0 && staticOnly )
-			for ( int phase = 0; phase < 3; ++phase )
-				stage( nullptr, phase, this );
+			for ( int sub = 0; sub < soft.substeps && !error; ++sub )
+				for ( int phase = 0; phase < 3 && !error; ++phase )
+					stage( nullptr, phase, this );
 	}
-	if ( !error && nextPhase != 3 )
+	if ( !error && nextPhase != 3 * soft.substeps )
 		error = "assembly_missing_stage";
 	// There is no rollback after native entry. Material state is already in
 	// the authoritative world; a failed step remains latched.
 	if ( error )
 		return false;
+	if ( soft.substeps == 1 && !finishSubstep() )
+		return false;
+	for ( auto& part : parts )
+		if ( part )
+			for ( int i = 0; i < part->contact.boxCount; ++i )
+			{
+				auto& box = part->contact.boxes[i];
+				box.cachedTransform = b2Body_GetTransform( box.body );
+			}
+	++completed;
+	return true;
+}
+
+bool Assembly::finishSubstep()
+{
 	Profile::Scope observationTiming( profile, Profile::Finalize );
 	for ( auto& part : parts )
 		if ( part )
@@ -801,16 +834,19 @@ bool Assembly::advance()
 				error = contact.error;
 				return false;
 			}
-			for ( int i = 0; i < contact.boxCount; ++i )
-				contact.boxes[i].cachedTransform = b2Body_GetTransform( contact.boxes[i].body );
 			peakDepth = std::max( peakDepth, contact.lastDepth );
 		}
 	soft.peak = soft.currentMetrics();
 	peakSpeed = std::max( peakSpeed, soft.peak.nodeSpeed );
 	peakGap = std::max( peakGap, soft.peak.pin );
 	++soft.completedSubsteps;
-	++completed;
+	if ( soft.failure )
+	{
+		error = soft.failure;
+		return false;
+	}
 	return true;
 }
+
 } // namespace Game
 } // namespace SoftBody

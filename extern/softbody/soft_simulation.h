@@ -30,7 +30,9 @@ struct SimulationDef
 	// Runtime budgets, not per-shape storage limits. Removed bodies release nodes.
 	int maxNodes = 512, maxSoftContactRows = 512;
 	int maxInternalSprings = 2048;
+	// Complete world step; material/constraints use timeStep / subSteps.
 	float timeStep = 1.f / 480;
+	int subSteps = 1;
 	int iterations = 8;
 	Point gravity{ { 0, -20 } };
 	bool enableSoftContacts = false;
@@ -134,7 +136,7 @@ struct SoftTouchState
 };
 struct SimulationState
 {
-	unsigned long long completedSteps = 0;
+	unsigned long long completedSteps = 0; // Completed internal soft substeps.
 	double energy = 0, motorWork = 0, appliedWork = 0;
 	double penetration = 0, pinError = 0, nodeSpeed = 0, centerSpeed = 0, minAreaRatio = 1;
 	bool selfCross = false;

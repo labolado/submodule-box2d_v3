@@ -1199,7 +1199,7 @@ void Solver::solve( Row& row )
 	auto p = point( row );
 	float separation = b2Dot( { float( p.x - surface.x ), float( p.y - surface.y ) }, row.normal );
 	// Positive separation admits only the velocity needed to reach the face.
-	float bias = std::max( 0.f, separation ) / Step;
+	float bias = std::max( 0.f, separation ) / soft.dt;
 	float normalMass = inverseMass( row, row.normal );
 	if ( !( normalMass > 0 ) )
 	{
@@ -1258,7 +1258,8 @@ bool Solver::validate()
 		error = soft.failure;
 		return false;
 	}
-	if ( soft.dt != Step || soft.substeps != 1 || soft.iterations != Sweeps )
+	if ( !( soft.dt > 0 ) || !std::isfinite( 1.f / soft.dt ) || soft.substeps < 1 ||
+		 soft.substeps > 128 || soft.iterations != Sweeps )
 	{
 		error = "unsupported_game_step";
 		return false;
