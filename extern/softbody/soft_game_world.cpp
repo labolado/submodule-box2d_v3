@@ -478,6 +478,14 @@ int chainHits( const Solver& solver, int shape, int edge, ChainHit hits[2], floa
 	{
 		const auto& contact = manifold.points[i];
 		auto n = manifold.normal;
+		// The capsule is only a query proxy for a closed, CCW material contour.
+		// Its back-facing side must not support the body: after going around a
+		// chain endpoint, upper edges can otherwise hang on the terrain while
+		// lower edges correctly pass through the noncolliding back side.
+		// During unfolding the contour orientation is not reliable; retain the
+		// existing recovery path until a valid boundary has been restored.
+		if ( !solver.recovery.active && b2Dot( b2RightPerp( d ), n ) > 0 )
+			continue;
 		auto surface = b2MulAdd( contact.point, -.5f * contact.separation, n );
 		auto center =
 			b2Sub( b2MulAdd( contact.point, .5f * contact.separation + radius, n ), shift );

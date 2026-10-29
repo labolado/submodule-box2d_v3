@@ -294,6 +294,11 @@ bodies, moving chains and plain segments are unsupported.
 The colliding side is to the right of the directed Box2D segment. `flipY`
 reflects the side as well as the coordinates. Front-side support uses Box2D's
 public chain/capsule or chain/circle narrow phase and its adjacency normals.
+The capsule is a query proxy for an oriented, closed soft contour. On a healthy
+contour, contacts facing the outward side of a material edge are discarded:
+an upper boundary arriving from behind must not hang on the chain. Unfolding
+temporarily retains the existing recovery path until the boundary is valid.
+Open endpoints remain cliffs; this does not add an end cap or a solid back side.
 Back-side passage is intentional. The soft contact skin is1mm, with friction
 `sqrt(softFriction * shapeFriction)` and the existing zero-bounce response.
 Coplanar contacts with identical friction on one straight material edge retain
