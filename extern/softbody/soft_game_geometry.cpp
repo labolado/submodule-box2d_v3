@@ -69,9 +69,20 @@ bool RigidGeometry::read( b2ShapeId shape, bool flipY )
 		return circle.radius > 0;
 	}
 	if ( b2Shape_GetType( shape ) != b2_polygonShape )
-		return false;
+	{
+		if ( b2Shape_GetType( shape ) != b2_capsuleShape )
+			return false;
+		kind = Capsule;
+		capsule = b2Shape_GetCapsule( shape );
+		if ( flipY )
+		{
+			capsule.center1.y = -capsule.center1.y;
+			capsule.center2.y = -capsule.center2.y;
+		}
+		return capsule.radius > 0 && b2DistanceSquared( capsule.center1, capsule.center2 ) > 1e-12f;
+	}
 	auto source = b2Shape_GetPolygon( shape );
-	if ( source.radius != 0 || source.count < 3 || source.count > B2_MAX_POLYGON_VERTICES )
+	if ( source.radius < 0 || source.count < 3 || source.count > B2_MAX_POLYGON_VERTICES )
 		return false;
 	polygon = source;
 	if ( flipY )
@@ -97,6 +108,8 @@ bool RigidGeometry::read( b2ShapeId shape, bool flipY )
 		corners |= 1u << ( ( v.x > 0 ? 1 : 0 ) + ( v.y > 0 ? 2 : 0 ) );
 	}
 	kind = source.count == 4 && hx > 0 && hy > 0 && corners == 15 ? Rectangle : Polygon;
+	if ( source.radius > 0 )
+		kind = RoundedPolygon;
 	return true;
 }
 
@@ -109,6 +122,12 @@ bool RigidGeometry::equals( const RigidGeometry& other ) const
 	if ( kind == Circle )
 		return circle.center.x == other.circle.center.x &&
 			   circle.center.y == other.circle.center.y && circle.radius == other.circle.radius;
+	if ( kind == Capsule )
+		return capsule.center1.x == other.capsule.center1.x &&
+			   capsule.center1.y == other.capsule.center1.y &&
+			   capsule.center2.x == other.capsule.center2.x &&
+			   capsule.center2.y == other.capsule.center2.y &&
+			   capsule.radius == other.capsule.radius;
 	if ( kind == Chain )
 	{
 		const b2Vec2 a[] = { chain.ghost1, chain.segment.point1, chain.segment.point2,
@@ -120,7 +139,7 @@ bool RigidGeometry::equals( const RigidGeometry& other ) const
 				return false;
 		return true;
 	}
-	if ( polygon.count != other.polygon.count )
+	if ( polygon.count != other.polygon.count || polygon.radius != other.polygon.radius )
 		return false;
 	for ( int i = 0; i < polygon.count; ++i )
 		if ( polygon.vertices[i].x != other.polygon.vertices[i].x ||
@@ -129,6 +148,267 @@ bool RigidGeometry::equals( const RigidGeometry& other ) const
 			 polygon.normals[i].y != other.polygon.normals[i].y )
 			return false;
 	return true;
+}
+
+namespace
+{
+constexpr float Pi = 3.14159265358979323846f;
+float segmentParameter( b2Vec2 p, b2Vec2 a, b2Vec2 b )
+{
+	auto d = b2Sub( b, a );
+	float length = b2LengthSquared( d );
+	return length > 1e-16f ? std::max( 0.f, std::min( 1.f, b2Dot( b2Sub( p, a ), d ) / length ) )
+						   : 0;
+}
+float positiveAngle( float a )
+{
+	a = std::fmod( a, 2 * Pi );
+	return a < 0 ? a + 2 * Pi : a;
+}
+} // namespace
+
+float RigidGeometry::distance( b2Vec2 p ) const
+{
+	if ( kind == Circle )
+		return b2Distance( p, circle.center ) - circle.radius;
+	if ( kind == Capsule )
+	{
+		auto q = b2Lerp( capsule.center1, capsule.center2,
+						 segmentParameter( p, capsule.center1, capsule.center2 ) );
+		return b2Distance( p, q ) - capsule.radius;
+	}
+	float plane = -1e30f, distanceSquared = 1e30f;
+	for ( int i = 0; i < polygon.count; ++i )
+	{
+		auto a = polygon.vertices[i], b = polygon.vertices[( i + 1 ) % polygon.count];
+		plane = std::max( plane, b2Dot( b2Sub( p, a ), polygon.normals[i] ) );
+		auto q = b2Lerp( a, b, segmentParameter( p, a, b ) );
+		distanceSquared = std::min( distanceSquared, b2DistanceSquared( p, q ) );
+	}
+	return ( plane <= 0 ? plane : std::sqrt( distanceSquared ) ) - polygon.radius;
+}
+
+b2Vec2 BoundarySegment::point( float t ) const
+{
+	return radius > 0 ? b2MulAdd( center, radius,
+								  { std::cos( angle + t * sweep ), std::sin( angle + t * sweep ) } )
+					  : b2Lerp( a, b, t );
+}
+b2Vec2 BoundarySegment::normalAt( b2Vec2 p ) const
+{
+	return radius > 0 ? b2Normalize( b2Sub( p, center ) ) : normal;
+}
+bool BoundarySegment::parameter( b2Vec2 p, float& t ) const
+{
+	if ( radius == 0 )
+	{
+		auto d = b2Sub( b, a );
+		t = b2Dot( b2Sub( p, a ), d ) / b2LengthSquared( d );
+		return t >= -1e-6f && t <= 1 + 1e-6f;
+	}
+	float offset = positiveAngle( std::atan2( p.y - center.y, p.x - center.x ) - angle );
+	if ( offset > 2 * Pi - 1e-6f )
+		offset = 0;
+	t = offset / sweep;
+	return t <= 1 + 1e-6f;
+}
+b2Vec2 BoundarySegment::closest( b2Vec2 p ) const
+{
+	if ( radius == 0 )
+		return b2MulAdd( a, segmentParameter( p, a, b ), b2Sub( b, a ) );
+	float t;
+	if ( parameter( p, t ) )
+		return point( std::min( 1.f, t ) );
+	return b2DistanceSquared( p, a ) < b2DistanceSquared( p, b ) ? a : b;
+}
+void BoundarySegment::intersections( const BoundarySegment& other,
+									 std::vector<float>& parameters ) const
+{
+	auto add = [&]( b2Vec2 p ) {
+		float t, u;
+		if ( parameter( p, t ) && other.parameter( p, u ) )
+			parameters.push_back( std::max( 0.f, std::min( 1.f, t ) ) );
+	};
+	if ( radius == 0 && other.radius == 0 )
+	{
+		auto d = b2Sub( b, a ), e = b2Sub( other.b, other.a );
+		float cross = b2Cross( d, e );
+		if ( std::abs( cross ) > 1e-10f )
+			add( b2MulAdd( a, b2Cross( b2Sub( other.a, a ), e ) / cross, d ) );
+		else if ( std::abs( b2Cross( b2Sub( other.a, a ), d ) ) < 1e-7f )
+		{
+			add( other.a );
+			add( other.b );
+		}
+		return;
+	}
+	if ( radius == 0 || other.radius == 0 )
+	{
+		const auto& line = radius == 0 ? *this : other;
+		const auto& arc = radius == 0 ? other : *this;
+		auto d = b2Sub( line.b, line.a ), offset = b2Sub( line.a, arc.center );
+		double aa = b2Dot( d, d ), bb = b2Dot( offset, d );
+		double cc = double( offset.x ) * offset.x + double( offset.y ) * offset.y -
+					double( arc.radius ) * arc.radius;
+		double discriminant = bb * bb - aa * cc;
+		if ( aa <= 1e-16 || discriminant < 0 )
+			return;
+		double root = std::sqrt( discriminant );
+		add( b2MulAdd( line.a, float( ( -bb - root ) / aa ), d ) );
+		add( b2MulAdd( line.a, float( ( -bb + root ) / aa ), d ) );
+		return;
+	}
+	auto delta = b2Sub( other.center, center );
+	float length = b2Length( delta );
+	if ( length < 1e-7f )
+	{
+		if ( std::abs( radius - other.radius ) < 1e-7f )
+		{
+			add( other.a );
+			add( other.b );
+		}
+		return;
+	}
+	if ( length > radius + other.radius || length < std::abs( radius - other.radius ) )
+		return;
+	float along =
+		( radius * radius - other.radius * other.radius + length * length ) / ( 2 * length );
+	float height = std::sqrt( std::max( 0.f, radius * radius - along * along ) );
+	auto unit = b2MulSV( 1 / length, delta ), base = b2MulAdd( center, along, unit );
+	add( b2MulAdd( base, height, { -unit.y, unit.x } ) );
+	add( b2MulAdd( base, -height, { -unit.y, unit.x } ) );
+}
+float BoundarySegment::closestEdge( b2Vec2 p, b2Vec2 q, b2Vec2& surface ) const
+{
+	float best = 1e30f, fraction = 0;
+	auto consider = [&]( float t, b2Vec2 s ) {
+		float distance = b2DistanceSquared( b2Lerp( p, q, t ), s );
+		if ( distance < best )
+		{
+			best = distance;
+			fraction = t;
+			surface = s;
+		}
+	};
+	consider( 0, closest( p ) );
+	consider( 1, closest( q ) );
+	consider( segmentParameter( a, p, q ), a );
+	consider( segmentParameter( b, p, q ), b );
+	if ( radius > 0 )
+	{
+		float t = segmentParameter( center, p, q );
+		consider( t, closest( b2Lerp( p, q, t ) ) );
+	}
+	return fraction;
+}
+
+void buildCurvedBoundary( const std::vector<BoundaryShape>& shapes,
+						  std::vector<BoundarySegment>& boundary )
+{
+	std::vector<BoundarySegment> curves;
+	for ( const auto& source : shapes )
+	{
+		int feature = 0;
+		auto line = [&]( b2Vec2 a, b2Vec2 b, b2Vec2 normal ) {
+			BoundarySegment c;
+			c.a = a;
+			c.b = b;
+			c.normal = normal;
+			c.shape = source.shape;
+			c.feature = feature++;
+			curves.push_back( c );
+		};
+		auto arc = [&]( b2Vec2 center, float radius, b2Vec2 start, float sweep ) {
+			BoundarySegment c;
+			c.center = center;
+			c.radius = radius;
+			c.angle = std::atan2( start.y, start.x );
+			c.sweep = sweep;
+			c.a = c.point( 0 );
+			c.b = c.point( 1 );
+			c.normal = start;
+			c.shape = source.shape;
+			c.feature = feature++;
+			c.cornerA = c.cornerB = false;
+			curves.push_back( c );
+		};
+		const auto& g = source.geometry;
+		if ( g.kind == RigidGeometry::Circle )
+			arc( g.circle.center, g.circle.radius, { 1, 0 }, 2 * Pi );
+		else if ( g.kind == RigidGeometry::Capsule )
+		{
+			auto a = g.capsule.center1, b = g.capsule.center2;
+			auto u = b2Normalize( b2Sub( b, a ) );
+			b2Vec2 n{ u.y, -u.x };
+			float r = g.capsule.radius;
+			line( b2MulAdd( a, r, n ), b2MulAdd( b, r, n ), n );
+			arc( b, r, n, Pi );
+			line( b2MulAdd( b, -r, n ), b2MulAdd( a, -r, n ), b2Neg( n ) );
+			arc( a, r, b2Neg( n ), Pi );
+		}
+		else
+		{
+			const auto& p = g.polygon;
+			for ( int i = 0; i < p.count; ++i )
+			{
+				int next = ( i + 1 ) % p.count;
+				line( b2MulAdd( p.vertices[i], p.radius, p.normals[i] ),
+					  b2MulAdd( p.vertices[next], p.radius, p.normals[i] ), p.normals[i] );
+				if ( p.radius > 0 )
+				{
+					float sweep = std::atan2( b2Cross( p.normals[i], p.normals[next] ),
+											  b2Dot( p.normals[i], p.normals[next] ) );
+					arc( p.vertices[next], p.radius, p.normals[i], sweep );
+				}
+			}
+		}
+	}
+	boundary.clear();
+	std::vector<float> cuts;
+	for ( const auto& source : curves )
+	{
+		cuts.clear();
+		cuts.push_back( 0 );
+		cuts.push_back( 1 );
+		for ( const auto& other : curves )
+			if ( source.shape != other.shape )
+				source.intersections( other, cuts );
+		std::sort( cuts.begin(), cuts.end() );
+		int piece = 0;
+		for ( size_t i = 1; i < cuts.size(); ++i )
+		{
+			float lo = cuts[i - 1], hi = cuts[i];
+			if ( hi - lo < 1e-6f )
+				continue;
+			auto p = source.point( ( lo + hi ) * .5f );
+			auto n = source.normalAt( p );
+			bool hidden = false;
+			for ( const auto& other : shapes )
+				if ( source.shape != other.shape )
+				{
+					float distance = other.geometry.distance( p );
+					// A coincident exterior has one deterministic owner; an
+					// adjacent interior seam is hidden on both source fixtures.
+					if ( distance < -1e-6f ||
+						 ( distance < 1e-6f &&
+						   ( other.shape < source.shape ||
+							 other.geometry.distance( b2MulAdd( p, 4e-6f, n ) ) < 0 ) ) )
+					{
+						hidden = true;
+						break;
+					}
+				}
+			if ( hidden )
+				continue;
+			auto c = source;
+			c.a = source.point( lo );
+			c.b = source.point( hi );
+			c.angle += lo * c.sweep;
+			c.sweep *= hi - lo;
+			c.feature = source.feature * 1024 + piece++;
+			boundary.push_back( c );
+		}
+	}
 }
 
 void buildCompoundBoundary( const std::vector<BoundaryPolygon>& polygons,

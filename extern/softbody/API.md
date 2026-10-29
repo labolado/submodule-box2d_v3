@@ -487,18 +487,27 @@ entry. Counters report entered rigid steps and successfully completed soft steps
 - `maxSoftContactRows` defaults to 512 gathered soft/soft rows. Exhaustion reports
   `soft_pair_contact_capacity`, never silently drops contacts. It can happen after
   entering a step, so the normal sticky-failure rule applies. Rigid rows are sized
-  from the node count (node/vertex rows for polygons, node/edge rows for circles).
+  from the node count and exposed boundary complexity; curved unions can cost
+  more than sharp-only compounds.
   Scratch is reused after preflight/first-step warmup. These budgets are not a
   memory quota or a certified mobile limit. No new parallelism or SIMD is implied.
 - Soft-soft contacts are off by default: all active pairs must explicitly
   disable collision. `SimulationDef.enableSoftContacts = true` enables the
   experimental path below; it does not change joint collision exclusions.
-- Static/kinematic bodies accept a single circle or 1–16 sharp convex polygon
-  fixtures (3–8 vertices each), with zero restitution. Local offsets/rotations
-  are supported. Multi-fixture circles/mixed circle-polygon bodies, capsules,
-  plain segments and rounded polygons remain rejected. Static chain-only bodies
-  have the separate terrain contract above. Single circles retain
-  analytic distances; centered single boxes retain their historical arithmetic.
+- Static/kinematic bodies accept 1–16 closed fixtures: circles, capsules and
+  sharp/rounded convex polygons (3–8 vertices), including mixed compounds and
+  local offsets/rotations. Restitution must be zero. Plain segments and mixed
+  chain/closed bodies remain rejected; static chain-only terrain is separate.
+  Capsule centerlines must exceed Box2D linear slop and have positive radius.
+  Polygon radius expands the core polygon outward, following native geometry.
+  Single circles and sharp-only compounds retain their previous algorithms.
+- Curved compounds use analytic line/arc union boundaries, split at intersections
+  and clipped against other active fixtures. Coincident exteriors have one source;
+  sensors and excluded fixtures cannot hide solid faces. Contacts retain fixture
+  friction and source features. Native shape edits invalidate this cached union.
+  Node contacts, finite material-edge crossings and healthy-contour containment
+  participate in projection; folded contours do not invent an oriented interior.
+  This does not add general CCD or an analytic capsule *soft body* type.
 - Up to sixteen registered closed contact shapes per soft body after attachment
   exclusions, at most 64 body registrations. This is a preflight capacity limit,
   not a certified mobile budget. Per-soft-body filtering determines which
@@ -512,7 +521,7 @@ entry. Counters report entered rigid steps and successfully completed soft steps
   its fixtures accumulate into that view and publish once. Across soft bodies,
   the existing native step state remains authoritative. No rigid solver changes.
 - Supported fixture geometry, filters, mass/type and enabled changes invalidate
-  impulses as needed. Adding/removing/replacing polygon fixtures is discovered
+  impulses as needed. Adding/removing/replacing supported fixtures is discovered
   at preflight without reattaching. Removing all fixtures leaves an empty valid
   registration. Destroying the rigid body requires detaching its registration.
   Unsupported changes fail before stepping and can be repaired. Mutation during

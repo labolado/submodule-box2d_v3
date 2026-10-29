@@ -97,7 +97,7 @@ bool Solver::prepareTargets()
 		}
 		if ( !geometry.read( box.shape, flipY ) )
 		{
-			error = "game_requires_circle_or_sharp_convex_polygon";
+			error = "game_requires_supported_closed_shape";
 			return false;
 		}
 		if ( geometry.kind == RigidGeometry::Chain &&
@@ -153,12 +153,6 @@ bool Solver::prepareTargets()
 				if ( box.geometry.kind == RigidGeometry::Chain ||
 					 boxes[j].geometry.kind == RigidGeometry::Chain )
 					continue; // Static segments are surfaces, never a filled polygon union.
-				if ( box.geometry.kind == RigidGeometry::Circle ||
-					 boxes[j].geometry.kind == RigidGeometry::Circle )
-				{
-					error = "compound_requires_sharp_polygons";
-					return false;
-				}
 				box.stateSlot = boxes[j].stateSlot;
 				break;
 			}
@@ -170,21 +164,43 @@ bool Solver::prepareTargets()
 void Solver::prepareCompounds()
 {
 	for ( int i = 0; i < boxCount; ++i )
+	{
 		boxes[i].compound = false;
+		boxes[i].curved = false;
+	}
 	for ( int i = 0; i < boxCount; ++i )
 		if ( boxes[i].enabled && boxes[i].stateSlot != i )
 			boxes[boxes[i].stateSlot].compound = true;
 	for ( int i = 0; i < boxCount; ++i )
 		if ( boxes[i].enabled )
 			boxes[i].compound = boxes[boxes[i].stateSlot].compound;
+	for ( int i = 0; i < boxCount; ++i )
+		if ( boxes[i].enabled &&
+			 ( boxes[i].geometry.kind == RigidGeometry::Capsule ||
+			   boxes[i].geometry.kind == RigidGeometry::RoundedPolygon ||
+			   ( boxes[i].compound && boxes[i].geometry.kind == RigidGeometry::Circle ) ) )
+			boxes[boxes[i].stateSlot].curved = true;
+	for ( int i = 0; i < boxCount; ++i )
+		if ( boxes[i].enabled )
+			boxes[i].curved = boxes[boxes[i].stateSlot].curved;
 	if ( !boundaryDirty )
 		return;
 	for ( int i = 0; i < boxCount; ++i )
 	{
 		auto& box = boxes[i];
 		box.boundary.clear();
-		if ( !box.compound || box.stateSlot != i )
+		if ( ( !box.compound && !box.curved ) || box.stateSlot != i )
 			continue;
+		if ( box.curved )
+		{
+			std::vector<BoundaryShape> shapes;
+			for ( int j = 0; j < boxCount; ++j )
+				if ( boxes[j].enabled && boxes[j].stateSlot == i )
+					shapes.push_back( { boxes[j].geometry, j } );
+			buildCurvedBoundary( shapes, box.boundary );
+			curveCuts.reserve( 2 * box.boundary.size() + 2 );
+			continue;
+		}
 		std::vector<BoundaryPolygon> polygons;
 		for ( int j = 0; j < boxCount; ++j )
 			if ( boxes[j].enabled && boxes[j].stateSlot == i )
@@ -198,9 +214,11 @@ void Solver::prepareCompounds()
 		size_t capacity = 0;
 		for ( int i = 0; i < boxCount; ++i )
 			if ( boxes[i].enabled && boxes[i].stateSlot == i )
-				capacity += boxes[i].compound ? size_t( boxCount + 1 ) * body().nodeCount +
-													2 * boxes[i].boundary.size()
-											  : 2 * body().nodeCount + B2_MAX_POLYGON_VERTICES;
+				capacity +=
+					boxes[i].curved ? ( 4 * boxes[i].boundary.size() + 2 ) * body().nodeCount
+					: boxes[i].compound
+						? size_t( boxCount + 1 ) * body().nodeCount + 2 * boxes[i].boundary.size()
+						: 2 * body().nodeCount + B2_MAX_POLYGON_VERTICES;
 		if ( rows.size() < capacity )
 			rows.resize( capacity );
 		if ( previous.size() < capacity )
@@ -237,6 +255,12 @@ bool Solver::insideCompound( int owner, b2Vec2 p ) const
 	for ( int j = 0; j < boxCount; ++j )
 		if ( boxes[j].enabled && boxes[j].stateSlot == owner )
 		{
+			if ( boxes[owner].curved )
+			{
+				if ( boxes[j].geometry.distance( p ) <= 0 )
+					return true;
+				continue;
+			}
 			const auto& polygon = boxes[j].geometry.polygon;
 			bool inside = true;
 			for ( int f = 0; f < polygon.count; ++f )
@@ -257,10 +281,7 @@ bool Solver::nearestCompound( int owner, b2Vec2 p, b2Vec2& q, int& segment ) con
 	const auto& edges = boxes[owner].boundary;
 	for ( size_t i = 0; i < edges.size(); ++i )
 	{
-		auto d = b2Sub( edges[i].b, edges[i].a );
-		float t = std::max(
-			0.f, std::min( 1.f, b2Dot( b2Sub( p, edges[i].a ), d ) / b2LengthSquared( d ) ) );
-		auto point = b2MulAdd( edges[i].a, t, d );
+		auto point = edges[i].closest( p );
 		float distance = b2LengthSquared( b2Sub( point, p ) );
 		if ( distance < best )
 		{
@@ -271,6 +292,191 @@ bool Solver::nearestCompound( int owner, b2Vec2 p, b2Vec2& q, int& segment ) con
 	}
 	return segment >= 0;
 }
+// Find a material interval inside the union, including crossings with both
+// endpoints outside. Split at exact line/arc intersections; no contour sampling.
+bool Solver::curvedInterior( int owner, b2Vec2 a, b2Vec2 b, float& fraction, b2Vec2& surface,
+							 int& feature )
+{
+	BoundarySegment material;
+	material.a = a;
+	material.b = b;
+	if ( b2DistanceSquared( a, b ) < 1e-12f )
+		return false;
+	curveCuts.clear();
+	curveCuts.push_back( 0 );
+	curveCuts.push_back( 1 );
+	for ( const auto& curve : boxes[owner].boundary )
+		material.intersections( curve, curveCuts );
+	std::sort( curveCuts.begin(), curveCuts.end() );
+	float best = 0;
+	feature = -1;
+	for ( size_t i = 1; i < curveCuts.size(); ++i )
+	{
+		if ( curveCuts[i] - curveCuts[i - 1] < 1e-7f )
+			continue;
+		float t = .5f * ( curveCuts[i] + curveCuts[i - 1] );
+		auto p = b2Lerp( a, b, t );
+		if ( !insideCompound( owner, p ) )
+			continue;
+		b2Vec2 q;
+		int edge;
+		if ( !nearestCompound( owner, p, q, edge ) )
+			continue;
+		float depth = b2DistanceSquared( p, q );
+		if ( depth > best )
+		{
+			best = depth;
+			fraction = t;
+			surface = q;
+			feature = edge;
+		}
+	}
+	return feature >= 0;
+}
+
+void Solver::gatherCurved( int owner )
+{
+	auto& box = boxes[owner];
+	BoxProjection geometry( body(), box.state, box.geometry );
+	auto appendContact = [&]( int node, float fraction, b2Vec2 q, int curve, int kind,
+							  b2Vec2 normal ) {
+		const auto& surface = box.boundary[curve];
+		Row row;
+		row.box = surface.shape;
+		row.edge = node;
+		row.fraction = fraction;
+		row.feature = 4 * surface.feature + kind;
+		row.localAnchor = q;
+		row.normal = b2RotateVector( geometry.transform.q, normal );
+		append( row );
+		++contactSteps[row.box];
+	};
+	for ( int node = 0; node < body().nodeCount; ++node )
+	{
+		auto p = geometry.local( node );
+		b2Vec2 q;
+		int edge;
+		if ( nearestCompound( owner, p, q, edge ) &&
+			 ( b2DistanceSquared( p, q ) <= Margin * Margin || insideCompound( owner, p ) ) )
+			appendContact( node, 0, q, edge, 0, box.boundary[edge].normalAt( q ) );
+	}
+	for ( int edge = 0; edge < body().nodeCount; ++edge )
+	{
+		auto a = geometry.local( edge ), b = geometry.local( ( edge + 1 ) % body().nodeCount );
+		if ( b2DistanceSquared( a, b ) < 1e-12f )
+			continue;
+		for ( size_t i = 0; i < box.boundary.size(); ++i )
+		{
+			const auto& curve = box.boundary[i];
+			b2Vec2 q;
+			float t = curve.closestEdge( a, b, q );
+			auto p = b2Lerp( a, b, t );
+			if ( t <= 1e-6f || t >= 1 - 1e-6f )
+				continue;
+			auto normal = curve.normalAt( q );
+			bool contained = false;
+			if ( !recovery.active )
+			{
+				auto world = b2TransformWorldPoint( geometry.transform, q );
+				Core::Vec point{ float( world.x ), float( world.y ) };
+				contained = SoftBody::inside<float>( point, body() ) &&
+							SoftBody::nearest<float>( point, body() ).edge == edge;
+				if ( contained )
+				{
+					auto d = b2Normalize( b2Sub( b, a ) );
+					normal = { -d.y, d.x };
+				}
+			}
+			if ( contained || b2DistanceSquared( p, q ) <= Margin * Margin )
+				appendContact( edge, t, q, int( i ), 1, normal );
+		}
+		float t;
+		b2Vec2 q;
+		int curve;
+		if ( curvedInterior( owner, a, b, t, q, curve ) )
+			appendContact( edge, t, q, curve, 2, box.boundary[curve].normalAt( q ) );
+	}
+}
+
+bool Solver::projectCurved( int owner )
+{
+	if ( !observeRecovery() )
+		return false;
+	auto& box = boxes[owner];
+	BoxProjection projection( body(), box.state, box.geometry );
+	projection.stopOnInvalid = !recovery.active;
+	if ( recovery.active )
+	{
+		projection.remaining = &recovery.remaining;
+		projection.correctionDistance = &recovery.correctionDistance;
+	}
+	auto move = [&]( int edge, float t, b2Vec2 p, b2Vec2 q ) {
+		auto delta = b2Sub( q, p );
+		float depth = b2Length( delta );
+		if ( depth > 1e-7f )
+			projection.move( edge, t,
+							 b2RotateVector( projection.transform.q, b2MulSV( 1 / depth, delta ) ),
+							 depth );
+	};
+	for ( int node = 0; node < body().nodeCount && !projection.invalidated; ++node )
+	{
+		auto p = projection.local( node );
+		b2Vec2 q;
+		int curve;
+		if ( insideCompound( owner, p ) && nearestCompound( owner, p, q, curve ) )
+			move( node, 0, p, q );
+	}
+	for ( int edge = 0; edge < body().nodeCount && !projection.invalidated; ++edge )
+	{
+		auto a = projection.local( edge ), b = projection.local( ( edge + 1 ) % body().nodeCount );
+		float t;
+		b2Vec2 q;
+		int curve;
+		if ( curvedInterior( owner, a, b, t, q, curve ) )
+			move( edge, t, b2Lerp( a, b, t ), q );
+	}
+	// A closed rigid component may lie entirely inside a healthy soft contour.
+	// Only its nearest material edge supplies an escape direction. During
+	// folding, there is no oriented solid interior; retain finite edge crossings.
+	if ( !recovery.active )
+		for ( const auto& curve : box.boundary )
+		{
+			if ( projection.invalidated )
+				break;
+			auto world = b2TransformWorldPoint( projection.transform, curve.point( .5f ) );
+			Core::Vec point{ float( world.x ), float( world.y ) };
+			if ( !SoftBody::inside<float>( point, body() ) )
+				continue;
+			auto hit = SoftBody::nearest<float>( point, body() );
+			if ( hit.edge >= 0 )
+				projection.move( hit.edge, hit.t, { -hit.normal[0], -hit.normal[1] }, hit.depth );
+		}
+	geometryCorrections += projection.corrections;
+	if ( profile && profile->enabled && profile->geometryDepth )
+		profile->work[Profile::ProjectionCorrections] += projection.corrections;
+	return observeRecovery();
+}
+
+// Node and interior-interval witnesses, not a certified continuous maximum.
+// Regression fixtures additionally sample complete material edges independently.
+double Solver::curvedDepth( int owner )
+{
+	BoxProjection geometry( body(), boxes[owner].state, boxes[owner].geometry );
+	double depth = 0;
+	for ( int edge = 0; edge < body().nodeCount; ++edge )
+	{
+		auto a = geometry.local( edge ), b = geometry.local( ( edge + 1 ) % body().nodeCount );
+		b2Vec2 q;
+		int curve;
+		float t;
+		if ( insideCompound( owner, a ) && nearestCompound( owner, a, q, curve ) )
+			depth = std::max( depth, double( b2Distance( a, q ) ) );
+		if ( curvedInterior( owner, a, b, t, q, curve ) )
+			depth = std::max( depth, double( b2Distance( b2Lerp( a, b, t ), q ) ) );
+	}
+	return depth;
+}
+
 void Solver::gatherCompound( int owner )
 {
 	auto& box = boxes[owner];
@@ -699,6 +905,12 @@ void Solver::gather()
 			chainsGathered = true;
 			continue;
 		}
+		if ( box.curved )
+		{
+			if ( box.stateSlot == id )
+				gatherCurved( id );
+			continue;
+		}
 		if ( box.compound )
 		{
 			if ( box.stateSlot == id )
@@ -869,6 +1081,13 @@ bool Solver::projectGeometry()
 				observed = false;
 				continue;
 			}
+			if ( box.curved )
+			{
+				if ( box.stateSlot == id && !projectCurved( id ) )
+					return false;
+				observed = false;
+				continue;
+			}
 			if ( box.compound )
 			{
 				if ( box.stateSlot == id && !projectCompound( id ) )
@@ -925,7 +1144,8 @@ void Solver::captureBoundarySides()
 		BoxProjection geometry( body(), box.state, box.geometry );
 		geometry.nodeFaces = &box.nodeFaces;
 		geometry.faceMargin = Margin;
-		if ( box.compound || geometry.circular() || box.geometry.kind == RigidGeometry::Chain )
+		if ( box.curved || box.compound || geometry.circular() ||
+			 box.geometry.kind == RigidGeometry::Chain )
 		{
 			std::fill( box.nodeFaces.begin(), box.nodeFaces.end(), -1 );
 			continue;
@@ -986,7 +1206,7 @@ float Solver::limitCorrection( int node, Core::Vec delta )
 		}
 		BoxProjection geometry( body(), box.state, box.geometry );
 		geometry.faceMargin = Margin;
-		if ( box.compound )
+		if ( box.compound || box.curved )
 		{
 			if ( box.stateSlot != j )
 				continue;
@@ -998,7 +1218,7 @@ float Solver::limitCorrection( int node, Core::Vec delta )
 			if ( b2Length( b2Sub( p, q ) ) > std::hypot( delta[0], delta[1] ) + Margin &&
 				 !insideCompound( j, p ) )
 				continue;
-			auto n = box.boundary[edge].normal;
+			auto n = box.boundary[edge].normalAt( q );
 			auto d = b2InvRotateVector( geometry.transform.q, { delta[0], delta[1] } );
 			float toward = b2Dot( d, n ), gap = std::max( 0.f, b2Dot( b2Sub( p, q ), n ) );
 			if ( toward < 0 )
@@ -1047,7 +1267,7 @@ Core::Vec Solver::projectTranslation( Core::Vec desired )
 		}
 		BoxProjection geometry( body(), box.state, box.geometry );
 		geometry.faceMargin = Margin;
-		if ( box.compound )
+		if ( box.compound || box.curved )
 		{
 			if ( box.stateSlot != j )
 				continue;
@@ -1062,7 +1282,7 @@ Core::Vec Solver::projectTranslation( Core::Vec desired )
 				if ( gap > std::hypot( desired[0], desired[1] ) + Margin &&
 					 !insideCompound( j, p ) )
 					continue;
-				auto n = box.boundary[edge].normal;
+				auto n = box.boundary[edge].normalAt( q );
 				planes[count++] = { b2RotateVector( geometry.transform.q, n ),
 									std::max( 0.f, b2Dot( b2Sub( p, q ), n ) ) };
 			}

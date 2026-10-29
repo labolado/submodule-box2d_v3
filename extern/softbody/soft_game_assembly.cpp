@@ -746,6 +746,13 @@ void Assembly::stage( void* step, int phase, void* context )
 								std::max( contact.lastDepth, contact.chainDepth( i ) );
 							continue;
 						}
+						if ( box.curved )
+						{
+							if ( box.stateSlot == i )
+								contact.lastDepth =
+									std::max( contact.lastDepth, contact.curvedDepth( i ) );
+							continue;
+						}
 						BoxProjection geometry( part->contact.body(), box.state, box.geometry );
 						contact.lastDepth = std::max( contact.lastDepth, geometry.boundaryDepth() );
 					}

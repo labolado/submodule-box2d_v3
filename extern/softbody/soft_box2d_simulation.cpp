@@ -179,10 +179,9 @@ ObjectId Box2DCoupling::attachBody( b2BodyId body )
 		candidate.flipY = s.def.flipY;
 		for ( auto shape : shapes )
 		{
-			if ( ( count > 1 && b2Shape_GetType( shape ) != b2_polygonShape ) ||
-				 b2Shape_GetType( shape ) == b2_chainSegmentShape )
+			if ( b2Shape_GetType( shape ) == b2_chainSegmentShape )
 			{
-				s.error = "compound requires sharp polygons";
+				s.error = "chain segments cannot mix with closed shapes";
 				return {};
 			}
 			candidate.add( shape );
@@ -465,11 +464,10 @@ bool Box2DCoupling::prepare()
 				Game::RigidGeometry geometry;
 				if ( b2Shape_GetRestitution( shapes[i] ) != 0 ||
 					 !geometry.read( shapes[i], s.def.flipY ) ||
-					 geometry.kind == Game::RigidGeometry::Chain ||
-					 ( count > 1 && geometry.kind == Game::RigidGeometry::Circle ) )
+					 geometry.kind == Game::RigidGeometry::Chain )
 				{
-					s.error = "compound requires sharp zero-bounce polygons; single circles are "
-							  "supported";
+					s.error =
+						"attachment requires zero-bounce circles, capsules or convex polygons";
 					return false;
 				}
 			}

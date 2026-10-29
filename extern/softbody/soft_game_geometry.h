@@ -20,15 +20,19 @@ struct RigidGeometry
 		Rectangle,
 		Polygon,
 		Circle,
+		Capsule,
+		RoundedPolygon,
 		Chain
 	};
 	Kind kind = Rectangle;
 	float hx = 0, hy = 0;
 	b2Polygon polygon{};
 	b2Circle circle{};
+	b2Capsule capsule{};
 	b2ChainSegment chain{};
 	bool read( b2ShapeId shape, bool flipY );
 	bool equals( const RigidGeometry& other ) const;
+	float distance( b2Vec2 point ) const;
 };
 
 // Unfiltered static-tree query: public world queries discard zero masks before
@@ -37,7 +41,7 @@ b2TreeStats queryStaticShapes( b2WorldId world, b2AABB bounds, b2OverlapResultCa
 							   void* context );
 
 // Exposed polygon-union boundary in a single rigid body's local coordinates.
-// Each segment retains its source fixture for material and cache identity.
+// Each segment/arc retains its source fixture for material and cache identity.
 struct BoundaryPolygon
 {
 	b2Polygon polygon;
@@ -48,9 +52,26 @@ struct BoundarySegment
 	b2Vec2 a, b, normal;
 	int shape, feature;
 	bool cornerA = true, cornerB = true;
+	// radius == 0 is the historical straight segment. Otherwise the boundary
+	// is an exact counterclockwise circular arc, not a sampled polygon.
+	b2Vec2 center{};
+	float radius = 0, angle = 0, sweep = 0;
+	b2Vec2 point( float t ) const;
+	b2Vec2 normalAt( b2Vec2 p ) const;
+	b2Vec2 closest( b2Vec2 p ) const;
+	bool parameter( b2Vec2 p, float& t ) const;
+	void intersections( const BoundarySegment& other, std::vector<float>& parameters ) const;
+	float closestEdge( b2Vec2 p, b2Vec2 q, b2Vec2& surface ) const;
 };
 void buildCompoundBoundary( const std::vector<BoundaryPolygon>& polygons,
 							std::vector<BoundarySegment>& boundary );
+struct BoundaryShape
+{
+	RigidGeometry geometry;
+	int shape;
+};
+void buildCurvedBoundary( const std::vector<BoundaryShape>& shapes,
+						  std::vector<BoundarySegment>& boundary );
 
 // Geometry-only extension of our C1 projection (historical name retained). Keep it separate from
 // the accumulated velocity constraints: moving a node must refresh subsequent

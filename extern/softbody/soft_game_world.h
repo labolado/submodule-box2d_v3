@@ -31,7 +31,8 @@ struct Box
 	int index = -1;
 	int stateSlot = 0; // First enabled fixture of the same rigid body.
 	bool compound = false;
-	std::vector<BoundarySegment> boundary; // Populated only on the state owner.
+	bool curved = false;
+	std::vector<BoundarySegment> boundary; // Exposed lines/arcs, only on the state owner.
 	float hx = 0, hy = 0, friction = 0;
 	b2Filter filter = b2DefaultFilter();
 	bool enabled = false;
@@ -85,6 +86,7 @@ struct Solver
 		float gap;
 	};
 	std::vector<Plane> translationPlanes;
+	std::vector<float> curveCuts; // Reused material-edge/analytic-boundary intersections.
 	int rowCount = 0, previousCount = 0;
 	unsigned long long rowSolves = 0, warmHits = 0, cacheResets = 0;
 	std::vector<unsigned long long> contactSteps =
@@ -136,6 +138,11 @@ struct Solver
 	bool nearestCompound( int owner, b2Vec2 p, b2Vec2& q, int& segment ) const;
 	void gatherCompound( int owner );
 	bool projectCompound( int owner );
+	void gatherCurved( int owner );
+	bool projectCurved( int owner );
+	bool curvedInterior( int owner, b2Vec2 a, b2Vec2 b, float& fraction, b2Vec2& surface,
+						 int& feature );
+	double curvedDepth( int owner );
 	void chainEdgeRows( int edge );
 	void gatherChains();
 	bool projectChains();
