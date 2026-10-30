@@ -16,6 +16,12 @@
 
 #include <stddef.h>
 
+// Local material API borrows the current callback's contact without changing
+// world/contact layouts or recording images. Nested steps of other worlds save
+// and restore this scope; worker threads cannot access the calling thread's scope.
+static _Thread_local b2World* sMaterialWorld;
+static _Thread_local b2ContactSim* sMaterialContact;
+
 // Contacts and determinism
 // A deterministic simulation requires contacts to exist in the same order in b2Island no matter the thread count.
 // The order must reproduce from run to run. This is necessary because the Gauss-Seidel constraint solver is order dependent.
@@ -664,7 +670,13 @@ bool b2UpdateContact( b2World* world, b2ContactSim* contactSim, b2Shape* shapeA,
 		b2ShapeId shapeIdB = { shapeB->id + 1, world->worldId, shapeB->generation };
 
 		// Runs on the thread that called b2World_Step, see the second collide pass in b2Collide.
+		b2World* previousMaterialWorld = sMaterialWorld;
+		b2ContactSim* previousMaterialContact = sMaterialContact;
+		sMaterialWorld = world;
+		sMaterialContact = contactSim;
 		world->preSolveFcn( shapeIdA, shapeIdB, &contactSim->manifold, world->preSolveContext );
+		sMaterialWorld = previousMaterialWorld;
+		sMaterialContact = previousMaterialContact;
 
 		// Keep these current.
 		pointCount = contactSim->manifold.pointCount;
@@ -772,4 +784,33 @@ bool b2UpdateContact( b2World* world, b2ContactSim* contactSim, b2Shape* shapeA,
 	}
 
 	return touching;
+}
+
+bool b2World_GetPreSolveMaterial( b2WorldId worldId, float* friction, float* restitution )
+{
+	b2World* world = b2GetWorldFromId( worldId );
+	b2ContactSim* contact = sMaterialWorld == world ? sMaterialContact : NULL;
+	if ( contact == NULL || friction == NULL || restitution == NULL )
+	{
+		return false;
+	}
+	*friction = contact->friction;
+	*restitution = contact->restitution;
+	return true;
+}
+
+bool b2World_SetPreSolveMaterial( b2WorldId worldId, float friction, float restitution )
+{
+	b2World* world = b2GetWorldFromId( worldId );
+	b2ContactSim* contact = sMaterialWorld == world ? sMaterialContact : NULL;
+	if ( contact == NULL || !b2IsValidFloat( friction ) || !b2IsValidFloat( restitution ) ||
+		 friction < 0.0f || restitution < 0.0f )
+	{
+		return false;
+	}
+	contact->friction = friction;
+	contact->restitution = restitution;
+	// Do not recycle an override if the application removes its callback next step.
+	contact->simFlags &= ~b2_simRelativeTransformValid;
+	return true;
 }

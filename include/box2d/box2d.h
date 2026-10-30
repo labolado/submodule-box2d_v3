@@ -188,6 +188,17 @@ B2_API void b2World_SetPreSolveCallback( b2WorldId worldId, b2PreSolveCallbackFc
 										 b2PreContinuousCallbackFcn* preContinuousFcn,
 										 void* context );
 
+/// Read the mixed material of the contact currently executing its pre-solve callback.
+/// Local extension: only call from the step thread. Returns false outside that callback
+/// (including pre-continuous) or for null outputs. No contact pointer escapes.
+B2_API bool b2World_GetPreSolveMaterial( b2WorldId worldId, float* friction, float* restitution );
+
+/// Override only the current pre-solve contact. Values must be finite and nonnegative.
+/// Returns false outside the callback or for invalid values, without changing material.
+/// The next contact update mixes the shape materials again. This does not change shapes,
+/// persist across separated contacts, or add recording support for host callbacks.
+B2_API bool b2World_SetPreSolveMaterial( b2WorldId worldId, float friction, float restitution );
+
 /// Enable pre-solve callbacks for every solid contact in this world. Shape-level
 /// pre-solve flags remain unchanged. This is useful for a world-wide listener.
 /// This flag may be changed from a pre-solve callback.
