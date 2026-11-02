@@ -285,7 +285,7 @@ layouts/vtables, Box2D rigid `src` or LiquidFun code changed.
 ## Static chain terrain
 
 Assembly `Box2DCoupling::attachBody` / Lua `world:attachPhysicsBody` accepts a
-static body containing only zero-restitution chain segments. Use the existing
+static body containing only chain segments. Use the existing
 Box2D/Solar2D chain creation interface, including its ghost vertices. A chain
 does not become a filled polygon or a hidden thick box. Single circles and
 polygon compounds remain separate registrations; mixed chain/closed-shape
@@ -405,7 +405,7 @@ Disabled rigid targets skip the pin and report zero impulse; re-enabling a widel
 separated target is not a recovery guarantee. Sleeping or motion-locked dynamic
 and kinematic targets are rejected by the existing bridge; keep them awake.
 Contact filters and exclusions do not disable the pin. Registration geometry
-limits below still apply, including zero restitution. No collision is implicitly
+limits below still apply. No collision is implicitly
 excluded by creating a connection.
 
 `getState()` reports current geometric gap and last-substep soft impulse (kg*m/s).
@@ -496,7 +496,7 @@ entry. Counters report entered rigid steps and successfully completed soft steps
   experimental path below; it does not change joint collision exclusions.
 - Static/kinematic bodies accept 1–16 closed fixtures: circles, capsules and
   sharp/rounded convex polygons (3–8 vertices), including mixed compounds and
-  local offsets/rotations. Restitution must be zero. Plain segments and mixed
+  local offsets/rotations. Rigid restitution is preserved; soft contacts use zero restitution. Plain segments and mixed
   chain/closed bodies remain rejected; static chain-only terrain is separate.
   Capsule centerlines must exceed Box2D linear slop and have positive radius.
   Polygon radius expands the core polygon outward, following native geometry.
@@ -642,3 +642,8 @@ these headers must rebuild and size custom-shape weights explicitly. It does not
 change the Solar2D public plugin SDK, existing engine class layouts or virtuals.
 Historical Lua modes no longer exist. The default ellipse has 16 nodes; custom
 contours use the current runtime node budget.
+
+Rigid shape restitution is never overwritten by soft registration. Nonzero values and runtime
+changes are accepted for supported closed shapes and static chains. They continue to affect
+Box2D rigid-rigid collisions; soft-rigid contacts do not use them as a rebound coefficient.
+Soft material deformation/recovery can still produce rebound.

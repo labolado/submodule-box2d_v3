@@ -160,9 +160,9 @@ ObjectId Box2DCoupling::attachBody( b2BodyId body )
 		{
 			Game::RigidGeometry geometry;
 			if ( b2Shape_GetType( shape ) != b2_chainSegmentShape ||
-				 b2Shape_GetRestitution( shape ) != 0 || !geometry.read( shape, s.def.flipY ) )
+				 !geometry.read( shape, s.def.flipY ) )
 			{
-				s.error = "chain terrain requires only static zero-bounce chain segments";
+				s.error = "chain terrain requires only static chain segments";
 				return {};
 			}
 		}
@@ -462,12 +462,10 @@ bool Box2DCoupling::prepare()
 			for ( int i = 0; i < count; ++i )
 			{
 				Game::RigidGeometry geometry;
-				if ( b2Shape_GetRestitution( shapes[i] ) != 0 ||
-					 !geometry.read( shapes[i], s.def.flipY ) ||
+				if ( !geometry.read( shapes[i], s.def.flipY ) ||
 					 geometry.kind == Game::RigidGeometry::Chain )
 				{
-					s.error =
-						"attachment requires zero-bounce circles, capsules or convex polygons";
+					s.error = "attachment requires circles, capsules or convex polygons";
 					return false;
 				}
 			}
@@ -580,10 +578,9 @@ bool Box2DCoupling::prepare()
 						registered = registered || B2_ID_EQUALS( terrain, owner );
 					if ( !registered )
 						return true;
-					if ( b2Shape_GetType( shape ) != b2_chainSegmentShape ||
-						 b2Shape_GetRestitution( shape ) != 0 )
+					if ( b2Shape_GetType( shape ) != b2_chainSegmentShape )
 					{
-						q.error = "terrain candidate is not a zero-bounce chain segment";
+						q.error = "terrain candidate is not a chain segment";
 						return false;
 					}
 					if ( b2Shape_IsSensor( shape ) ||

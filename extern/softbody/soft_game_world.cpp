@@ -90,11 +90,8 @@ bool Solver::prepareTargets()
 		box.cachedCenter = center;
 		RigidGeometry geometry;
 
-		if ( b2Shape_GetRestitution( box.shape ) != 0 )
-		{
-			error = "game_requires_zero_bounce_shape";
-			return false;
-		}
+		// Rigid materials retain restitution for Box2D contacts. Soft contacts
+		// currently solve only non-penetration and friction (zero restitution).
 		if ( !geometry.read( box.shape, flipY ) )
 		{
 			error = "game_requires_supported_closed_shape";
