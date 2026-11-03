@@ -372,6 +372,36 @@ bool PairContacts::project()
 {
 	if ( !collect() )
 		return false;
+	// A finite sequential projection must not use a caller's arbitrary cyclic
+	// contour origin as its sweep order. World-reference springs amplify small
+	// projection differences into different sustained-load oscillations.
+	// Keep pair order and free/free behavior; order supported-pair features by
+	// their fixed reference geometry, without changing public node identities.
+	for ( size_t begin = 0; begin < rows.size(); )
+	{
+		const auto& first = rows[begin];
+		int low = std::min( first.a, first.b ), high = std::max( first.a, first.b );
+		size_t end = begin + 1;
+		while ( end < rows.size() && std::min( rows[end].a, rows[end].b ) == low &&
+				std::max( rows[end].a, rows[end].b ) == high )
+			++end;
+		if ( !first.centres &&
+			 ( core.bodies[low].worldSupported || core.bodies[high].worldSupported ) )
+		{
+			auto key = [&]( const Row& row ) {
+				const auto& a = core.bodies[row.a];
+				const auto& b = core.bodies[row.b];
+				auto p = a.rest[row.edgeA], q = b.rest[row.edgeB];
+				return std::array<float, 13>{ { float( a.worldSupported ), a.referencePosition[0],
+												a.referencePosition[1], float( row.a ),
+												float( row.b ), p[0], p[1], q[0], q[1], row.tA,
+												row.tB, row.normal[0], row.normal[1] } };
+			};
+			std::sort( rows.begin() + begin, rows.begin() + end,
+					   [&]( const Row& a, const Row& b ) { return key( a ) < key( b ); } );
+		}
+		begin = end;
+	}
 	for ( const auto& row : rows )
 	{
 		if ( row.centres )
