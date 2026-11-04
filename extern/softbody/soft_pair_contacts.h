@@ -60,6 +60,7 @@ private:
 	void direction( int a, int b );
 	void fallback( int a, int b, Vec normal );
 	float separation( int a, int b, Vec normal ) const;
+	void updateSupportedSeparation( int a, int b, Vec& normal ) const;
 	void projectRecovery( const Row& row );
 	float inverse( const Row& row ) const;
 	Vec velocity( int body, int edge, float fraction, bool centre ) const;

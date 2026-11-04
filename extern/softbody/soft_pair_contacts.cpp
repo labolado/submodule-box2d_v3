@@ -252,6 +252,40 @@ void PairContacts::fallback( int a, int b, Vec normal )
 		return;
 	append( row );
 }
+void PairContacts::updateSupportedSeparation( int a, int b, Vec& normal ) const
+{
+	const auto& first = core.bodies[a];
+	const auto& second = core.bodies[b];
+	if ( first.worldSupported == second.worldSupported )
+		return;
+	// A still-valid plane needs no edge search, particularly for distant pairs.
+	if ( separation( a, b, normal ) >= 0 )
+		return;
+	// Preserve a certified approach side before a thin support folds. The
+	// centre direction need not separate a wide platform from an offset load.
+	// Projection gaps certify disjoint contours even when they are concave;
+	// a negative gap is not evidence of overlap, so retain the last safe normal.
+	float best = -1;
+	for ( const auto* body : { &first, &second } )
+		for ( int i = 0; i < body->nodeCount; ++i )
+		{
+			auto d = difference( body->x[( i + 1 ) % body->nodeCount], body->x[i] );
+			float length = std::sqrt( dot( d, d ) );
+			if ( length <= 1e-6f )
+				continue;
+			Vec axis{ d[1] / length, -d[0] / length };
+			for ( float sign : { 1.f, -1.f } )
+			{
+				auto candidate = scale( axis, sign );
+				float gap = separation( a, b, candidate );
+				if ( gap >= 0 && gap > best )
+				{
+					best = gap;
+					normal = candidate;
+				}
+			}
+		}
+}
 bool PairContacts::collect()
 {
 	rows.clear();
@@ -283,6 +317,8 @@ bool PairContacts::collect()
 			}
 			if ( !state.active && separation( a, b, direction ) >= 0 )
 				state.normal = direction;
+			if ( !state.active )
+				updateSupportedSeparation( a, b, state.normal );
 			if ( !broadPhase( bodyA, bodyB ) )
 				continue;
 			auto first = Game::inspectTopology( core.bodies[a] );
