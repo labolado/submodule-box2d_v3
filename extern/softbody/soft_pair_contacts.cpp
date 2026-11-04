@@ -48,6 +48,22 @@ Vec point( const Body<float>& body, int edge, float t )
 {
 	return add( scale( body.x[edge], 1 - t ), scale( body.x[( edge + 1 ) % body.nodeCount], t ) );
 }
+bool concaveContour( const Body<float>& body )
+{
+	// A convex reference can acquire a dent under load. Centre containment
+	// and convex projection gaps then cease to describe the filled region.
+	if ( body.concaveReference )
+		return true;
+	for ( int i = 0; i < body.nodeCount; ++i )
+	{
+		auto a = difference( body.x[( i + 1 ) % body.nodeCount], body.x[i] );
+		auto b =
+			difference( body.x[( i + 2 ) % body.nodeCount], body.x[( i + 1 ) % body.nodeCount] );
+		if ( cross<float>( a, b ) < -1e-12f )
+			return true;
+	}
+	return false;
+}
 // A concave body's centre can lie in empty space. Certify separation using
 // the actual simple contours, not their convex projections or mass centres.
 bool clearContours( const Body<float>& a, const Body<float>& b )
@@ -276,7 +292,7 @@ bool PairContacts::collect()
 				error = "nonfinite_soft_pair";
 				break;
 			}
-			bool concave = bodyA.concaveReference || bodyB.concaveReference;
+			bool concave = concaveContour( bodyA ) || concaveContour( bodyB );
 			bool buried = concave ? contained( bodyA, bodyB ) || contained( bodyB, bodyA )
 								  : inside<float>( centre( bodyA ), bodyB ) ||
 										inside<float>( centre( bodyB ), bodyA );
@@ -535,7 +551,7 @@ void PairContacts::finish()
 			// nearly coincident contours that defeat nearest-boundary depth.
 			bool valid = Game::inspectTopology( core.bodies[a] ).valid() &&
 						 Game::inspectTopology( core.bodies[b] ).valid();
-			bool concave = core.bodies[a].concaveReference || core.bodies[b].concaveReference;
+			bool concave = concaveContour( core.bodies[a] ) || concaveContour( core.bodies[b] );
 			bool separated = valid && ( concave ? clearContours( core.bodies[a], core.bodies[b] )
 												: separation( a, b, state.normal ) >= 0 );
 			state.separatedSteps = separated ? state.separatedSteps + 1 : 0;
