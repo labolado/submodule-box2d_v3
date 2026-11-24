@@ -255,11 +255,8 @@ static inline b2Softness b2MakeSoft( float hertz, float zeta, float h )
 {
 	if ( hertz == 0.0f )
 	{
-		return (b2Softness){
-			.biasRate = 0.0f,
-			.massScale = 0.0f,
-			.impulseScale = 0.0f,
-		};
+		b2Softness soft = { 0.0f, 0.0f, 0.0f };
+		return soft;
 	}
 
 	float omega = 2.0f * B2_PI * hertz;
@@ -288,11 +285,8 @@ static inline b2Softness b2MakeSoft( float hertz, float zeta, float h )
 	// In all cases:
 	// massScale + impulseScale == 1
 
-	return (b2Softness){
-		.biasRate = omega / a1,
-		.massScale = a2 * a3,
-		.impulseScale = a3,
-	};
+	b2Softness soft = { omega / a1, a2 * a3, a3 };
+	return soft;
 }
 
 void b2Solve( b2World* world, b2StepContext* stepContext );

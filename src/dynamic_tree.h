@@ -158,15 +158,15 @@ B2_FORCE_INLINE int b2GetRootPair( const b2TreeNode* nodes )
 
 B2_FORCE_INLINE b2TreeNode b2MakeEmptyNode( void )
 {
-	return (b2TreeNode){
-		.aabb =
-			{
-				.lowerBound = { .x = INFINITY, .y = INFINITY },
-				.upperBound = { .x = -INFINITY, .y = -INFINITY },
-			},
-		.flagIndex = B2_EMPTY_NODE,
-		.height = 0,
-	};
+	b2TreeNode node;
+	node.aabb.lowerBound.x = INFINITY;
+	node.aabb.lowerBound.y = INFINITY;
+	node.aabb.upperBound.x = -INFINITY;
+	node.aabb.upperBound.y = -INFINITY;
+	node.padding = 0;
+	node.flagIndex = B2_EMPTY_NODE;
+	node.height = 0;
+	return node;
 }
 
 static inline bool b2HasTreeMoved( const b2DynamicTree* tree )
