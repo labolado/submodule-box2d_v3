@@ -19,8 +19,14 @@
 // Local material API borrows the current callback's contact without changing
 // world/contact layouts or recording images. Nested steps of other worlds save
 // and restore this scope; worker threads cannot access the calling thread's scope.
-static _Thread_local b2World* sMaterialWorld;
-static _Thread_local b2ContactSim* sMaterialContact;
+#if defined( _MSC_VER )
+#define B2_THREAD_LOCAL __declspec( thread )
+#else
+#define B2_THREAD_LOCAL _Thread_local
+#endif
+
+static B2_THREAD_LOCAL b2World* sMaterialWorld;
+static B2_THREAD_LOCAL b2ContactSim* sMaterialContact;
 
 // Contacts and determinism
 // A deterministic simulation requires contacts to exist in the same order in b2Island no matter the thread count.
