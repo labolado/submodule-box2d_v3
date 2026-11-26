@@ -29,12 +29,62 @@ typedef void b2TaskCallbackFcn( void* taskContext );
 /// user's task object. May be nullptr. A nullptr indicates to Box2D that the work was executed
 /// serially within the callback and there is no need to call b2FinishTaskCallbackFcn.
 /// @ingroup world
-typedef void* b2EnqueueTaskCallbackFcn( b2TaskCallbackFcn* task, void* taskContext,
-										void* userContext );
+typedef void* b2EnqueueTaskCallbackFcn( b2TaskCallbackFcn* task, void* taskContext, void* userContext );
 
 /// Finishes a user task object that wraps a Box2D task.
 /// @ingroup world
 typedef void b2FinishTaskCallbackFcn( void* userTask, void* userContext );
+
+/// The task type for the pull model.
+/// @ingroup world
+typedef enum b2TaskType
+{
+	b2_taskPairs,		///< Finding pairs of potentially colliding shapes. The broad-phase.
+	b2_taskCollide,		///< Computing contact manifolds. The narrow-phase.
+	b2_taskTreeRebuild, ///< Rebuilding the bounding volume hierarchy. A long running side task.
+	b2_taskIslandSplit, ///< Splitting an island in order to let an island sleep.
+	b2_taskSolver,		///< Solving constraints.
+	b2_taskFinalize,	///< Updating body transforms and shape bounding boxes.
+	b2_taskContinuous,	///< Continuous collision detection.
+	b2_taskSensors,		///< Sensor overlaps and events.
+	b2_taskTypeCount	///< The type count.
+} b2TaskType;
+
+/// A task in the pull model.
+/// @ingroup world
+typedef struct b2Task
+{
+	/// The task function.
+	b2TaskCallbackFcn* fcn;
+
+	/// The context that must be passed to the task function.
+	void* context;
+
+	/// The task type. Informational.
+	b2TaskType type;
+
+	/// Is this task deferred? This indicates that this task must be joined
+	/// at a later stage instead of immediately before the next stage.
+	/// @see b2TaskBatch::joinTasks
+	bool deferred;
+} b2Task;
+
+/// A batch of tasks for the pull model.
+/// @ingroup world
+typedef struct b2TaskBatch
+{
+	/// The regular tasks that must be executed in this stage.
+	const b2Task* tasks;
+
+	/// The task count.
+	int count;
+
+	/// Earlier tasks that must now be joined before the next stage.
+	const b2Task* joinTasks;
+
+	/// The join task count.
+	int joinCount;
+} b2TaskBatch;
 
 /// Optional friction mixing callback. This intentionally provides no context objects because this
 /// is called from a worker thread.
@@ -47,8 +97,8 @@ typedef float b2FrictionCallbackFcn( float frictionA, uint64_t userMaterialIdA, 
 /// this is called from a worker thread.
 /// @warning This function should not attempt to modify Box2D state or user application state.
 /// @ingroup world
-typedef float b2RestitutionCallbackFcn( float restitutionA, uint64_t userMaterialIdA,
-										float restitutionB, uint64_t userMaterialIdB );
+typedef float b2RestitutionCallbackFcn( float restitutionA, uint64_t userMaterialIdA, float restitutionB,
+										uint64_t userMaterialIdB );
 
 /// Result from b2World_CastRayClosest If there is initial overlap the fraction and normal will be
 /// zero while the point is an arbitrary point in the overlap region.
@@ -163,7 +213,7 @@ typedef struct b2WorldDef
 	/// Function to spawn tasks
 	b2EnqueueTaskCallbackFcn* enqueueTask;
 
-	/// Function to finish a task
+	/// Function to finish a task. Blocks and helps make progress.
 	b2FinishTaskCallbackFcn* finishTask;
 
 	/// User context that is provided to enqueueTask and finishTask
@@ -200,20 +250,6 @@ typedef enum b2BodyType
 	/// number of body types
 	b2_bodyTypeCount,
 } b2BodyType;
-
-/// Motion locks to restrict the body movement
-/// @ingroup body
-typedef struct b2MotionLocks
-{
-	/// Prevent translation along the x-axis
-	bool linearX;
-
-	/// Prevent translation along the y-axis
-	bool linearY;
-
-	/// Prevent rotation around the z-axis
-	bool angularZ;
-} b2MotionLocks;
 
 /// A body definition holds all the data needed to construct a rigid body. You can safely re-use
 /// body definitions. Shapes are added to a body after construction. Body definitions are temporary
@@ -269,9 +305,9 @@ typedef struct b2BodyDef
 	/// Use this to store application specific body data.
 	void* userData;
 
-	/// Motion locks to restrict linear and angular movement. Caution: may lead to softer
-	/// constraints along the locked direction
-	b2MotionLocks motionLocks;
+	/// Fully lock the rotation of this body by setting the inverse rotational inertia to zero. This also
+	/// keeps the angular velocity at zero. The main inertia value is not affected.
+	bool fixedRotation;
 
 	/// Set this flag to false if this body should never fall asleep.
 	bool enableSleep;
@@ -603,6 +639,7 @@ typedef struct b2Counters
 	int staticTreeHeight; ///<
 	int treeHeight;		  ///<
 	int taskCount;		  ///<
+	int enqueueCount;	  ///<
 	int colorCounts[24];  ///<
 
 	/// Number of contacts touched by the collide pass (graph contacts + awake-set non-touching).
@@ -629,6 +666,7 @@ typedef enum b2JointType
 	b2_revoluteJoint,  ///< rotate around a pivot
 	b2_weldJoint,	   ///< bring two bodies together with some flex
 	b2_wheelJoint,	   ///< wheel spins with shock absorber
+	b2_motionLockJoint, ///< restrict translation to a line or a point
 } b2JointType;
 
 /// Base joint definition used by all joint types. The local frames are measured from the body's
@@ -810,7 +848,8 @@ typedef struct b2MoverJointDef
 /// @ingroup mover_joint
 B2_API b2MoverJointDef b2DefaultMoverJointDef( void );
 
-/// Pogo joint definition
+/// The pogo joint is used for the dynamic character mover. The pogo axis is along the frame B
+/// y-axis.
 /// @ingroup pogo_joint
 typedef struct b2PogoJointDef
 {
@@ -973,6 +1012,28 @@ typedef struct b2WeldJointDef
 /// Use this to initialize your joint definition
 /// @ingroup weld_joint
 B2_API b2WeldJointDef b2DefaultWeldJointDef( void );
+
+/// A motion lock joint is designed to restrict motion to a line or a point. All restrictions are
+/// relative to the joint frame in body A.
+/// @ingroup motion_lock_joint
+typedef struct b2MotionLockJointDef
+{
+	/// Base joint definition
+	b2JointDef base;
+
+	/// Lock movement along the x axis.
+	bool lockLinearX;
+
+	/// Lock movement along the y axis.
+	bool lockLinearY;
+
+	/// Used internally to detect a valid definition. DO NOT SET.
+	int internalValue;
+} b2MotionLockJointDef;
+
+/// Use this to initialize your joint definition.
+/// @ingroup motion_lock_joint
+B2_API b2MotionLockJointDef b2DefaultMotionLockJointDef( void );
 
 /// Wheel joint definition Body B is a wheel that may rotate freely and slide along the local x-axis
 /// in frame A. The joint translation is zero when the local frame origins coincide in world space.
@@ -1303,8 +1364,7 @@ typedef bool b2CustomFilterCallbackFcn( b2ShapeId shapeIdA, b2ShapeId shapeIdB, 
 /// @warning Do not structurally modify the world inside this callback. The
 /// world-wide pre-solve event flag may be changed.
 /// @ingroup world
-typedef void b2PreSolveCallbackFcn( b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Manifold* manifold,
-									void* context );
+typedef void b2PreSolveCallbackFcn( b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Manifold* manifold, void* context );
 
 /// Prototype for a pre-continuous callback.
 /// This is called when a time of impact event is computed in continuous collision. This function
@@ -1319,8 +1379,8 @@ typedef void b2PreSolveCallbackFcn( b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Ma
 /// Return false if you want to disable the time of impact event.
 /// @warning Do not structurally modify the world inside this callback
 /// @ingroup world
-typedef bool b2PreContinuousCallbackFcn( b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Pos point,
-										 b2Vec2 normal, void* context );
+typedef bool b2PreContinuousCallbackFcn( b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Pos point, b2Vec2 normal,
+										 void* context );
 
 /// Prototype callback for overlap queries. Called for each shape found in the query.
 /// @see b2World_OverlapAABB
@@ -1345,8 +1405,7 @@ typedef bool b2OverlapResultCallbackFcn( b2ShapeId shapeId, void* context );
 /// @return -1 to filter, 0 to terminate, fraction to clip the ray for closest hit, 1 to continue
 /// @see b2World_CastRay
 /// @ingroup world
-typedef float b2CastResultCallbackFcn( b2ShapeId shapeId, b2Pos point, b2Vec2 normal,
-									   float fraction, void* context );
+typedef float b2CastResultCallbackFcn( b2ShapeId shapeId, b2Pos point, b2Vec2 normal, float fraction, void* context );
 
 /// Prototype for LiquidFun step.
 /// This is called before b2Solve in world step.
@@ -1354,8 +1413,7 @@ typedef void b2LiquidFunStepFcn( float dt, float invDT, void* context );
 
 /// Used to collect collision planes for character movers. Return true to continue gathering planes.
 /// @ingroup character
-typedef bool b2PlaneResultCallbackFcn( b2ShapeId shapeId, const b2PlaneResult* plane,
-									   void* context );
+typedef bool b2PlaneResultCallbackFcn( b2ShapeId shapeId, const b2PlaneResult* plane, void* context );
 
 // Source compatibility for existing Solar2D/LiquidFun integrations.
 typedef b2TaskCallbackFcn b2TaskCallback;
@@ -1542,23 +1600,22 @@ B2_API b2HexColor b2GetGraphColor( int index );
 typedef struct b2DebugDraw
 {
 	/// Draw a closed polygon provided in CCW order.
-	void ( *DrawPolygonFcn )( b2WorldTransform transform, const b2Vec2* vertices, int vertexCount,
-							  b2HexColor color, void* context );
+	void ( *DrawPolygonFcn )( b2WorldTransform transform, const b2Vec2* vertices, int vertexCount, b2HexColor color,
+							  void* context );
 
 	/// Draw a solid closed polygon provided in CCW order.
-	void ( *DrawSolidPolygonFcn )( b2WorldTransform transform, const b2Vec2* vertices,
-								   int vertexCount, float radius, b2HexColor color, void* context );
+	void ( *DrawSolidPolygonFcn )( b2WorldTransform transform, const b2Vec2* vertices, int vertexCount, float radius,
+								   b2HexColor color, void* context );
 
 	/// Draw a circle.
 	void ( *DrawCircleFcn )( b2Pos center, float radius, b2HexColor color, void* context );
 
 	/// Draw a solid circle.
-	void ( *DrawSolidCircleFcn )( b2WorldTransform transform, b2Vec2 center, float radius,
-								  b2HexColor color, void* context );
+	void ( *DrawSolidCircleFcn )( b2WorldTransform transform, b2Vec2 center, float radius, b2HexColor color,
+								  void* context );
 
 	/// Draw a solid capsule.
-	void ( *DrawSolidCapsuleFcn )( b2Pos p1, b2Pos p2, float radius, b2HexColor color,
-								   void* context );
+	void ( *DrawSolidCapsuleFcn )( b2Pos p1, b2Pos p2, float radius, b2HexColor color, void* context );
 
 	/// Draw a line segment.
 	void ( *DrawLineFcn )( b2Pos p1, b2Pos p2, b2HexColor color, void* context );

@@ -28,8 +28,7 @@ const char* Box2DState::validateStepBody( b2WorldId world, b2BodyId body )
 		return "static_body_unsupported";
 	if ( !b2Body_IsAwake( body ) )
 		return "sleeping_body";
-	auto locks = b2Body_GetMotionLocks( body );
-	if ( locks.linearX || locks.linearY || locks.angularZ )
+	if ( b2Body_IsFixedRotation( body ) )
 		return "motion_lock_unsupported";
 	return nullptr;
 }

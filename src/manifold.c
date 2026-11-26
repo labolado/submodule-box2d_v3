@@ -1477,6 +1477,22 @@ b2LocalManifold b2CollideChainSegmentAndPolygon( const b2ChainSegment* segmentA,
 
 			if ( type == b2_normalAdmit )
 			{
+				// Try to get two points for more reliable CCD.
+				float faceSeparation = b2Dot( normal1, b2Sub( pB, p1 ) );
+				if ( faceSeparation > output.distance - 0.1f * B2_LINEAR_SLOP )
+				{
+					int i2 = cache->indexB[0];
+					int i1 = i2 > 0 ? i2 - 1 : count - 1;
+					int ib1 = b2Dot( normal1, normals[i1] ) < b2Dot( normal1, normals[i2] ) ? i1 : i2;
+					int ib2 = ib1 < count - 1 ? ib1 + 1 : 0;
+					b2LocalManifold faceManifold = b2ClipSegments( p1, p2, vertices[ib1], vertices[ib2], normal1, 0.0f, radiusB,
+																	B2_MAKE_ID( 0, ib2 ), B2_MAKE_ID( 1, ib1 ) );
+					if ( faceManifold.pointCount == 2 )
+					{
+						return faceManifold;
+					}
+				}
+
 				manifold.normal = normal;
 				b2LocalManifoldPoint* cp = manifold.points + 0;
 				cp->point = pA;
@@ -1736,13 +1752,15 @@ b2LocalManifold b2CollideChainSegmentAndPolygon( const b2ChainSegment* segmentA,
 		float d2 = b2Dot( normal1, normals[i2] );
 		if ( d1 < d2 )
 		{
-			ib1 = i1, ib2 = i2;
+			ib1 = i1;
+			ib2 = i2;
 			b1 = vertices[ib1];
 			b2 = vertices[ib2];
 		}
 		else
 		{
-			ib1 = i2, ib2 = i2 < count - 1 ? i2 + 1 : 0;
+			ib1 = i2;
+			ib2 = i2 < count - 1 ? i2 + 1 : 0;
 			b1 = vertices[ib1];
 			b2 = vertices[ib2];
 		}

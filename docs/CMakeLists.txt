@@ -63,6 +63,7 @@ doxygen_add_docs(doc
                 "collision.md"
                 "simulation.md"
                 "loose_ends.md"
+                "known_limitations.md"
                 "recording.md"
                 "large_worlds.md"
                 "character.md"
@@ -77,4 +78,6 @@ doxygen_add_docs(doc
 add_custom_command(TARGET doc POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -DNAVTREE=${CMAKE_CURRENT_BINARY_DIR}/html/navtree.js
                         -P ${CMAKE_CURRENT_SOURCE_DIR}/instant_scroll.cmake
+                COMMAND ${CMAKE_COMMAND} -DSEARCHJS=${CMAKE_CURRENT_BINARY_DIR}/html/search/search.js
+                        -P ${CMAKE_CURRENT_SOURCE_DIR}/search_init.cmake
                 VERBATIM)

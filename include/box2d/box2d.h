@@ -49,6 +49,13 @@ B2_API bool b2World_IsValid( b2WorldId id );
 /// @param subStepCount The number of sub-steps, increasing the sub-step count can increase accuracy. Usually 4.
 B2_API void b2World_Step( b2WorldId worldId, float timeStep, int subStepCount, b2LiquidFunStepFcn* fcn, void* liquidFunContext );
 
+/// The pull model for tasking. Instead of getting task callbacks from b2World_Step you can call
+/// this to kick off a step and get an array of tasks to execute.
+B2_API b2TaskBatch b2World_BeginStep( b2WorldId worldId, float timeStep, int subStepCount );
+
+/// Call this after executing each task batch. The step is done when the batch is empty.
+B2_API b2TaskBatch b2World_ContinueStep( b2WorldId worldId );
+
 /// Call this to draw shapes and other debug draw data
 B2_API void b2World_Draw( b2WorldId worldId, b2DebugDraw* draw );
 
@@ -572,7 +579,7 @@ B2_API void b2Body_ApplyAngularImpulse( b2BodyId bodyId, float impulse, bool wak
 /// Get the mass of the body, usually in kilograms
 B2_API float b2Body_GetMass( b2BodyId bodyId );
 
-/// Get the rotational inertia of the body, usually in kg*m^2
+/// Get the rotational inertia of the body, usually in kg*m^2.
 B2_API float b2Body_GetRotationalInertia( b2BodyId bodyId );
 
 /// Get the center of mass position of the body in local space.
@@ -583,8 +590,7 @@ B2_API b2Pos b2Body_GetWorldCenter( b2BodyId bodyId );
 
 /// Override the body's mass properties. Normally this is computed automatically using the shape
 /// geometry and density. This information is lost if a shape is added or removed or if the body
-/// type changes. If motion locks are used to fix rotation then the rotational inertia value is
-/// ignored and rotational inertia remains fixed at zero.
+/// type changes.
 B2_API void b2Body_SetMassData( b2BodyId bodyId, b2MassData massData );
 
 /// Get the mass data for a body
@@ -655,12 +661,12 @@ B2_API void b2Body_Disable( b2BodyId bodyId );
 /// Enable a body by adding it to the simulation. This is expensive.
 B2_API void b2Body_Enable( b2BodyId bodyId );
 
-/// Set the motion locks on this body. This causes mass properties to be recomputed because fixed
-/// rotation sets the rotational inertia to zero.
-B2_API void b2Body_SetMotionLocks( b2BodyId bodyId, b2MotionLocks locks );
+/// Fix the rotation of this body by setting the inverse inertia to zero in the solver. It doesn't affect the main
+/// inertia value. Sets the angular velocity to zero.
+B2_API void b2Body_SetFixedRotation( b2BodyId bodyId, bool flag );
 
-/// Get the motion locks for this body.
-B2_API b2MotionLocks b2Body_GetMotionLocks( b2BodyId bodyId );
+/// Does this body have fixed rotation?
+B2_API bool b2Body_IsFixedRotation( b2BodyId bodyId );
 
 /// Set this body to be a bullet. A bullet does continuous collision detection against dynamic
 /// and kinematic bodies (but not other bullets). This only works on dynamic bodies.
@@ -1589,6 +1595,24 @@ B2_API void b2WeldJoint_EnableBlockSolve( b2JointId jointId, bool enableBlockSol
 /// Is the experimental coupled block solver enabled?
 /// This may be enabled but inactive when either linear or angular Hertz is non-zero.
 B2_API bool b2WeldJoint_IsBlockSolveEnabled( b2JointId jointId );
+
+/** @} */
+
+/**
+ * @defgroup motion_lock_joint Motion Lock Joint
+ * @brief Functions for the motion lock joint.
+ * @{
+ */
+
+/// Create a motion lock joint.
+/// @see b2MotionLockJointDef for details
+B2_API b2JointId b2CreateMotionLockJoint( b2WorldId worldId, const b2MotionLockJointDef* def );
+
+/// Enable/disable a linear lock. The axis is 0 for x and 1 for y.
+B2_API void b2MotionLockJoint_EnableLinearLock( b2JointId jointId, int axis, bool flag );
+
+/// Is a linear lock enabled? The axis is 0 for x and 1 for y.
+B2_API bool b2MotionLockJoint_IsLinearLockEnabled( b2JointId jointId, int axis );
 
 /** @} */
 

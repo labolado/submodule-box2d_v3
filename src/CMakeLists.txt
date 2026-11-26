@@ -12,6 +12,7 @@ set(BOX2D_SOURCE_FILES
 	body.h
 	broad_phase.c
 	broad_phase.h
+	chain_builder.c
 	constraint_graph.c
 	constraint_graph.h
 	contact_solver.c
@@ -38,6 +39,7 @@ set(BOX2D_SOURCE_FILES
 	joint.h
 	manifold.c
 	math_functions.c
+	motion_lock_joint.c
 	motor_joint.c
 	mover_joint.c
 	mover.c
@@ -48,6 +50,7 @@ set(BOX2D_SOURCE_FILES
 	platform.h
 	pogo_joint.c
 	prismatic_joint.c
+	qsort.h
 	recording_ops.inl
 	recording.c
 	recording.h
@@ -72,6 +75,7 @@ set(BOX2D_SOURCE_FILES
 	table.h
 	timer.c
 	types.c
+	verstable.h
 	weld_joint.c
 	wheel_joint.c
 )
@@ -122,13 +126,13 @@ endif()
 
 if (BOX2D_PROFILE)
     target_compile_definitions(box2d PRIVATE BOX2D_PROFILE)
-    set(TRACY_DELAYED_INIT ON CACHE BOOL "Enable delayed init for Tracy" FORCE)
+    set(TRACY_ENABLE ON CACHE BOOL "Enable profiling" FORCE)
     set(TRACY_MANUAL_LIFETIME ON CACHE BOOL "Enable manual lifetime for Tracy" FORCE)
 
     FetchContent_Declare(
         tracy
         GIT_REPOSITORY https://github.com/wolfpld/tracy.git
-        GIT_TAG v0.13.1
+        GIT_TAG v0.14.1
         GIT_SHALLOW TRUE
         GIT_PROGRESS TRUE
     )
@@ -190,6 +194,9 @@ if (MSVC)
 elseif (MINGW)
 	message(STATUS "Box2D on MinGW")
 	target_compile_options(box2d PRIVATE -Wmissing-prototypes -Wall -Wextra -pedantic -Wno-unused-value)
+	if (NOT BOX2D_DISABLE_SIMD AND CMAKE_C_COMPILER_ID STREQUAL "GNU")
+		set_source_files_properties(contact_solver_w8.c PROPERTIES COMPILE_OPTIONS "-Wa,-muse-unaligned-vector-move")
+	endif()
 elseif (APPLE)
 	message(STATUS "Box2D on Apple")
 	target_compile_options(box2d PRIVATE -Wmissing-prototypes -Wall -Wextra -pedantic -Wno-unused-value)

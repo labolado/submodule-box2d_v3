@@ -8,13 +8,13 @@
 #include "platform.h"
 #include "parallel_for.h"
 #include "physics_world.h"
+#include "qsort.h"
 #include "shape.h"
 #include "solver_set.h"
 
 #include "box2d/collision.h"
 
 #include <stddef.h>
-#include <stdlib.h>
 
 struct b2SensorQueryContext
 {
@@ -119,19 +119,6 @@ static bool b2SensorQueryCallback( int proxyId, uint64_t userData, void* context
 	return true;
 }
 
-static int b2CompareVisitors( const void* a, const void* b )
-{
-	const b2Visitor* sa = a;
-	const b2Visitor* sb = b;
-
-	if ( sa->shapeId < sb->shapeId )
-	{
-		return -1;
-	}
-
-	return 1;
-}
-
 static void b2SensorTask( int startIndex, int endIndex, int threadIndex, void* context )
 {
 	b2TracyCZoneNC( sensor_task, "Overlap", b2_colorBrown, true );
@@ -193,7 +180,23 @@ static void b2SensorTask( int startIndex, int endIndex, int threadIndex, void* c
 		b2DynamicTree_OverlapAABB( trees + 2, queryBounds, sensorShape->filter.maskBits, b2SensorQueryCallback, &queryContext );
 
 		// Sort the overlaps to enable finding begin and end events.
-		qsort( sensor->overlaps2.data, sensor->overlaps2.count, sizeof( b2Visitor ), b2CompareVisitors );
+		{
+			b2Visitor* visitors = sensor->overlaps2.data;
+#define LESS( i, j ) ( visitors[(int)( i )].shapeId < visitors[(int)( j )].shapeId )
+#define SWAP( i, j )                                                                                                   \
+	do                                                                                                                 \
+	{                                                                                                                  \
+		b2Visitor swapTemp = visitors[(int)( i )];                                                                     \
+		visitors[(int)( i )] = visitors[(int)( j )];                                                                   \
+		visitors[(int)( j )] = swapTemp;                                                                               \
+	}                                                                                                                  \
+	while ( 0 )
+
+			QSORT( sensor->overlaps2.count, LESS, SWAP );
+
+#undef LESS
+#undef SWAP
+		}
 
 		// Remove duplicates from overlaps2 (sorted). Duplicates are possible due to the hit events appended earlier.
 		int uniqueCount = 0;
@@ -236,7 +239,7 @@ static void b2SensorTask( int startIndex, int endIndex, int threadIndex, void* c
 	b2TracyCZoneEnd( sensor_task );
 }
 
-void b2OverlapSensors( b2World* world )
+void b2BeginSensors( b2World* world )
 {
 	int sensorCount = world->sensors.count;
 	if ( sensorCount == 0 )
@@ -246,8 +249,6 @@ void b2OverlapSensors( b2World* world )
 
 	B2_ASSERT( world->workerCount > 0 );
 
-	b2TracyCZoneNC( overlap_sensors, "Sensors", b2_colorMediumPurple, true );
-
 	for ( int i = 0; i < world->workerCount; ++i )
 	{
 		b2SetBitCountAndClear( &world->sensorTaskContexts.data[i].eventBits, sensorCount );
@@ -255,9 +256,18 @@ void b2OverlapSensors( b2World* world )
 
 	// Parallel-for sensors overlaps
 	int minRange = 16;
-	b2ParallelFor( world, &b2SensorTask, sensorCount, minRange, world );
+	b2StageParallelFor( world, b2_taskSensors, &b2SensorTask, sensorCount, minRange, world );
+}
 
-	b2TracyCZoneNC( sensor_state, "Events", b2_colorLightSlateGray, true );
+void b2EndSensors( b2World* world )
+{
+	int sensorCount = world->sensors.count;
+	if ( sensorCount == 0 )
+	{
+		return;
+	}
+
+	b2TracyCZoneNC( sensor_state, "Sensor Events", b2_colorLightSlateGray, true );
 
 	b2BitSet* bitSet = &world->sensorTaskContexts.data[0].eventBits;
 	for ( int i = 1; i < world->workerCount; ++i )
@@ -366,7 +376,6 @@ void b2OverlapSensors( b2World* world )
 	}
 
 	b2TracyCZoneEnd( sensor_state );
-	b2TracyCZoneEnd( overlap_sensors );
 }
 
 void b2DestroySensor( b2World* world, b2Shape* sensorShape )
