@@ -43,6 +43,7 @@ typedef struct b2Shape
 	bool enableCustomFiltering;
 	bool enableHitEvents;
 	bool enablePreSolveEvents;
+	bool enableParallelPreSolveEvents;
 
 	// Solar2D: character mover plane settings reported by b2Shape_GetPushLimit/GetClipVelocity
 	float pushLimit;

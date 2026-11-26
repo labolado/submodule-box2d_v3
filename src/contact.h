@@ -49,6 +49,9 @@ enum b2ContactFlags
 
 	// Did a body on this contact have a time of impact event?
 	b2_simHadTimeOfImpact = 0x00800000,
+
+	// Contact is latched in parallel one-way pass-through until geometric separation.
+	b2_simOneWayLatched = 0x01000000,
 };
 
 // A contact edge is used to connect bodies and contacts together

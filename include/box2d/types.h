@@ -1366,6 +1366,11 @@ typedef bool b2CustomFilterCallbackFcn( b2ShapeId shapeIdA, b2ShapeId shapeIdB, 
 /// @ingroup world
 typedef void b2PreSolveCallbackFcn( b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Manifold* manifold, void* context );
 
+/// Prototype for a thread-safe parallel pre-solve filter with per-contact latch state.
+/// @ingroup world
+typedef void b2ParallelPreSolveCallbackFcn( b2ShapeId shapeIdA, b2ShapeId shapeIdB, b2Manifold* manifold,
+											bool* latched, void* context );
+
 /// Prototype for a pre-continuous callback.
 /// This is called when a time of impact event is computed in continuous collision. This function
 /// can be used to skip the event. Unlike the pre-solve callback, this only supplies the point and normal.

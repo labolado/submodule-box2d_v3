@@ -581,8 +581,10 @@ static void b2CollideTask( int startIndex, int endIndex, int workerIndex, void* 
 
 			// It is risky to recycle non-touching chain segment contact.
 			bool chainSegment = shapeA->type == b2_chainSegmentShape || shapeB->type == b2_chainSegmentShape;
+			bool invokesParallelPreSolve = world->parallelPreSolveFcn != NULL &&
+				( shapeA->enableParallelPreSolveEvents || shapeB->enableParallelPreSolveEvents );
 
-			if ( invokesPreSolve == false && useSeamFilter == false &&
+			if ( invokesPreSolve == false && invokesParallelPreSolve == false && useSeamFilter == false &&
 				 ( hadTimeOfImpact == false || wasTouching ) && ( chainSegment == false || wasTouching ) &&
 				 recycleDistance > 0.0f && ( contactSim->simFlags & b2_simRelativeTransformValid ) &&
 				 ( contactSim->simFlags & b2_contactRecycleFlag ) )
@@ -3745,6 +3747,21 @@ void b2World_SetPreSolveCallback( b2WorldId worldId, b2PreSolveCallbackFcn* preS
 	world->preSolveFcn = preSolveFcn;
 	world->preContinuousFcn = preContinuousFcn;
 	world->preSolveContext = context;
+}
+
+void b2World_SetParallelPreSolveCallback( b2WorldId worldId, b2ParallelPreSolveCallbackFcn* preSolveFcn,
+										  b2PreContinuousCallbackFcn* preContinuousFcn, void* context )
+{
+	b2World* world = b2GetWorldFromId( worldId );
+	world->parallelPreSolveFcn = preSolveFcn;
+	world->parallelPreContinuousFcn = preContinuousFcn;
+	world->parallelPreSolveContext = context;
+}
+
+int b2World_GetPreSolveShapeCount( b2WorldId worldId )
+{
+	b2World* world = b2GetWorldFromId( worldId );
+	return world->preSolveShapeCount;
 }
 
 void b2World_EnableGlobalPreSolveEvents( b2WorldId worldId, bool flag )

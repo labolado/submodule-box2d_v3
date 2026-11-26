@@ -422,6 +422,41 @@ static bool b2ContinuousQueryCallback( int proxyId, uint64_t userData, void* con
 			}
 		}
 
+		if ( didHit && world->parallelPreContinuousFcn != NULL &&
+			 ( shape->enableParallelPreSolveEvents || fastShape->enableParallelPreSolveEvents ) )
+		{
+			bool oneWayLatched = false;
+			int contactKey = fastBody->headContactKey;
+			while ( contactKey != B2_NULL_INDEX )
+			{
+				int contactId = contactKey >> 1;
+				int edgeIndex = contactKey & 1;
+				b2Contact* contact = b2Array_Get( world->contacts, contactId );
+				if ( ( contact->shapeIdA == shape->id && contact->shapeIdB == fastShape->id ) ||
+					 ( contact->shapeIdA == fastShape->id && contact->shapeIdB == shape->id ) )
+				{
+					const b2ContactSim* contactSim = b2GetContactSim( world, contact );
+					oneWayLatched = ( contactSim->simFlags & b2_simOneWayLatched ) != 0;
+					break;
+				}
+				contactKey = contact->edges[edgeIndex].nextKey;
+			}
+
+			if ( oneWayLatched )
+			{
+				didHit = false;
+			}
+			else
+			{
+				b2ShapeId shapeIdA = { shape->id + 1, world->worldId, shape->generation };
+				b2ShapeId shapeIdB = { fastShape->id + 1, world->worldId, fastShape->generation };
+
+				b2Pos worldPoint = b2OffsetPos( continuousContext->base, output.point );
+				didHit = world->parallelPreContinuousFcn( shapeIdA, shapeIdB, worldPoint, output.normal,
+														  world->parallelPreSolveContext );
+			}
+		}
+
 		if ( didHit && world->preContinuousFcn != NULL &&
 			 ( world->enableGlobalPreSolveEvents || shape->enablePreSolveEvents || fastShape->enablePreSolveEvents ) )
 		{

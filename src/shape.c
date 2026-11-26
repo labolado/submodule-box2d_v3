@@ -166,6 +166,7 @@ static b2Shape* b2CreateShapeInternal( b2World* world, b2Body* body, b2WorldTran
 	shape->enableCustomFiltering = def->enableCustomFiltering;
 	shape->enableHitEvents = def->enableHitEvents;
 	shape->enablePreSolveEvents = def->enablePreSolveEvents;
+	shape->enableParallelPreSolveEvents = false;
 	world->preSolveShapeCount += def->enablePreSolveEvents ? 1 : 0;
 	shape->proxyKey = B2_NULL_INDEX;
 	shape->localCentroid = b2GetShapeCentroid( shape );
@@ -1696,7 +1697,9 @@ void b2Shape_EnablePreSolveEvents( b2ShapeId shapeId, bool flag )
 			bool recycle = ( bodyA->flags & b2_bodyEnableContactRecycling ) != 0 &&
 						   ( bodyB->flags & b2_bodyEnableContactRecycling ) != 0 &&
 						   shapeA->enablePreSolveEvents == false &&
-						   shapeB->enablePreSolveEvents == false;
+						   shapeB->enablePreSolveEvents == false &&
+						   shapeA->enableParallelPreSolveEvents == false &&
+						   shapeB->enableParallelPreSolveEvents == false;
 
 			if ( recycle )
 			{
@@ -1737,6 +1740,105 @@ bool b2Shape_ArePreSolveEventsEnabled( b2ShapeId shapeId )
 	b2World* world = b2GetWorld( shapeId.world0 );
 	b2Shape* shape = b2GetShape( world, shapeId );
 	return shape->enablePreSolveEvents;
+}
+
+void b2Shape_EnableParallelPreSolveEvents( b2ShapeId shapeId, bool flag )
+{
+	b2World* world = b2GetWorldLocked( shapeId.world0 );
+	if ( world == NULL )
+	{
+		return;
+	}
+
+	b2Shape* shape = b2GetShape( world, shapeId );
+	if ( shape->enableParallelPreSolveEvents == flag )
+	{
+		return;
+	}
+
+	shape->enableParallelPreSolveEvents = flag;
+
+	// Refresh the cached recycling flags on existing contacts.
+	b2Body* body = b2Array_Get( world->bodies, shape->bodyId );
+	int contactKey = body->headContactKey;
+	while ( contactKey != B2_NULL_INDEX )
+	{
+		int contactId = contactKey >> 1;
+		int edgeIndex = contactKey & 1;
+
+		b2Contact* contact = b2Array_Get( world->contacts, contactId );
+
+		if ( contact->shapeIdA == shape->id || contact->shapeIdB == shape->id )
+		{
+			b2Shape* shapeA = b2Array_Get( world->shapes, contact->shapeIdA );
+			b2Shape* shapeB = b2Array_Get( world->shapes, contact->shapeIdB );
+			b2Body* bodyA = b2Array_Get( world->bodies, shapeA->bodyId );
+			b2Body* bodyB = b2Array_Get( world->bodies, shapeB->bodyId );
+
+			bool recycle = ( bodyA->flags & b2_bodyEnableContactRecycling ) != 0 &&
+						   ( bodyB->flags & b2_bodyEnableContactRecycling ) != 0 &&
+						   shapeA->enablePreSolveEvents == false &&
+						   shapeB->enablePreSolveEvents == false &&
+						   shapeA->enableParallelPreSolveEvents == false &&
+						   shapeB->enableParallelPreSolveEvents == false;
+
+			if ( recycle )
+			{
+				contact->flags |= b2_contactRecycleFlag;
+			}
+			else
+			{
+				contact->flags &= ~b2_contactRecycleFlag;
+			}
+
+			b2ContactSim* contactSim = b2GetContactSim( world, contact );
+
+			if ( recycle )
+			{
+				contactSim->simFlags |= b2_contactRecycleFlag;
+			}
+			else
+			{
+				contactSim->simFlags &= ~b2_contactRecycleFlag;
+			}
+		}
+
+		contactKey = contact->edges[edgeIndex].nextKey;
+	}
+}
+
+bool b2Shape_AreParallelPreSolveEventsEnabled( b2ShapeId shapeId )
+{
+	b2World* world = b2GetWorld( shapeId.world0 );
+	b2Shape* shape = b2GetShape( world, shapeId );
+	return shape->enableParallelPreSolveEvents;
+}
+
+void b2Shape_ClearParallelPreSolveLatch( b2ShapeId shapeId )
+{
+	b2World* world = b2GetWorldLocked( shapeId.world0 );
+	if ( world == NULL )
+	{
+		return;
+	}
+
+	b2Shape* shape = b2GetShape( world, shapeId );
+	b2Body* body = b2Array_Get( world->bodies, shape->bodyId );
+	int contactKey = body->headContactKey;
+	while ( contactKey != B2_NULL_INDEX )
+	{
+		int contactId = contactKey >> 1;
+		int edgeIndex = contactKey & 1;
+
+		b2Contact* contact = b2Array_Get( world->contacts, contactId );
+		if ( contact->shapeIdA == shape->id || contact->shapeIdB == shape->id )
+		{
+			b2ContactSim* contactSim = b2GetContactSim( world, contact );
+			contactSim->simFlags &= ~b2_simOneWayLatched;
+		}
+
+		contactKey = contact->edges[edgeIndex].nextKey;
+	}
 }
 
 void b2Shape_EnableHitEvents( b2ShapeId shapeId, bool flag )

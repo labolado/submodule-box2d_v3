@@ -297,7 +297,8 @@ void b2CreateContact( b2World* world, b2Shape* shapeA, b2Shape* shapeB )
 
 	// Both bodies must enable recycling. Disable for pre-solve.
 	if ( ( bodyA->flags & b2_bodyEnableContactRecycling ) != 0 && ( bodyB->flags & b2_bodyEnableContactRecycling ) != 0 &&
-		 shapeA->enablePreSolveEvents == false && shapeB->enablePreSolveEvents == false )
+		 shapeA->enablePreSolveEvents == false && shapeB->enablePreSolveEvents == false &&
+		 shapeA->enableParallelPreSolveEvents == false && shapeB->enableParallelPreSolveEvents == false )
 	{
 		contact->flags |= b2_contactRecycleFlag;
 	}
@@ -674,7 +675,15 @@ bool b2UpdateContact( b2World* world, b2ContactSim* contactSim, b2Shape* shapeA,
 	contactSim->tangentSpeed = shapeA->material.tangentSpeed + shapeB->material.tangentSpeed;
 
 	int pointCount = contactSim->manifold.pointCount;
-	bool touching = pointCount > 0;
+	bool rawTouching = pointCount > 0;
+	bool touching = rawTouching;
+
+	// Geometric separation clears any one-way pass-through latch immediately,
+	// without waiting for broad-phase fat AABBs to disconnect.
+	if ( rawTouching == false )
+	{
+		contactSim->simFlags &= ~b2_simOneWayLatched;
+	}
 
 	// Enabled for the whole world or by either body. Must match the recycling check in b2CollideTask.
 	bool useSeamFilter = world->enableSeamContactFilter ||
@@ -687,6 +696,33 @@ bool b2UpdateContact( b2World* world, b2ContactSim* contactSim, b2Shape* shapeA,
 		pointCount = 0;
 		contactSim->manifold.pointCount = 0;
 		touching = false;
+	}
+
+	if ( touching && world->parallelPreSolveFcn != NULL &&
+		 ( shapeA->enableParallelPreSolveEvents || shapeB->enableParallelPreSolveEvents ) )
+	{
+		b2ShapeId shapeIdA = { shapeA->id + 1, world->worldId, shapeA->generation };
+		b2ShapeId shapeIdB = { shapeB->id + 1, world->worldId, shapeB->generation };
+		bool latched = ( contactSim->simFlags & b2_simOneWayLatched ) != 0;
+
+		world->parallelPreSolveFcn( shapeIdA, shapeIdB, &contactSim->manifold, &latched, world->parallelPreSolveContext );
+
+		if ( latched )
+		{
+			contactSim->simFlags |= b2_simOneWayLatched;
+		}
+		else
+		{
+			contactSim->simFlags &= ~b2_simOneWayLatched;
+		}
+
+		pointCount = contactSim->manifold.pointCount;
+		touching = pointCount > 0;
+
+		if ( touching == false )
+		{
+			contactSim->simFlags &= ~b2_simRelativeTransformValid;
+		}
 	}
 
 	if ( touching && world->preSolveFcn != NULL &&

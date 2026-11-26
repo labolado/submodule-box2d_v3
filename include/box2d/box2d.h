@@ -195,6 +195,16 @@ B2_API void b2World_SetPreSolveCallback( b2WorldId worldId, b2PreSolveCallbackFc
 										 b2PreContinuousCallbackFcn* preContinuousFcn,
 										 void* context );
 
+/// Register thread-safe pre-solve and pre-continuous filters that execute in parallel on worker
+/// threads without forcing narrow-phase or continuous collision onto the calling thread.
+/// Runs before the calling-thread pre-solve callback when both are enabled on a shape.
+B2_API void b2World_SetParallelPreSolveCallback( b2WorldId worldId, b2ParallelPreSolveCallbackFcn* preSolveFcn,
+												 b2PreContinuousCallbackFcn* preContinuousFcn,
+												 void* context );
+
+/// Number of shapes with calling-thread pre-solve events enabled in this world.
+B2_API int b2World_GetPreSolveShapeCount( b2WorldId worldId );
+
 /// Read the mixed material of the contact currently executing its pre-solve callback.
 /// Local extension: only call from the step thread. Returns false outside that callback
 /// (including pre-continuous) or for null outputs. No contact pointer escapes.
@@ -895,6 +905,16 @@ B2_API void b2Shape_EnablePreSolveEvents( b2ShapeId shapeId, bool flag );
 
 /// Returns true if pre-solve events are enabled
 B2_API bool b2Shape_ArePreSolveEventsEnabled( b2ShapeId shapeId );
+
+/// Enable thread-safe parallel pre-solve filtering for this shape without forcing the contact
+/// onto the calling thread. Ignored for sensors.
+B2_API void b2Shape_EnableParallelPreSolveEvents( b2ShapeId shapeId, bool flag );
+
+/// Returns true if parallel pre-solve filtering is enabled for this shape.
+B2_API bool b2Shape_AreParallelPreSolveEventsEnabled( b2ShapeId shapeId );
+
+/// Clear any per-contact parallel pre-solve latch flags on contacts attached to this shape.
+B2_API void b2Shape_ClearParallelPreSolveLatch( b2ShapeId shapeId );
 
 /// Enable contact hit events for this shape. Ignored for sensors.
 /// @see b2WorldDef::hitEventThreshold

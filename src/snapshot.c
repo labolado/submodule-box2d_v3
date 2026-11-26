@@ -944,6 +944,9 @@ b2WorldId b2CreateWorldFromSnapshot( const uint8_t* image, int size, int workerC
 	// A world loaded from scratch carries no host pointers
 	world->preSolveFcn = NULL;
 	world->preSolveContext = NULL;
+	world->parallelPreSolveFcn = NULL;
+	world->parallelPreContinuousFcn = NULL;
+	world->parallelPreSolveContext = NULL;
 	world->customFilterFcn = NULL;
 	world->customFilterContext = NULL;
 	world->userData = NULL;
