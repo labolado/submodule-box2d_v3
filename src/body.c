@@ -2043,10 +2043,18 @@ void b2Body_SetAllowFastRotation( b2BodyId bodyId, bool flag )
 		return;
 	}
 
-	b2Body* body = b2GetBodyFullId( world, bodyId );
-	b2BodySim* bodySim = b2GetBodySim( world, body );
-	bodySim->flags |= flag ? b2_allowFastRotation : 0;
+	uint32_t newFlag = flag ? b2_allowFastRotation : 0;
 
+	b2Body* body = b2GetBodyFullId( world, bodyId );
+	if ( ( body->flags & b2_allowFastRotation ) == newFlag )
+	{
+		return;
+	}
+
+	body->flags &= ~b2_allowFastRotation;
+	body->flags |= newFlag;
+
+	b2SyncBodyFlags( world, body );
 }
 
 bool b2Body_AllowFastRotation( b2BodyId bodyId )
